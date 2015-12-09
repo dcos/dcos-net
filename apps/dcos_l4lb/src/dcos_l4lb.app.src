@@ -1,0 +1,12 @@
+{application, dcos_l4lb,
+ [
+  {description, ""},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { dcos_l4lb_app, []}},
+  {env, []}
+ ]}.
