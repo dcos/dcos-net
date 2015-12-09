@@ -1,4 +1,12 @@
--module(dcos_l4lb_sup).
+%%%-------------------------------------------------------------------
+%%% @author sdhillon
+%%% @copyright (C) 2015, <COMPANY>
+%%% @doc
+%%%
+%%% @end
+%%% Created : 09. Dec 2015 12:49 AM
+%%%-------------------------------------------------------------------
+-module(dcos_l4lb_network_sup).
 
 -behaviour(supervisor).
 
@@ -16,16 +24,11 @@
 %% ===================================================================
 
 start_link() ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+  supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 %% ===================================================================
 %% Supervisor callbacks
 %% ===================================================================
 
 init([]) ->
-    {ok, { {rest_for_one, 5, 10}, [?CHILD(dcos_l4lb_ipsets, worker),
-        ?CHILD(dcos_l4lb_vip_server, worker),
-        ?CHILD(dcos_l4lb_mesos_poller, worker),
-        ?CHILD(dcos_l4lb_network_sup, supervisor)
-    ]} }.
-
+  {ok, { {one_for_one, 15, 100}, [?CHILD(dcos_l4lb_ct, worker), ?CHILD(dcos_l4lb_nfq, worker)]} }.
