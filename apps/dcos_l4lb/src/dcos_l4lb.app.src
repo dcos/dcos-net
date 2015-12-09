@@ -8,7 +8,11 @@
                   stdlib,
                   lager,
                   inets,
-                  pkt
+                  pkt,
+                  gen_netlink,
+                  iptables,
+                  jsx,
+                  gen_socket
                  ]},
   {mod, { dcos_l4lb_app, []}},
   {env, []}
