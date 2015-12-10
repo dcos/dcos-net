@@ -23,7 +23,8 @@ start_link() ->
 %% ===================================================================
 
 init([]) ->
-    {ok, { {rest_for_one, 5, 10}, [?CHILD(dcos_l4lb_ipsets, worker),
+    {ok, { {one_for_one, 5, 10}, [
+        ?CHILD(dcos_l4lb_ipsets, worker),
         ?CHILD(dcos_l4lb_vip_server, worker),
         ?CHILD(dcos_l4lb_mesos_poller, worker),
         ?CHILD(dcos_l4lb_network_sup, supervisor)
