@@ -22,10 +22,27 @@ start_link() ->
 %% Supervisor callbacks
 %% ===================================================================
 
-init([]) ->
-    {ok, { {rest_for_one, 5, 10}, [?CHILD(dcos_l4lb_ipsets, worker),
+
+maybe_add_network_child(Children) ->
+    case dcos_l4lb_config:networking() of
+        true ->
+            [?CHILD(dcos_l4lb_network_sup, supervisor)|Children];
+        false ->
+            Children
+    end.
+add_default_children(Children) ->
+    [
+        ?CHILD(dcos_l4lb_ipsets, worker),
         ?CHILD(dcos_l4lb_vip_server, worker),
-        ?CHILD(dcos_l4lb_mesos_poller, worker),
-        ?CHILD(dcos_l4lb_network_sup, supervisor)
-    ]} }.
+        ?CHILD(dcos_l4lb_mesos_poller, worker)|
+        Children
+    ].
+get_children() ->
+    Children1 = maybe_add_network_child([]),
+    Children2 = add_default_children(Children1),
+    Children2.
+
+init([]) ->
+    Children =
+    {ok, { {one_for_one, 5, 10}, get_children()} }.
 
