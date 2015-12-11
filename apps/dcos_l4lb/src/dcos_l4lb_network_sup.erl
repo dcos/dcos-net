@@ -33,6 +33,9 @@ start_link() ->
 init([]) ->
   {ok,
    { {one_for_one, 5, 10},
-     [?CHILD(dcos_l4lb_ct, worker),
-      ?CHILD(dcos_l4lb_packet_handler, worker),
-      ?CHILD(dcos_l4lb_nfq, worker)]} }.
+     [
+       ?CHILD(dcos_l4lb_routes, worker),
+       ?CHILD(dcos_l4lb_ct, worker),
+       ?CHILD(dcos_l4lb_packet_handler, worker),
+       ?CHILD(dcos_l4lb_nfq, worker)
+     ]} }.
