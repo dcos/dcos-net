@@ -26,7 +26,7 @@ start_link() ->
 maybe_add_network_child(Children) ->
     case dcos_l4lb_config:networking() of
         true ->
-            [?CHILD(dcos_l4lb_network_sup, supervisor)|Children];
+            [?CHILD(dcos_l4lb_network_sup_sup, supervisor)|Children];
         false ->
             Children
     end.
