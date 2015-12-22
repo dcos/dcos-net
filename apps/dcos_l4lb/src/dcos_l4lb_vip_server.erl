@@ -23,6 +23,8 @@
   terminate/2,
   code_change/3]).
 
+-include("enfhackery.hrl").
+
 -ifdef(TEST).
 -include_lib("proper/include/proper.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -31,7 +33,7 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {vips = dict:new(), vip_counter = dict:new()}).
+-record(state, {vips = dict:new()}).
 
 -type vips() :: dict:dict().
 -type ip_port() :: {tuple(), integer()}.
@@ -100,22 +102,9 @@ init([]) ->
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
   {stop, Reason :: term(), NewState :: #state{}}).
-handle_call({get_backend, IP, Port}, _From, State = #state{vips = Vips, vip_counter = VIPCounter}) ->
-  lager:debug("Looking up VIP: ~p:~p", [IP, Port]),
-  %% We assume, and only support tcp right now
-  case dict:find({tcp, IP, Port}, Vips) of
-    {ok, []} ->
-      %% This should never happen, but it's better than crashing
-      {reply, error, State};
-    {ok, Value} ->
-      VIPCounter1 = dict:update_counter({tcp, IP, Port}, 1, VIPCounter),
-      Counter = dict:fetch({tcp, IP, Port}, VIPCounter1),
-      Offset = (Counter rem erlang:length(Value)) + 1,
-      Backend = lists:nth(Offset, Value),
-      {reply, {ok, Backend}, State#state{vip_counter = VIPCounter1}};
-    error ->
-      {reply, error, State}
-  end;
+handle_call({get_backend, IP, Port}, _From, State = #state{vips = Vips}) ->
+  lager:debug("Looking up VIP: ~p:~B", [IP, Port]),
+  {reply, choose_backend(IP, Port, Vips), State};
 handle_call(_Request, _From, State) ->
   {reply, ok, State}.
 
@@ -168,6 +157,25 @@ handle_info(_Info, State) ->
 terminate(_Reason, _State) ->
   ok.
 
+-spec(choose_backend(inet:ip4_address(), inet:port_number(), vips()) -> term()).
+choose_backend(IP, Port, Vips) ->
+  %% We assume, and only support tcp right now
+  case dict:find({tcp, IP, Port}, Vips) of
+    {ok, []} ->
+      %% This should never happen, but it's better than crashing
+      error;
+    {ok, Backends} ->
+      case dcos_l4lb_ewma:pick_backend(Backends) of
+        {ok, Backend} ->
+          {ok, {Backend#backend.ip, Backend#backend.port}};
+        {error, Reason} ->
+          lager:warning("failed to retrieve backend for vip {tcp, ~p, ~B}: ~p", [IP, Port, Reason]),
+          error
+      end;
+    error ->
+      error
+  end.
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -191,7 +199,7 @@ proper_test() ->
   [] = proper:module(?MODULE).
 
 initial_state() ->
-  #state{vips = dict:new(), vip_counter = dict:new()}.
+  #state{vips = dict:new()}.
 
 prop_server_works_fine() ->
     ?FORALL(Cmds, commands(?MODULE),

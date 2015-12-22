@@ -1,18 +1,18 @@
 %%%-------------------------------------------------------------------
-%%% @author sdhillon
-%%% @copyright (C) 2015, <COMPANY>
+%%% @author Tyler Neely
+%%% @copyright (C) 2015, Mesosphere
 %%% @doc
 %%%
 %%% @end
-%%% Created : 09. Dec 2015 1:41 AM
+%%% Created : 08. Dec 2015 11:44 PM
 %%%-------------------------------------------------------------------
--module(dcos_l4lb_ct).
--author("sdhillon").
+-module(dcos_l4lb_conn_latency_observer).
+-author("Tyler Neely").
 
 -behaviour(gen_server).
 
 %% API
--export([start_link/1, handle_mapping/2]).
+-export([start_link/0]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -22,39 +22,40 @@
   terminate/2,
   code_change/3]).
 
-% This is the error code for a duplicate conntrack on 64-bit Linux
-% But it can also represent other errors
-% Like, conntrack not compiled
-
--define(MAYBE_DUPLICATE_CONNTRACK, 2717908991).
--record(state, {socket}).
-
 -include_lib("gen_socket/include/gen_socket.hrl").
 -include_lib("gen_netlink/include/netlink.hrl").
 -include("enfhackery.hrl").
-%% These are the default max values from the kernel
--define(SNDBUF_DEFAULT, 212992).
+
+-define(NFQNL_COPY_PACKET, 2).
+
+-define(NFNLGRP_CONNTRACK_NEW, 1).
+-define(NFNLGRP_CONNTRACK_UPDATE, 2).
+-define(NFNLGRP_CONNTRACK_DESTROY, 3).
+-define(NFNLGRP_CONNTRACK_EXP_NEW, 4).
+-define(NFNLGRP_CONNTRACK_EXP_UPDATE, 5).
+-define(SOL_NETLINK, 270).
+-define(NETLINK_ADD_MEMBERSHIP, 1).
+
 -define(RCVBUF_DEFAULT, 212992).
 
-% The default size buffer we allocate to receive something from the kernel.
--define(RECV_SIZE, 8192).
+-define(SERVER, ?MODULE).
+
+-record(state, {socket = erlang:error() :: gen_socket:socket()}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
-handle_mapping(Num, Mapping) ->
-  gen_server:call(?SERVER_NAME_WITH_NUM(Num), {handle_mapping, Mapping}).
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec(start_link(Num :: non_neg_integer()) ->
+-spec(start_link() ->
   {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
-start_link(Num) ->
-  gen_server:start_link({local, ?SERVER_NAME_WITH_NUM(Num)}, ?MODULE, [], []).
+start_link() ->
+  gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -71,18 +72,20 @@ start_link(Num) ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
--spec(init(Args :: term()) ->
+-spec(init(term()) ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
+  ets:new(connection_timers, [named_table]),
   {ok, Socket} = socket(netlink, raw, ?NETLINK_NETFILTER, []),
-  ok = gen_socket:setsockopt(Socket, ?SOL_SOCKET, ?SO_RCVBUF, ?RCVBUF_DEFAULT),
-  ok = gen_socket:setsockopt(Socket, ?SOL_SOCKET, ?SO_SNDBUF, ?SNDBUF_DEFAULT),
-  netlink:rcvbufsiz(Socket, ?RCVBUF_DEFAULT),
-  %% Our fates are linked.
   {gen_socket, RealPort, _, _, _, _} = Socket,
   erlang:link(RealPort),
   ok = gen_socket:bind(Socket, netlink:sockaddr_nl(netlink, 0, 0)),
+  ok = gen_socket:setsockopt(Socket, ?SOL_SOCKET, ?SO_RCVBUF, 57108864),
+  ok = gen_socket:setsockopt(Socket, ?SOL_NETLINK, ?NETLINK_ADD_MEMBERSHIP, ?NFNLGRP_CONNTRACK_NEW),
+  ok = gen_socket:setsockopt(Socket, ?SOL_NETLINK, ?NETLINK_ADD_MEMBERSHIP, ?NFNLGRP_CONNTRACK_UPDATE),
+  netlink:rcvbufsiz(Socket, ?RCVBUF_DEFAULT),
+  ok = gen_socket:input_event(Socket, true),
   {ok, #state{socket = Socket}}.
 
 %%--------------------------------------------------------------------
@@ -100,9 +103,6 @@ init([]) ->
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
   {stop, Reason :: term(), NewState :: #state{}}).
-handle_call({handle_mapping, Mapping}, _From, State = #state{socket = Socket}) ->
-  try_mapping(Mapping, Socket),
-  {reply, ok, State};
 handle_call(_Request, _From, State) ->
   {reply, ok, State}.
 
@@ -134,19 +134,23 @@ handle_cast(_Request, State) ->
   {noreply, NewState :: #state{}} |
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
+handle_info({check_conn_connected, {ID, IP, Port}}, State) ->
+  case ets:take(connection_timers, ID) of
+    [{_ID, Time}] ->
+      Success = false,
+      dcos_l4lb_ewma:observe(max(os:system_time() - Time, 0), {IP, Port}, Success);
+    _ ->
+      % we've already cleared it
+      ok
+  end,
+  {noreply, State};
 handle_info({Socket, input_ready}, State = #state{socket = Socket}) ->
-  case gen_socket:recv(Socket, ?RECV_SIZE) of
+  case gen_socket:recv(Socket, 8192) of
     {ok, Data} ->
       Msg = netlink:nl_ct_dec(Data),
-      case Msg of
-        [{netlink, error, [], _, _, {ErrNo, _}}|_] when ErrNo == 0 ->
-          ok;
-        [{netlink, error, [], _, _, {ErrNo, SubData}}|_] ->
-          SubMsg = netlink:nl_ct_dec(SubData),
-          lager:warning("Errno (~p): ~p~n", [ErrNo, SubMsg])
-      end;
+      lists:foreach(fun handle_conn/1, Msg);
     Other ->
-      lager:warning("Unknown msg (ct): ~p~n", [Other])
+      lager:warning("Unknown msg (ct_latency): ~p", [Other])
   end,
   ok = gen_socket:input_event(Socket, true),
   {noreply, State};
@@ -189,32 +193,6 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-
-
-nfnl_query(Socket, Query) ->
-  Request = netlink:nl_ct_enc(Query),
-  gen_socket:sendto(Socket, netlink:sockaddr_nl(netlink, 0, 0), Request),
-  Answer = gen_socket:recv(Socket, 8192),
-  case Answer of
-    {ok, Reply} ->
-      lager:debug("Reply: ~p~n", [netlink:nl_ct_dec(Reply)]),
-      case netlink:nl_ct_dec(Reply) of
-        [{netlink, error, [], _, _, {ErrNo, _}}|_] when ErrNo == 0 ->
-          ok;
-        [{netlink, error, [], _, _, {ErrNo, SubData}}|_] ->
-          SubMsg = netlink:nl_ct_dec(SubData),
-          lager:warning("Errno2 (~p): ~p~n", [ErrNo, SubMsg]),
-          {error, ErrNo};
-        [Msg|_] ->
-          {error, Msg};
-        Other ->
-          Other
-      end;
-    Other ->
-      Other
-  end.
-
-
 socket(Family, Type, Protocol, Opts) ->
   case proplists:get_value(netns, Opts) of
     undefined ->
@@ -223,81 +201,45 @@ socket(Family, Type, Protocol, Opts) ->
       gen_socket:socketat(NetNs, Family, Type, Protocol)
   end.
 
--spec(try_mapping(#mapping{}, gen_socket:socket()) -> ok | {error, Reason :: term()}).
-try_mapping(Mapping, Socket) ->
-  Msg = build_ctnetlink_msg_create(Mapping),
-  Status = nfnl_query(Socket, Msg),
-  case Status of
-    ok ->
-      ok;
-    {error, ?MAYBE_DUPLICATE_CONNTRACK} ->
-      retry_mapping(Mapping, Socket);
-    {error, Error} ->
-      lager:warning("Mapping Status Error: ~p", [Error]),
-      {error, Error};
-    _ ->
-      lager:debug("Mapping Status: ~p", [Status]),
-      {error, unknown}
+handle_conn(#ctnetlink{msg = {_Family, _, _, Props}}) ->
+  {id, ID} = proplists:lookup(id, Props),
+  {status, Status} = proplists:lookup(status, Props),
+  {tuple_reply, Reply} = proplists:lookup(tuple_reply, Props),
+  Addresses = fmt_net(Reply),
+  mark_replied(ID, Addresses, Status).
+
+mark_replied(ID, {_Proto, DstIP, DstPort, _SrcIP, _SrcPort}, Status) ->
+  case lists:member(seen_reply, Status) of
+    true ->
+      lager:debug("marking backend ~p:~p available", [DstIP, DstPort]),
+      case ets:take(connection_timers, ID) of
+        [{_ID, Time}] ->
+          Success = true,
+          dcos_l4lb_ewma:observe(max(os:system_time() - Time, 0), {DstIP, DstPort}, Success);
+        _ ->
+          % we've already cleared it, or we never saw its initial SYN
+          ok
+      end;
+    false ->
+      dcos_l4lb_ewma:set_pending({DstIP, DstPort}),
+      lager:debug("marking backend ~p:~p in-flight", [DstIP, DstPort]),
+      % Set up a timer and schedule a connection check at the
+      % configured threshold.
+      ets:insert(connection_timers, {ID, os:system_time()}),
+      timer:send_after(dcos_l4lb_config:tcp_connect_threshold(),
+                       {check_conn_connected, {ID, DstIP, DstPort}})
   end.
 
--spec(retry_mapping(#mapping{}, gen_socket:socket()) -> ok | {error, Reason :: term()}).
-retry_mapping(Mapping, Socket) ->
-  % Try deleting the "old" mapping - we don't really care
-  % if it suceeds or not
-  MsgDelete = build_ctnetlink_msg_delete(Mapping),
-  _DeleteStatus = nfnl_query(Socket, MsgDelete),
-  % Go back into creating the mapping
-  MsgCreate = build_ctnetlink_msg_create(Mapping),
-  CreateStatus = nfnl_query(Socket, MsgCreate),
-  case CreateStatus of
-    ok ->
-      ok;
-    {error, Error} ->
-      lager:warning("Retried Mapping Status Error: ~p", [Error]),
-      {error, Error};
-    _ ->
-      lager:debug("Retried Mapping Status: ~p", [CreateStatus]),
-      {error, unknown}
-  end.
+fmt_net(Props) ->
+  {ip, IPProps} = proplists:lookup(ip, Props),
 
--spec(build_ctnetlink_msg_delete(#mapping{}) -> [#ctnetlink{}]).
-build_ctnetlink_msg_delete(Mapping) ->
-  Seq = erlang:time_offset() + erlang:monotonic_time(),
-  TupleOrig = tuple_orig(Mapping),
-  TupleReply = tuple_reply(Mapping),
-  Cmd = {inet, 0, 0, [
-    TupleOrig,
-    TupleReply,
-    {protoinfo, [{tcp, []}]}
-  ]},
-  Msg = [#ctnetlink{type = delete, flags = [request, ack], seq = Seq, pid = 0, msg = Cmd}],
-  Msg.
+  {v4_src, SrcIP} = proplists:lookup(v4_src, IPProps),
+  {v4_dst, DstIP} = proplists:lookup(v4_dst, IPProps),
 
--spec(build_ctnetlink_msg_create(#mapping{}) -> [#ctnetlink{}]).
-build_ctnetlink_msg_create(Mapping) ->
-  Seq = erlang:time_offset() + erlang:monotonic_time(),
-  TupleOrig = tuple_orig(Mapping),
-  TupleReply = tuple_reply(Mapping),
-  Cmd = {inet, 0, 0, [
-    TupleOrig,
-    TupleReply,
-    {timeout, 2},
-    {protoinfo, [{tcp, [{state, syn_sent}]}]},
-    {nat_src,
-      [{v4_src, Mapping#mapping.new_src_ip},
-        {src_port, [{min_port, Mapping#mapping.new_src_port}, {max_port, Mapping#mapping.new_src_port}]}]},
-    {nat_dst,
-      [{v4_dst, Mapping#mapping.new_dst_ip},
-        {dst_port, [{min_port, Mapping#mapping.new_dst_port}, {max_port, Mapping#mapping.new_dst_port}]}]}
-  ]},
-  Msg = [#ctnetlink{type = new, flags = [create, request, ack], seq = Seq, pid = 0, msg = Cmd}],
-  Msg.
+  {proto, ProtoProps} = proplists:lookup(proto, Props),
 
-tuple_orig(Mapping) ->
-  {tuple_orig,
-    [{ip, [{v4_src, Mapping#mapping.orig_src_ip}, {v4_dst, Mapping#mapping.orig_dst_ip}]},
-      {proto, [{num, tcp}, {src_port, Mapping#mapping.orig_src_port}, {dst_port, Mapping#mapping.orig_dst_port}]}]}.
-tuple_reply(Mapping) ->
-  {tuple_reply,
-    [{ip, [{v4_src, Mapping#mapping.orig_dst_ip}, {v4_dst, Mapping#mapping.orig_src_ip}]},
-      {proto, [{num, tcp}, {src_port, Mapping#mapping.orig_dst_port}, {dst_port, Mapping#mapping.orig_src_port}]}]}.
+  {num, Proto} = proplists:lookup(num, ProtoProps),
+  {src_port, SrcPort} = proplists:lookup(src_port, ProtoProps),
+  {dst_port, DstPort} = proplists:lookup(dst_port, ProtoProps),
+
+  {Proto, SrcIP, SrcPort, DstIP, DstPort}.
