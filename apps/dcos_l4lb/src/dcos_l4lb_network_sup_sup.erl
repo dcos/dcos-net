@@ -52,7 +52,7 @@ init([]) ->
     {dcos_l4lb_network_sup, start_link, [X]}, permanent, 5000, supervisor, []} || X <- lists:seq(Begin, End)],
   Children2 = [?CHILD(dcos_l4lb_routes, worker),
                ?CHILD(dcos_l4lb_ewma, worker),
-               ?CHILD(dcos_l4lb_conn_latency_observer, worker) | Children1],
+               ?CHILD(dcos_l4lb_ct_latency_observer, worker) | Children1],
   {ok,
     {
       {one_for_one, 5, 10},
