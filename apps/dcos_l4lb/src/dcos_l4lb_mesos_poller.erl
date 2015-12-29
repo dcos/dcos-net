@@ -178,9 +178,7 @@ poll() ->
   Response = httpc:request(get, {MasterURI, []}, [], [{body_format, binary}]),
   case handle_response(Response) of
     {ok, Vips} ->
-      %% I could probably use a gen_event, but where is the fun in that?
-      dcos_l4lb_ipsets:push_vips(Vips),
-      dcos_l4lb_vip_server:push_vips(Vips),
+      dcos_l4lb_vip_events:push_vips(Vips),
       {ok, Vips};
     Other ->
       Other
