@@ -205,9 +205,11 @@ prop_server_works_fine() ->
     ?FORALL(Cmds, commands(?MODULE),
             ?TRAPEXIT(
                 begin
+                    dcos_l4lb_vip_events:start_link(),
                     ?MODULE:start_link(),
                     {History, State, Result} = run_commands(?MODULE, Cmds),
                     ?MODULE:stop(),
+                    gen_server:stop(dcos_l4lb_vip_events),
                     ?WHENFAIL(io:format("History: ~w\nState: ~w\nResult: ~w\n",
                                         [History, State, Result]),
                               Result =:= ok)
