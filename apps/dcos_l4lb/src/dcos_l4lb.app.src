@@ -11,7 +11,9 @@
                   inets,
                   pkt,
                   jsx,
-                  gen_socket
+                  gen_socket,
+                  mochiweb,
+                  webmachine
                  ]},
   {mod, { dcos_l4lb_app, []}},
   {env, []}

@@ -31,7 +31,11 @@ maybe_add_network_child(Children) ->
             Children
     end.
 add_default_children(Children) ->
+    Webmachine = {webmachine_mochiweb,
+           {webmachine_mochiweb, start, [dcos_l4lb_api_config:web_config()]},
+           permanent, 5000, worker, [mochiweb_socket_server]},
     [
+        Webmachine,
         ?CHILD(dcos_l4lb_vip_events, worker),
         ?CHILD(dcos_l4lb_ipsets, worker),
         ?CHILD(dcos_l4lb_vip_server, worker),
