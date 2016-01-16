@@ -21,7 +21,7 @@ dispatch() ->
     ]).
 
 web_config() ->
-    {ok, App} = application:get_application(?MODULE),
+    {ok, _App} = application:get_application(?MODULE),
     [
         {ip, dcos_l4lb_config:api_listen_ip()},
         {port, dcos_l4lb_config:api_listen_port()},
