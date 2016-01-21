@@ -31,9 +31,23 @@ maybe_add_network_child(Children) ->
             Children
     end.
 add_default_children(Children) ->
+    {ok, _App} = application:get_application(?MODULE),
+
+    Dispatch = lists:flatten([
+                              {['*'], dcos_l4lb_api, []}
+                             ]),
+
+    ApiConfig = [
+        {ip, dcos_l4lb_config:api_listen_ip()},
+        {port, dcos_l4lb_config:api_listen_port()},
+        {log_dir, "priv/log"},
+        {dispatch, Dispatch}
+    ],
+
     Webmachine = {webmachine_mochiweb,
-           {webmachine_mochiweb, start, [dcos_l4lb_api_config:web_config()]},
+           {webmachine_mochiweb, start, [ApiConfig]},
            permanent, 5000, worker, [mochiweb_socket_server]},
+
     [
         Webmachine,
         ?CHILD(dcos_l4lb_vip_events, worker),
@@ -42,6 +56,7 @@ add_default_children(Children) ->
         ?CHILD(dcos_l4lb_mesos_poller, worker)|
         Children
     ].
+
 get_children() ->
     Children1 = maybe_add_network_child([]),
     Children2 = add_default_children(Children1),

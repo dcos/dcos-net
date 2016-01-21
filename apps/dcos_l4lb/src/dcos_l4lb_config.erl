@@ -48,7 +48,7 @@ api_listen_ip() ->
 
 
 api_listen_port() ->
-  application:get_env(dcos_l4lb, api_listen_port, 5565).
+  application:get_env(dcos_l4lb, api_listen_port, 61421).
 
 
 %% Returns a integer
