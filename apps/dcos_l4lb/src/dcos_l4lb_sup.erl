@@ -34,7 +34,9 @@ add_default_children(Children) ->
     {ok, _App} = application:get_application(?MODULE),
 
     Dispatch = lists:flatten([
-                              {['*'], dcos_l4lb_api, []}
+                              {["vips"], dcos_l4lb_api, []},
+                              {["vip", vip], dcos_l4lb_api, []},
+                              {["backend", backend], dcos_l4lb_api, []}
                              ]),
 
     ApiConfig = [
