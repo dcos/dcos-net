@@ -32,23 +32,8 @@ maybe_add_network_child(Children) ->
     end.
 add_default_children(Children) ->
     {ok, _App} = application:get_application(?MODULE),
-
-    Dispatch = lists:flatten([
-                              {["vips"], dcos_l4lb_api, []},
-                              {["vip", vip], dcos_l4lb_api, []},
-                              {["backend", backend], dcos_l4lb_api, []}
-                             ]),
-
-    ApiConfig = [
-        {ip, dcos_l4lb_config:api_listen_ip()},
-        {port, dcos_l4lb_config:api_listen_port()},
-        {log_dir, "priv/log"},
-        {dispatch, Dispatch}
-    ],
-
-    Webmachine = {webmachine_mochiweb,
-           {webmachine_mochiweb, start, [ApiConfig]},
-           permanent, 5000, worker, [mochiweb_socket_server]},
+    Webmachine = {dcos_l4lb_wm, {dcos_l4lb_wm, start, []},
+           permanent, 5000, worker, [dcos_l4lb_wm, mochiweb_socket_server]},
 
     [
         Webmachine,

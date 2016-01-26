@@ -10,6 +10,7 @@
 %% ===================================================================
 
 start(_StartType, _StartArgs) ->
+    dcos_l4lb_metrics:setup(),
     dcos_l4lb_sup:start_link().
 
 stop(_State) ->
