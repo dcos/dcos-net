@@ -1,0 +1,16 @@
+{application, dcos_dns,
+ [{description, "Node-local DNS service for Mesosphere DCOS"},
+  {vsn, "0.0.1"},
+  {registered, []},
+  {mod, {dcos_dns_app, []}},
+  {applications,
+   [kernel,
+    stdlib
+   ]},
+  {env,[]},
+  {modules, []},
+
+  {contributors, []},
+  {licenses, []},
+  {links, []}
+ ]}.
