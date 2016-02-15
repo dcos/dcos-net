@@ -5,7 +5,8 @@
   {mod, {dcos_dns_app, []}},
   {applications,
    [kernel,
-    stdlib
+    stdlib,
+    erldns
    ]},
   {env,[]},
   {modules, []},
