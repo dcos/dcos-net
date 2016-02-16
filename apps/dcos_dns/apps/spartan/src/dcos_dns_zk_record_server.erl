@@ -110,10 +110,18 @@ retrieve_state() ->
 %% @private
 update_zone(Zookeepers) ->
     ToCreate = lists:zip(lists:seq(1, 5), lists:sublist(Zookeepers ++ Zookeepers, 1, 5)),
-    Records = [generate_record(R) || R <- ToCreate],
+    Records = [soa()] ++ [generate_record(R) || R <- ToCreate],
     Sha = crypto:hash(sha, term_to_binary(Records)),
-    ok = erldns_zone_cache:put_zone({?TLD, Sha, Records}),
+    ok = erldns_zone_cache:put_zone({<<?TLD>>, Sha, Records}),
     ok.
+
+%% @private
+soa() ->
+    #dns_rr{
+        name = list_to_binary(?TLD),
+        type = ?DNS_TYPE_SOA,
+        ttl = 3600
+    }.
 
 %% @private
 generate_record({N, #{<<"hostname">> := Hostname}}) ->
