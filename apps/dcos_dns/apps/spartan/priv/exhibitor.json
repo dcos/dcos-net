@@ -1,0 +1,20 @@
+[
+    {
+        "code": 3,
+        "description": "serving",
+        "hostname": "10.0.4.160",
+        "isLeader": false
+    },
+    {
+        "code": 3,
+        "description": "serving",
+        "hostname": "10.0.4.161",
+        "isLeader": false
+    },
+    {
+        "code": 3,
+        "description": "serving",
+        "hostname": "10.0.4.159",
+        "isLeader": true
+    }
+]

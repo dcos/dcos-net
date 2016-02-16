@@ -6,7 +6,11 @@
   {applications,
    [kernel,
     stdlib,
-    erldns
+    erldns,
+    lager,
+    inets,
+    jsx,
+    dns
    ]},
   {env,[]},
   {modules, []},

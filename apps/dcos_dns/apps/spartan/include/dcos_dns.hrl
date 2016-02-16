@@ -1,0 +1,4 @@
+-define(APP, dcos_dns).
+-define(EXHIBITOR_HOST, "http://master.mesos:8181").
+-define(EXHIBITOR_URL, "exhibitor/v1/cluster/status").
+-define(TLD, "zk").
