@@ -13,6 +13,8 @@
          terminate/2,
          code_change/3]).
 
+-dialyzer([{nowarn_function, [update_zone/1]}, no_improper_lists]).
+
 -define(REFRESH_INTERVAL, 1000).
 -define(REFRESH_MESSAGE,  refresh).
 
@@ -66,14 +68,8 @@ handle_cast(Msg, State) ->
 -spec handle_info(term(), #state{}) -> {noreply, #state{}}.
 handle_info(?REFRESH_MESSAGE, State) ->
     timer:send_after(?REFRESH_INTERVAL, ?REFRESH_MESSAGE),
-
-    case retrieve_state() of
-        {ok, MasterState} ->
-            ok = update_zone(MasterState);
-        Error ->
-            lager:info("Failed to retrieve state: ~p", [Error]),
-            Error
-    end,
+    {ok, MasterState} = retrieve_state(),
+    ok = update_zone(MasterState),
     {noreply, State};
 handle_info(Msg, State) ->
     lager:warning("Unhandled messages: ~p", [Msg]),
@@ -97,8 +93,8 @@ code_change(_OldVsn, State, _Extra) ->
 %% @doc Retrieve state from the Mesos master about where the Zookeeper
 %%      intances are.
 retrieve_state() ->
-    case os:getenv("MESOS_FIXTURE", false) of
-        false ->
+    case os:getenv("MESOS_FIXTURE", "false") of
+        "false" ->
             %% @todo Change, this is the exhibitor URL.
             Host = os:getenv("MESOS", ?EXHIBITOR_HOST),
             Url = Host ++ ?EXHIBITOR_URL,
@@ -113,17 +109,18 @@ retrieve_state() ->
 
 %% @private
 update_zone(Zookeepers) ->
-    ToCreate = lists:zip(lists:seq(1,5), lists:sublist(Zookeepers ++ Zookeepers, 1, 5)),
+    ToCreate = lists:zip(lists:seq(1, 5), lists:sublist(Zookeepers ++ Zookeepers, 1, 5)),
     Records = [generate_record(R) || R <- ToCreate],
     Sha = crypto:hash(sha, term_to_binary(Records)),
-    erldns_zone_cache:put_zone({?TLD, Sha, Records}).
+    ok = erldns_zone_cache:put_zone({?TLD, Sha, Records}),
+    ok.
 
 %% @private
 generate_record({N, #{<<"hostname">> := Hostname}}) ->
     {ok, IpAddress} = inet:parse_address(binary_to_list(Hostname)),
     NewHostname = integer_to_list(N) ++ "." ++ ?TLD,
     #dns_rr{
-        name = NewHostname,
+        name = list_to_binary(NewHostname),
         type = ?DNS_TYPE_A,
         ttl = 3600,
         data = #dns_rrdata_a{ip = IpAddress}
