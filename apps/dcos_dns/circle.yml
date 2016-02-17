@@ -24,5 +24,4 @@ test:
     - make dialyzer
   post:
     - mkdir -p $CIRCLE_TEST_REPORTS/
-    - mv .eunit/*.xml $CIRCLE_TEST_REPORTS
-    - mv .eunit/*.html $CIRCLE_TEST_REPORTS
+    - mv TEST-*.xml $CIRCLE_TEST_REPORTS
