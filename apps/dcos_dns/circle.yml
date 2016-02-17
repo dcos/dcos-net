@@ -18,7 +18,10 @@ dependencies:
 
 test:
   override:
-    - make check
+    - make xref
+    - make eunit
+    - make ct
+    - make dialyzer
   post:
     - mkdir -p $CIRCLE_TEST_REPORTS/
     - mv .eunit/*.xml $CIRCLE_TEST_REPORTS
