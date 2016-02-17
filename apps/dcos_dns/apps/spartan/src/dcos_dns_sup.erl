@@ -29,7 +29,12 @@ init([]) ->
                        permanent, 5000, worker,
                        [dcos_dns_zk_record_server]},
 
-    {ok, { {one_for_all, 0, 1}, [ZkRecordServer]} }.
+    DispatchFsm = {dcos_dns_dns_dual_dispatch_fsm_sup,
+                   {dcos_dns_dns_dual_dispatch_fsm_sup, start_link, []},
+                    permanent, infinity, supervisor,
+                    [dcos_dns_dns_dual_dispatch_fsm_sup]},
+
+    {ok, { {one_for_all, 0, 1}, [ZkRecordServer, DispatchFsm]} }.
 
 %%====================================================================
 %% Internal functions
