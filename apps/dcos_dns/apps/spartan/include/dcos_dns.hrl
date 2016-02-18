@@ -5,3 +5,4 @@
 -define(PORT, 53).
 -define(MESOS_RESOLVERS, ["master.mesos", "master.mesos"]).
 -define(UPSTREAM_RESOLVERS, ["8.8.8.8", "8.8.8.8"]).
+-define(ERLDNS_HANDLER, dcos_dns_erldns_handler).
