@@ -27,6 +27,11 @@
 -define(SERVER, ?MODULE).
 
 -include("dcos_dns.hrl").
+
+%% We can't include these because of name clashes.
+% -include_lib("kernel/src/inet_dns.hrl").
+% -include_lib("kernel/src/inet_res.hrl").
+
 -include_lib("dns/include/dns_terms.hrl").
 -include_lib("dns/include/dns_records.hrl").
 
@@ -127,7 +132,7 @@ execute(timeout, #state{self=Self,
 %% @doc Return as soon as we receive the first response.
 waiting(Response, #state{req_id=ReqId, from=From}=State) ->
     lager:info("Received response: ~p", [Response]),
-    From ! {ReqId, ok, Response},
+    From ! {ReqId, ok, convert(Response)},
     {stop, normal, State}.
 
 handle_event(_Event, StateName, State) ->
@@ -177,6 +182,53 @@ async_resolve(Self, Name, Class, Type, Resolver) ->
 %% @doc Generate a request id.
 mk_reqid() ->
     erlang:phash2(erlang:timestamp()).
+
+%% @private
+%% @doc
+%%
+%% Convert a inet_dns response to a dns response so that it's cachable
+%% and encodable via the erldns application.
+%%
+%% This first formal argument is a #dns_rec, from inet_dns, but we can't
+%% load because it will cause a conflict with the naming in the dns
+%% application used by erldns.
+%%
+convert(#dns_message{} = Message) ->
+    Message;
+convert(Message) ->
+    Header = inet_dns:msg(Message, header),
+    Questions = inet_dns:msg(Message, qdlist),
+    Answers = inet_dns:msg(Message, anlist),
+    Authorities = inet_dns:msg(Message, nslist),
+    Resources = inet_dns:msg(Message, arlist),
+    #dns_message{
+              id = inet_dns:header(Header, id),
+              qr = inet_dns:header(Header, qr),
+              oc = inet_dns:header(Header, opcode), %% @todo Could be wrong.
+              aa = inet_dns:header(Header, aa),
+              tc = inet_dns:header(Header, tc),
+              rd = inet_dns:header(Header, rd),
+              ra = inet_dns:header(Header, ra),
+              ad = 0, %% @todo Could be wrong.
+              cd = 0, %% @todo Could be wrong.
+              rc = inet_dns:header(Header, rcode), %% @todo Could be wrong.
+              qc = 0,
+              anc = 0,
+              auc = 0,
+              adc = 0,
+              questions = convert(qdlist, Questions),
+              answers = convert(anlist, Answers),
+              authority = convert(nslist, Authorities),
+              additional = convert(arlist, Resources)}.
+
+convert(qdlist, _Questions) ->
+    [];
+convert(anlist, _Answers) ->
+    [];
+convert(nslist, _Authorities) ->
+    [];
+convert(arlist, _Resources) ->
+    [].
 
 -ifdef(TEST).
 
