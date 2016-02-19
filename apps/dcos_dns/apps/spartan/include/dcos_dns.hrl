@@ -1,6 +1,6 @@
 -define(APP, dcos_dns).
 -define(EXHIBITOR_HOST, "http://master.mesos:8181").
--define(EXHIBITOR_URL, "exhibitor/v1/cluster/status").
+-define(EXHIBITOR_URL, "/exhibitor/v1/cluster/status").
 -define(TLD, "zk").
 -define(PORT, 53).
 -define(MESOS_RESOLVERS, ["master.mesos", "master.mesos"]).

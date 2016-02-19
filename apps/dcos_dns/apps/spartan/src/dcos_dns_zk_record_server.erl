@@ -96,7 +96,7 @@ retrieve_state() ->
     case os:getenv("MESOS_FIXTURE", "false") of
         "false" ->
             %% @todo Change, this is the exhibitor URL.
-            Host = os:getenv("MESOS", ?EXHIBITOR_HOST),
+            Host = os:getenv("EXHIBITOR_HOST", ?EXHIBITOR_HOST),
             Url = Host ++ ?EXHIBITOR_URL,
             {ok, {{_, 200, _}, _, Body}} = httpc:request(get,
                                                          {Url, []}, [], [{body_format, binary}]),
