@@ -35,7 +35,7 @@ stop(_State) ->
 %% @private
 override_erldns_handlers() ->
     {_, Bin, _} = code:get_object_code(?ERLDNS_HANDLER),
-    {ok,{_,[{abstract_code,{_,AbstractCode}}]}} = beam_lib:chunks(Bin, [abstract_code]),
+    {ok, {_, [{abstract_code, {_, AbstractCode}}]}} = beam_lib:chunks(Bin, [abstract_code]),
     {ok, Module, NewBin} = compile:forms(AbstractCode, ?COMPILE_OPTIONS),
     ModStr = atom_to_list(Module),
     {module, Module} = code:load_binary(Module, ModStr, NewBin).
