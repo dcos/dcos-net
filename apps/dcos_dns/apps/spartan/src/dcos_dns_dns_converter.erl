@@ -79,14 +79,13 @@ convert(an, Answer) ->
             class = class(Class),
             type = type(Type),
             ttl = TTL,
-            data = convert(data, Data)};
+            data = convert(data, Type, Class, Data)}.
 
-convert(data, {_, _, _, _, _, _, _, _}=IpAddress) ->
+%% @private
+convert(data, _Type, _Class, {_, _, _, _, _, _, _, _}=IpAddress) ->
     #dns_rrdata_aaaa{ip=IpAddress};
-convert(data, {_, _, _, _}=IpAddress) ->
-    #dns_rrdata_a{ip=IpAddress};
-convert(data, Data) ->
-    Data.
+convert(data, _Type, _Class, {_, _, _, _}=IpAddress) ->
+    #dns_rrdata_a{ip=IpAddress}.
 
 %% @private
 class_to_integer(Bin) when is_binary(Bin) ->
