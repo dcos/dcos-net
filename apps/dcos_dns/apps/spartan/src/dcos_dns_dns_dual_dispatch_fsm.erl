@@ -204,7 +204,7 @@ convert(Message) ->
     #dns_message{
               id = inet_dns:header(Header, id),
               qr = inet_dns:header(Header, qr),
-              oc = inet_dns:header(Header, opcode), %% @todo Could be wrong.
+              oc = opcode(inet_dns:header(Header, opcode)),
               aa = inet_dns:header(Header, aa),
               tc = inet_dns:header(Header, tc),
               rd = inet_dns:header(Header, rd),
@@ -221,24 +221,45 @@ convert(Message) ->
               authority = convert(nslist, Authorities),
               additional = convert(arlist, Resources)}.
 
-%% [{dns_query,"google.com",a,in}] -> [{dns_query,<<"2.zk">>,1,1}]
+%% @private
 convert(qdlist, Questions) ->
     [convert(qd, Question) || Question <- Questions];
-convert(anlist, _Answers) ->
-    [];
+convert(anlist, Answers) ->
+    [convert(an, Answer) || Answer <- Answers];
 convert(nslist, _Authorities) ->
     [];
 convert(arlist, _Resources) ->
     [];
 
+%% [{dns_query,"google.com",a,in}] -> [{dns_query,<<"2.zk">>,1,1}]
 convert(qd, Question) ->
     Domain = inet_dns:dns_query(Question, domain),
     Type = inet_dns:dns_query(Question, type),
     Class = inet_dns:dns_query(Question, class),
-    #dns_query{name = list_to_binary(Domain),
-               class = class_to_integer(list_to_binary(upcase(atom_to_list(Class)))),
-               type = type_to_integer(list_to_binary(upcase(atom_to_list(Type))))}.
+    #dns_query{name = name(Domain),
+               class = class(Class),
+               type = type(Type)};
 
+%% [{dns_rr,"google.com",a,in,0,78,{74,125,239,142},undefined,[],false}] %% ->
+%%    [{dns_rr,<<"2.zk">>,1,1,3600,{dns_rrdata_a,{10,0,4,161}}}]
+convert(an, Answer) ->
+    Domain = inet_dns:rr(Answer, domain),
+    Type = inet_dns:rr(Answer, type),
+    Class = inet_dns:rr(Answer, class),
+    TTL = inet_dns:rr(Answer, ttl),
+    Data = inet_dns:rr(Answer, data),
+    #dns_rr{name = name(Domain),
+            class = class(Class),
+            type = type(Type),
+            ttl = TTL,
+            data = convert(data, Data)};
+
+convert(data, {_, _, _, _}=IpAddress) ->
+    #dns_rrdata_a{ip=IpAddress};
+convert(data, Data) ->
+    Data.
+
+%% @private
 class_to_integer(Bin) when is_binary(Bin) ->
     case Bin of
         ?DNS_CLASS_IN_BSTR -> ?DNS_CLASS_IN_NUMBER;
@@ -250,6 +271,7 @@ class_to_integer(Bin) when is_binary(Bin) ->
         _ -> undefined
     end.
 
+%% @private
 type_to_integer(Bin) when is_binary(Bin) ->
     case Bin of
         ?DNS_TYPE_A_BSTR -> ?DNS_TYPE_A_NUMBER;
@@ -322,9 +344,35 @@ type_to_integer(Bin) when is_binary(Bin) ->
     end.
 
 %% @private
+opcode_to_integer(Bin) when is_binary(Bin) ->
+    case Bin of
+        ?DNS_OPCODE_QUERY_BSTR -> ?DNS_OPCODE_QUERY_NUMBER;
+        ?DNS_OPCODE_IQUERY_BSTR -> ?DNS_OPCODE_IQUERY_NUMBER;
+        ?DNS_OPCODE_STATUS_BSTR -> ?DNS_OPCODE_STATUS_NUMBER;
+        ?DNS_OPCODE_UPDATE_BSTR -> ?DNS_OPCODE_UPDATE_NUMBER;
+        _ -> undefined
+    end.
+
+%% @private
 upcase(Y) ->
     Upcase = fun(X) when $a =< X,  X =< $z -> X + $A - $a; (X) -> X end,
     lists:map(Upcase, Y).
+
+%% @private
+name(Domain) ->
+    list_to_binary(Domain).
+
+%% @private
+class(Class) ->
+    class_to_integer(list_to_binary(upcase(atom_to_list(Class)))).
+
+%% @private
+type(Type) ->
+    type_to_integer(list_to_binary(upcase(atom_to_list(Type)))).
+
+%% @private
+opcode(Code) ->
+    opcode_to_integer(list_to_binary("'" ++ upcase(atom_to_list(Code)) ++ "'")).
 
 -ifdef(TEST).
 
