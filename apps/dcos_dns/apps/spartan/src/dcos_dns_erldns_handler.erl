@@ -166,8 +166,8 @@ safe_handle_packet_cache_miss(Message, AuthorityRecords, Host) ->
       % Response = erldns_resolver:resolve(Message, AuthorityRecords, Host),
       maybe_cache_packet(Response, Response#dns_message.aa);
     _ ->
-      try erldns_resolver:resolve(Message, AuthorityRecords, Host) of
-        Response -> maybe_cache_packet(Response, Response#dns_message.aa)
+      try dcos_dns_dns_dual_dispatch_fsm:sync_resolve(Message, AuthorityRecords, Host) of
+        {ok, Response} -> maybe_cache_packet(Response, Response#dns_message.aa)
       catch
         Exception:Reason ->
           lager:error("Error answering request: ~p (~p)", [Exception, Reason]),
