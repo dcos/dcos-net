@@ -19,6 +19,12 @@
 
 -behavior(gen_server).
 
+-dialyzer([{nowarn_function, [handle/3,
+                              handle_message/2,
+                              get_authority/1,
+                              safe_handle_packet_cache_miss/3,
+                              handle_packet_cache_miss/3]}]).
+
 -include_lib("dns/include/dns.hrl").
 -include_lib("erldns/include/erldns.hrl").
 
