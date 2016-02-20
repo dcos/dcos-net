@@ -188,4 +188,81 @@ mk_reqid() ->
 
 -ifdef(TEST).
 
+%% @doc Generate a question for resolving.
+create_question_message(upstream) ->
+    #dns_message{id=23351,
+                 qr=false,
+                 oc=0,
+                 aa=false,
+                 tc=false,
+                 rd=true,
+                 ra=false,
+                 ad=false,
+                 cd=false,
+                 rc=0,
+                 qc=1,
+                 anc=0,
+                 auc=0,
+                 adc=0,
+                 questions=[{dns_query, <<"www.google.com">>, 1, 1}],
+                 answers=[],
+                 authority=[],
+                 additional=[]};
+create_question_message(mesos) ->
+    #dns_message{id=23351,
+                 qr=false,
+                 oc=0,
+                 aa=false,
+                 tc=false,
+                 rd=true,
+                 ra=false,
+                 ad=false,
+                 cd=false,
+                 rc=0,
+                 qc=1,
+                 anc=0,
+                 auc=0,
+                 adc=0,
+                 questions=[{dns_query, <<"master.mesos">>, 1, 1}],
+                 answers=[],
+                 authority=[],
+                 additional=[]};
+create_question_message(zk) ->
+    #dns_message{id=23351,
+                 qr=false,
+                 oc=0,
+                 aa=false,
+                 tc=false,
+                 rd=true,
+                 ra=false,
+                 ad=false,
+                 cd=false,
+                 rc=0,
+                 qc=1,
+                 anc=0,
+                 auc=0,
+                 adc=0,
+                 questions=[{dns_query, <<"1.zk">>, 1, 1}],
+                 answers=[],
+                 authority=[],
+                 additional=[]}.
+
+%% @doc Verify upstream resolution works.
+%%      Given we don't know what Google will resolve to at any one point
+%%      or how many records are returned, just verify that we get an
+%%      answer from upstream and that the conversion of records is
+%%      successful.
+upstream_resolve_test() ->
+    ReqId = mk_reqid(),
+    From = self(),
+    Message = create_question_message(upstream),
+    AuthorityRecords = [],
+    Host = undefined,
+    {ok, _Pid} = ?MODULE:start_link(ReqId, From, Message, AuthorityRecords, Host),
+    Response = dcos_dns_app:wait_for_reqid(ReqId, 10000),
+    ?assertMatch({ok, #dns_message{}}, Response),
+    {ok, #dns_message{answers=Answers}} = Response,
+    ?assert(length(Answers) > 0),
+    ok.
+
 -endif.
