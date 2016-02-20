@@ -35,7 +35,8 @@
 -include_lib("dns/include/dns_terms.hrl").
 -include_lib("dns/include/dns_records.hrl").
 
--record(state, {req_id :: req_id(),
+-record(state, {id :: dns:message_id(),
+                req_id :: req_id(),
                 from :: pid(),
                 message :: dns:message(),
                 authority_records :: [dns:rr()],
@@ -81,13 +82,15 @@ sync_resolve(Message, AuthorityRecords, Host) ->
 init([ReqId, From, Message, AuthorityRecords, Host]) ->
     lager:info("Resolution request for message: ~p", [Message]),
     Self = self(),
+    Id = Message#dns_message.id,
     Questions = Message#dns_message.questions,
     Question = hd(Questions),
     Name = Question#dns_query.name,
     Type = Question#dns_query.type,
     Class = Question#dns_query.class,
     lager:info("Question: ~p", [Question]),
-    {ok, execute, #state{req_id=ReqId,
+    {ok, execute, #state{id=Id,
+                         req_id=ReqId,
                          from=From,
                          message=Message,
                          authority_records=AuthorityRecords,
@@ -130,9 +133,9 @@ execute(timeout, #state{self=Self,
     {next_state, waiting, State}.
 
 %% @doc Return as soon as we receive the first response.
-waiting(Response, #state{req_id=ReqId, from=From}=State) ->
+waiting(Response, #state{id=Id, req_id=ReqId, from=From}=State) ->
     lager:info("Received response: ~p", [Response]),
-    From ! {ReqId, ok, convert(Response)},
+    From ! {ReqId, ok, convert_message(Response, Id)},
     {stop, normal, State}.
 
 handle_event(_Event, StateName, State) ->
@@ -193,16 +196,16 @@ mk_reqid() ->
 %% load because it will cause a conflict with the naming in the dns
 %% application used by erldns.
 %%
-convert(#dns_message{} = Message) ->
+convert_message(#dns_message{} = Message, _Id) ->
     Message;
-convert(Message) ->
+convert_message(Message, Id) ->
     Header = inet_dns:msg(Message, header),
     Questions = inet_dns:msg(Message, qdlist),
     Answers = inet_dns:msg(Message, anlist),
     Authorities = inet_dns:msg(Message, nslist),
     Resources = inet_dns:msg(Message, arlist),
     #dns_message{
-              id = inet_dns:header(Header, id),
+              id = Id,
               qr = inet_dns:header(Header, qr),
               oc = opcode(inet_dns:header(Header, opcode)),
               aa = inet_dns:header(Header, aa),
