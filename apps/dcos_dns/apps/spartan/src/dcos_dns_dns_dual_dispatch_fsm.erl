@@ -118,16 +118,12 @@ execute(timeout, #state{self=Self,
             case Labels of
                 [<<"zk">>] ->
                     %% Zookeeper request.
-                    spawn(?MODULE, async_resolve, [Self, Message, AuthorityRecords, Host]);
+                    zookeeper_resolve(Self, Message, AuthorityRecords, Host);
                 [<<"mesos">>] ->
-                    %% Mesos request.
-                    [spawn(?MODULE, async_resolve, [Self, Name, Class, Type, Resolver])
-                     || Resolver <- ?MESOS_RESOLVERS];
-                Label ->
-                    lager:info("Assuming upstream: ~p", [Label]),
+                    mesos_resolve(Self, Name, Class, Type, Message, AuthorityRecords, Host);
+                _ ->
                     %% Upstream request.
-                    [spawn(?MODULE, async_resolve, [Self, Name, Class, Type, Resolver])
-                     || Resolver <- ?UPSTREAM_RESOLVERS]
+                    upstream_resolve(Self, Name, Class, Type)
             end
     end,
     {next_state, waiting, State}.
@@ -185,6 +181,29 @@ async_resolve(Self, Name, Class, Type, Resolver) ->
 %% @doc Generate a request id.
 mk_reqid() ->
     erlang:phash2(erlang:timestamp()).
+
+%% @private
+upstream_resolve(Self, Name, Class, Type) ->
+    [spawn(?MODULE, async_resolve, [Self, Name, Class, Type, Resolver])
+     || Resolver <- ?UPSTREAM_RESOLVERS].
+
+%% @private
+zookeeper_resolve(Self, Message, AuthorityRecords, Host) ->
+    spawn(?MODULE, async_resolve, [Self, Message, AuthorityRecords, Host]).
+
+-ifdef(TEST).
+
+mesos_resolve(Self, _Name, _Class, _Type, Message, AuthorityRecords, Host) ->
+    spawn(?MODULE, async_resolve, [Self, Message, AuthorityRecords, Host]).
+
+-else.
+
+%% @private
+mesos_resolve(Self, Name, Class, Type, _Message, _AuthorityRecords, _Host) ->
+    [spawn(?MODULE, async_resolve, [Self, Name, Class, Type, Resolver])
+     || Resolver <- ?MESOS_RESOLVERS].
+
+-endif.
 
 -ifdef(TEST).
 

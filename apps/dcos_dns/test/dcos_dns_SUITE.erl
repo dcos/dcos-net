@@ -12,6 +12,7 @@
 %% tests
 -export([
          upstream_test/1,
+         mesos_test/1,
          zk_test/1
         ]).
 
@@ -34,6 +35,7 @@ init_per_suite(_Config) ->
                         end, Environment)
                   end, Terms),
     application:ensure_all_started(dcos_dns),
+    dcos_dns_zk_record_server:generate_fixture_mesos_zone(),
     _Config.
 
 end_per_suite(_Config) ->
@@ -48,6 +50,7 @@ end_per_testcase(_, _Config) ->
 all() ->
     [
      upstream_test,
+     mesos_test,
      zk_test
     ].
 
@@ -60,6 +63,21 @@ upstream_test(_Config) ->
     {ok, DnsMsg} = inet_res:resolve("www.google.com", in, a, resolver_options()),
     Answers = inet_dns:msg(DnsMsg, anlist),
     ?assert(length(Answers) > 0),
+    ok.
+
+%% @doc Assert we can resolve Mesos records.
+%%
+%%      Shallow test; verifies that the mesos domain is parsed correctly
+%%      and send to the dual dispatch FSM, but actual
+%%      resolution bypasses the mesos servers, since they won't be
+%%      there.  The external resolution test is covered via
+%%      upstream_test/1.
+%%
+mesos_test(_Config) ->
+    {ok, DnsMsg} = inet_res:resolve("master.mesos", in, a, resolver_options()),
+    [Answer] = inet_dns:msg(DnsMsg, anlist),
+    Data = inet_dns:rr(Answer, data),
+    ?assertMatch({127,0,0,1}, Data),
     ok.
 
 %% @doc Assert we can resolve the Zookeeper records.

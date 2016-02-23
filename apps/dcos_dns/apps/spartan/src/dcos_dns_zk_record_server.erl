@@ -5,6 +5,10 @@
 -export([start_link/0,
          start_link/1]).
 
+-ifdef(TEST).
+-export([generate_fixture_mesos_zone/0]).
+-endif.
+
 %% gen_server callbacks
 -export([init/1,
          handle_call/3,
@@ -121,6 +125,28 @@ generate_fixture_response() ->
     Exhibitor = code:priv_dir(?APP) ++ "/exhibitor.json",
     {ok, Fixture} = file:read_file(Exhibitor),
     {ok, jsx:decode(Fixture, [return_maps])}.
+
+-ifdef(TEST).
+
+%% @private
+generate_fixture_mesos_zone() ->
+    SOA = #dns_rr{
+        name = list_to_binary("mesos"),
+        type = ?DNS_TYPE_SOA,
+        ttl = 3600
+    },
+    RR = #dns_rr{
+        name = list_to_binary("master.mesos"),
+        type = ?DNS_TYPE_A,
+        ttl = 3600,
+        data = #dns_rrdata_a{ip = {127, 0, 0, 1}}
+    },
+    Records = [SOA, RR],
+    Sha = crypto:hash(sha, term_to_binary(Records)),
+    ok = erldns_zone_cache:put_zone({<<"mesos">>, Sha, Records}),
+    ok.
+
+-endif.
 
 %% @private
 update_zone(Zookeepers) ->
