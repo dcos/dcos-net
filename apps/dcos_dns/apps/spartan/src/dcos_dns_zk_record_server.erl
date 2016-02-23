@@ -89,6 +89,15 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
+
+-ifdef(TEST).
+
+%% @private
+retrieve_state() ->
+    generate_fixture_response().
+
+-else.
+
 %% @private
 %% @doc Retrieve state from the Mesos master about where the Zookeeper
 %%      intances are.
@@ -102,10 +111,16 @@ retrieve_state() ->
                                                          {Url, []}, [], [{body_format, binary}]),
             {ok, jsx:decode(Body, [return_maps])};
         _ ->
-            Exhibitor = code:priv_dir(?APP) ++ "/exhibitor.json",
-            {ok, Fixture} = file:read_file(Exhibitor),
-            {ok, jsx:decode(Fixture, [return_maps])}
+            generate_fixture_response()
     end.
+
+-endif.
+
+%% @private
+generate_fixture_response() ->
+    Exhibitor = code:priv_dir(?APP) ++ "/exhibitor.json",
+    {ok, Fixture} = file:read_file(Exhibitor),
+    {ok, jsx:decode(Fixture, [return_maps])}.
 
 %% @private
 update_zone(Zookeepers) ->
