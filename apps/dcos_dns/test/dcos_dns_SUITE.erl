@@ -10,12 +10,16 @@
          all/0]).
 
 %% tests
--export([upstream_test/1
+-export([
+         upstream_test/1,
+         zk_test/1
         ]).
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/inet.hrl").
+
+-define(CONFIG, "../../../../config/sys.config").
 
 %% ===================================================================
 %% common_test callbacks
@@ -23,7 +27,7 @@
 
 init_per_suite(_Config) ->
     application:load(erldns),
-    {ok, [Terms]} = file:consult("../../../../config/sys.config"),
+    {ok, [Terms]} = file:consult(?CONFIG),
     lists:foreach(fun({App, Environment}) ->
                         lists:foreach(fun({Par, Val}) ->
                                             ok = application:set_env(App, Par, Val)
@@ -43,7 +47,8 @@ end_per_testcase(_, _Config) ->
 
 all() ->
     [
-     upstream_test
+     upstream_test,
+     zk_test
     ].
 
 %% ===================================================================
@@ -52,12 +57,20 @@ all() ->
 
 %% @doc Assert an upstream request is resolved by the dual dispatch FSM.
 upstream_test(_Config) ->
-    Name = "www.google.com",
-    Class = in,
-    Type = a,
-    Nameserver = {{127,0,0,1}, 8053},
-    Options = [{nameservers, [Nameserver]}],
-    {ok, DnsMsg} = inet_res:resolve(Name, Class, Type, Options),
+    {ok, DnsMsg} = inet_res:resolve("www.google.com", in, a, resolver_options()),
     Answers = inet_dns:msg(DnsMsg, anlist),
     ?assert(length(Answers) > 0),
     ok.
+
+%% @doc Assert we can resolve the Zookeeper records.
+zk_test(_Config) ->
+    {ok, DnsMsg} = inet_res:resolve("1.zk", in, a, resolver_options()),
+    [Answer] = inet_dns:msg(DnsMsg, anlist),
+    Data = inet_dns:rr(Answer, data),
+    ?assertMatch({10,0,4,160}, Data),
+    ok.
+
+%% @private
+%% @doc Use the dcos_dns resolver.
+resolver_options() ->
+    [{nameservers, [{{127,0,0,1}, 8053}]}].
