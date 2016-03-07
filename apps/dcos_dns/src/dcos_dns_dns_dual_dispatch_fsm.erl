@@ -184,8 +184,11 @@ mk_reqid() ->
 
 %% @private
 upstream_resolve(Self, Name, Class, Type) ->
+    UpstreamResolvers = application:get_env(?APP,
+                                            upstream_resolvers,
+                                            ["8.8.8.8"]),
     [spawn(?MODULE, async_resolve, [Self, Name, Class, Type, Resolver])
-     || Resolver <- ?UPSTREAM_RESOLVERS].
+     || Resolver <- UpstreamResolvers].
 
 %% @private
 zookeeper_resolve(Self, Message, AuthorityRecords, Host) ->
