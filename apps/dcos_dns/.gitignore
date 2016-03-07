@@ -2,3 +2,5 @@ _build/*
 TEST-*
 log/
 _checkouts/*
+.eqc*
+*eqc*
