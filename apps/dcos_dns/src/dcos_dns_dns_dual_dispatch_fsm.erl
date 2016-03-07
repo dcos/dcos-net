@@ -200,8 +200,11 @@ mesos_resolve(Self, _Name, _Class, _Type, Message, AuthorityRecords, Host) ->
 
 %% @private
 mesos_resolve(Self, Name, Class, Type, _Message, _AuthorityRecords, _Host) ->
+    MesosResolvers = application:get_env(?APP,
+                                         mesos_resolvers,
+                                         ["127.0.0.1"]),
     [spawn(?MODULE, async_resolve, [Self, Name, Class, Type, Resolver])
-     || Resolver <- ?MESOS_RESOLVERS].
+     || Resolver <- MesosResolvers].
 
 -endif.
 
