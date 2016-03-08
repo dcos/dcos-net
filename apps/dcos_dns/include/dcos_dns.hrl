@@ -2,5 +2,4 @@
 -define(EXHIBITOR_HOST, "http://master.mesos:8181").
 -define(EXHIBITOR_URL, "/exhibitor/v1/cluster/status").
 -define(TLD, "zk").
--define(PORT, 53).
 -define(ERLDNS_HANDLER, dcos_dns_erldns_handler).

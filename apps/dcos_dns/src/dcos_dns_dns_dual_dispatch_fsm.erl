@@ -168,9 +168,9 @@ async_resolve(Self, Message, AuthorityRecords, Host) ->
 
 %% @private
 %% @doc Internal callback function for performing resolution.
-async_resolve(Self, Name, Class, Type, Resolver) ->
-    {ok, IpAddress} = inet:parse_address(Resolver),
-    Opts = [{nameservers, [{IpAddress, ?PORT}]}],
+async_resolve(Self, Name, Class, Type, {ResolverIP, ResolverPort}) ->
+    {ok, IpAddress} = inet:parse_address(ResolverIP),
+    Opts = [{nameservers, [{IpAddress, ResolverPort}]}],
 
     %% @todo It's unclear how to return a nxdomain response through
     %%       erldns, yet.  Figure it out.
@@ -186,7 +186,7 @@ mk_reqid() ->
 upstream_resolve(Self, Name, Class, Type) ->
     UpstreamResolvers = application:get_env(?APP,
                                             upstream_resolvers,
-                                            ["8.8.8.8"]),
+                                            [{"8.8.8.8", 53}]),
     [spawn(?MODULE, async_resolve, [Self, Name, Class, Type, Resolver])
      || Resolver <- UpstreamResolvers].
 
@@ -205,7 +205,7 @@ mesos_resolve(Self, _Name, _Class, _Type, Message, AuthorityRecords, Host) ->
 mesos_resolve(Self, Name, Class, Type, _Message, _AuthorityRecords, _Host) ->
     MesosResolvers = application:get_env(?APP,
                                          mesos_resolvers,
-                                         ["127.0.0.1"]),
+                                         [{"127.0.0.1", 53}]),
     [spawn(?MODULE, async_resolve, [Self, Name, Class, Type, Resolver])
      || Resolver <- MesosResolvers].
 
