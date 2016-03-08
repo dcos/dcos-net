@@ -93,7 +93,6 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-
 -ifdef(TEST).
 
 %% @private
@@ -108,9 +107,7 @@ retrieve_state() ->
 retrieve_state() ->
     case os:getenv("MESOS_FIXTURE", "false") of
         "false" ->
-            %% @todo Change, this is the exhibitor URL.
-            Host = os:getenv("EXHIBITOR_HOST", ?EXHIBITOR_HOST),
-            Url = Host ++ ?EXHIBITOR_URL,
+            Url = application:get_env(?APP, exhibitor_url),
             {ok, {{_, 200, _}, _, Body}} = httpc:request(get,
                                                          {Url, []}, [], [{body_format, binary}]),
             {ok, jsx:decode(Body, [return_maps])};
