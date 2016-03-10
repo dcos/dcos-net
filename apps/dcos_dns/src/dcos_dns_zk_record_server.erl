@@ -107,7 +107,7 @@ retrieve_state() ->
 retrieve_state() ->
     case os:getenv("MESOS_FIXTURE", "false") of
         "false" ->
-            Url = application:get_env(?APP, exhibitor_url),
+            {ok, Url} = application:get_env(?APP, exhibitor_url),
             {ok, {{_, 200, _}, _, Body}} = httpc:request(get,
                                                          {Url, []}, [], [{body_format, binary}]),
             {ok, jsx:decode(Body, [return_maps])};
