@@ -34,6 +34,7 @@ init_per_suite(_Config) ->
                                             ok = application:set_env(App, Par, Val)
                         end, Environment)
                   end, Terms),
+    application:set_env(dcos_dns, mesos_resolvers, [{"127.0.0.1", 9053}]),
     application:ensure_all_started(dcos_dns),
     dcos_dns_zk_record_server:generate_fixture_mesos_zone(),
     _Config.
@@ -82,7 +83,7 @@ mesos_test(_Config) ->
 
 %% @doc Assert we can resolve the Zookeeper records.
 zk_test(_Config) ->
-    {ok, DnsMsg} = inet_res:resolve("1.zk", in, a, resolver_options()),
+    {ok, DnsMsg} = inet_res:resolve("zk-1.zk", in, a, resolver_options()),
     [Answer] = inet_dns:msg(DnsMsg, anlist),
     Data = inet_dns:rr(Answer, data),
     ?assertMatch({10,0,4,160}, Data),

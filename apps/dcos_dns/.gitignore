@@ -4,3 +4,4 @@ log/
 _checkouts/*
 .eqc*
 *eqc*
+include/EXOMETER-MIB.hrl

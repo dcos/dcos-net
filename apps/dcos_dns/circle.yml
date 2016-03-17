@@ -5,6 +5,7 @@ dependencies:
   pre:
     - curl -O -L https://raw.githubusercontent.com/yrashk/kerl/master/kerl && chmod 755 kerl
     - if [ ! -d ~/extras/otp/18.1 ]; then ./kerl build 18.1 18.1; ./kerl install 18.1 ~/extras/otp/18.1; fi
+    - ./rebar3 update
   override:
     - cp -f ./build.key ~/.ssh/id_circleci_github
     - ls -la ~/.ssh
@@ -17,6 +18,7 @@ test:
     - make eunit
     - make ct
     - make dialyzer
+    - make lint
   post:
     - mkdir -p $CIRCLE_TEST_REPORTS/
     - mv TEST-*.xml $CIRCLE_TEST_REPORTS
