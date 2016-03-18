@@ -44,7 +44,7 @@ ct:
 ##
 
 rel:
-	${REBAR} release
+	${REBAR} as prod release
 
 stage:
 	${REBAR} release -d

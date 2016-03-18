@@ -1,5 +1,4 @@
--module(dcos_dns_dns_dual_dispatch_fsm_sup).
--author('Christopher Meiklejohn <christopher.meiklejohn@gmail.com>').
+-module(dcos_dns_handler_sup).
 
 -behaviour(supervisor).
 
@@ -33,8 +32,8 @@ terminate_child(Supervisor, Pid) ->
 
 %% @doc supervisor callback.
 init([]) ->
-    Spec = {dcos_dns_dns_dual_dispatch_fsm,
-            {dcos_dns_dns_dual_dispatch_fsm, start_link, []},
-             temporary, 5000, worker, [dcos_dns_dns_dual_dispatch_fsm]},
+    Spec = {dcos_dns_handler_fsm,
+        {dcos_dns_handler_fsm, start_link, []},
+        temporary, 5000, worker, [dcos_dns_handler_fsm]},
 
     {ok, {{simple_one_for_one, 10, 10}, [Spec]}}.

@@ -10,7 +10,9 @@
     lager,
     inets,
     jsx,
-    dns
+    dns,
+    exometer,
+    ranch
    ]},
   {env,[]},
   {modules, []},
