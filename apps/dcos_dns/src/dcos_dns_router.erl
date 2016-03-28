@@ -72,5 +72,7 @@ upstream_from_labels([<<"mesos">>|_]) ->
     mesos_resolvers();
 upstream_from_labels([<<"zk">>|_]) ->
     erldns_resolvers();
+upstream_from_labels([<<"spartan">>|_]) ->
+    erldns_resolvers();
 upstream_from_labels(_) ->
     default_resolvers().
