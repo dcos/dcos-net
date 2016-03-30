@@ -59,7 +59,8 @@ init([]) ->
 
     Children = [HandlerSup, ZkRecordServer, ConfigLoaderServer],
     Children1 = maybe_add_udp_servers(Children),
-    {ok, { {one_for_all, 0, 1}, Children1} }.
+    %% The top level sup should never die.
+    {ok, { {one_for_all, 10000, 1}, Children1} }.
 
 %%====================================================================
 %% Internal functions
