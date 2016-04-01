@@ -45,8 +45,9 @@ start_link(LocalIP) ->
 %%% gen_server callbacks
 %%%===================================================================
 init([LocalIP]) ->
-    Port = application:get_env(?APP, udp_port, 5454),
+    Port = dcos_dns_config:udp_port(),
     {ok, Socket} = gen_udp:open(Port, [{reuseaddr, true}, {active, true}, binary, {ip, LocalIP}]),
+    link(Socket),
     {ok, #state{port = Port, socket = Socket}}.
 
 handle_call(_Request, _From, State) ->
@@ -74,7 +75,8 @@ handle_info(Info, State) ->
     lager:debug("Received info: ~p", [Info]),
     {noreply, State}.
 
-terminate(_Reason, _State) ->
+terminate(_Reason, _State = #state{socket = Socket}) ->
+    gen_udp:close(Socket),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->

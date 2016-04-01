@@ -19,6 +19,8 @@ start_link(Ref, Socket, Transport, Opts) ->
     {ok, Pid}.
 
 init(Ref, Socket, Transport, _Opts = []) ->
+    {ok, _} = timer:kill_after(?TIMEOUT),
+    link(Socket),
     ok = ranch:accept_ack(Ref),
     ok = inet:setopts(Socket, [{packet, 2}, {active, true}]),
     {ok, Peer} = inet:peername(Socket),
@@ -30,6 +32,7 @@ loop(Socket, Transport, State) ->
             case dcos_dns_handler_sup:start_child([{?MODULE, self()}, Data]) of
                 {ok, Pid} when is_pid(Pid) ->
                     dcos_dns_metrics:update([?MODULE, successes], 1, ?COUNTER),
+                    monitor(process, Pid),
                     ok;
                 Else ->
                     lager:warning("Failed to start query handler: ~p", [Else]),
@@ -40,7 +43,9 @@ loop(Socket, Transport, State) ->
         {do_reply, ReplyData} ->
             Transport:send(Socket, ReplyData);
         {tcp_closed, Socket} ->
-            ok
+            ok;
+        Else ->
+            lager:debug("Received unknown data: ~p", [Else])
     %% Should the timeout here be more aggressive?
     after ?TIMEOUT ->
         Transport:close(Socket)

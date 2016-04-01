@@ -35,4 +35,7 @@ setup() ->
     ok = exometer:ensure([dcos_dns, upstreams_failed], ?COUNTER, []),
 
     %% No upstreams available.
-    ok = exometer:ensure([dcos_dns, no_upstreams_available], ?COUNTER, []).
+    ok = exometer:ensure([dcos_dns, no_upstreams_available], ?COUNTER, []),
+
+    %% Number of times the dcos_dns_handler_fsm fell into being killed by a timer
+    ok = exometer:ensure([dcos_dns, timeout_kill], ?COUNTER, []).
