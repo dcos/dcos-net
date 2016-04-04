@@ -51,13 +51,13 @@ init([]) ->
         modules => [dcos_dns_handler_sup]
     },
 
-    SystemdSup = #{
-        id => dcos_dns_systemd,
-        start => {dcos_dns_systemd, start_link, []},
+    WatchdogSup = #{
+        id => dcos_dns_watchdog,
+        start => {dcos_dns_watchdog, start_link, []},
         restart => permanent,
         shutdown => 5000,
         type => worker,
-        modules => [dcos_dns_systemd]
+        modules => [dcos_dns_watchdog]
     },
     %% Configure metrics.
     dcos_dns_metrics:setup(),
@@ -66,7 +66,7 @@ init([]) ->
     ok = dcos_dns_zone_setup(),
 
     %% Systemd Sup intentionally goes last
-    Children = [HandlerSup, ZkRecordServer, ConfigLoaderServer, SystemdSup],
+    Children = [HandlerSup, ZkRecordServer, ConfigLoaderServer, WatchdogSup],
     Children1 = maybe_add_udp_servers(Children),
 
     %% The top level sup should never die.

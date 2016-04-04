@@ -1,6 +1,6 @@
 %% Basic utility module to integrate with systemd sd_notify via shell commands
 
--module(dcos_dns_systemd).
+-module(dcos_dns_watchdog).
 -author("Sargun Dhillon <sargun@mesosphere.com>").
 -behaviour(gen_server).
 
@@ -22,12 +22,16 @@
 -define(REFRESH_MESSAGE,  refresh).
 
 
+-define(PF_LOCAL, 1).
+-define(UNIX_PATH_MAX, 108).
+
 %% State record.
--record(state, {}).
+-record(state, {kill_timer}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
+
 
 %% @doc Same as start_link([]).
 -spec start_link() -> {ok, pid()} | ignore | {error, term()}.
@@ -37,9 +41,9 @@ start_link() ->
 %% @private
 -spec init([]) -> {ok, #state{}}.
 init([]) ->
-    ready(),
-    timer:send_after(?REFRESH_INTERVAL, ?REFRESH_MESSAGE),
-    {ok, #state{}}.
+    {ok, _} = timer:send_after(?REFRESH_INTERVAL, ?REFRESH_MESSAGE),
+    Timer = schedule_kill(),
+    {ok, #state{kill_timer = Timer}}.
 
 %% @private
 -spec handle_call(term(), {pid(), term()}, #state{}) ->
@@ -58,10 +62,14 @@ handle_cast(Msg, State) ->
 
 %% @private
 -spec handle_info(term(), #state{}) -> {noreply, #state{}}.
-handle_info(?REFRESH_MESSAGE, State) ->
-    wakeup_watchdog(),
-    timer:send_after(?REFRESH_INTERVAL, ?REFRESH_MESSAGE),
-    {noreply, State};
+handle_info(?REFRESH_MESSAGE, State = #state{kill_timer = KillTimer}) ->
+    lager:debug("Waking up watchdog"),
+    {ok, Timer1} = timer:kill_after(?REFRESH_INTERVAL * 4),
+    ok = healthcheck(),
+    timer:cancel(Timer1),
+    {ok, _} = timer:send_after(?REFRESH_INTERVAL, ?REFRESH_MESSAGE),
+    timer:cancel(KillTimer),
+    {noreply, State#state{kill_timer = schedule_kill()}};
 handle_info(Msg, State) ->
     lager:warning("Unhandled messages: ~p", [Msg]),
     {noreply, State}.
@@ -76,40 +84,10 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-%% API
-systemd_enabled() ->
-    case os:find_executable("systemd-notify") of
-        false ->
-            false;
-        ExecPath ->
-            ExecPath
-    end.
-
-
-wakeup_watchdog() ->
-    case systemd_enabled() of
-        false ->
-            ok;
-        ExecPath ->
-            ok = healthcheck(),
-            os:cmd(systemd_command(ExecPath, "WATCHDOG=1"))
-    end.
-
-
-
-ready() ->
-    case systemd_enabled() of
-        false ->
-            ok;
-        ExecPath ->
-            os:cmd(systemd_command(ExecPath, "READY=1 WATCHDOG=1"))
-    end.
-
-
-systemd_command(ExecPath, Opts) ->
-    Pid = os:getpid(),
-    lists:flatten(io_lib:format("~s MAINPID=~s ~s", [ExecPath, Pid, Opts])).
-
+schedule_kill() ->
+    KillCmd = lists:flatten(io_lib:format("kill -9 ~s", [os:getpid()])),
+    {ok, Timer} = timer:apply_after(?REFRESH_INTERVAL * 2, os, cmd, [KillCmd]),
+    Timer.
 
 healthcheck() ->
     ok = maybe_udp_healthcheck(),
