@@ -12,7 +12,7 @@
 
 -define(SERVER, ?MODULE).
 
--define(TIMEOUT, 5000).
+-define(TIMEOUT, 3000).
 
 -include("dcos_dns.hrl").
 
