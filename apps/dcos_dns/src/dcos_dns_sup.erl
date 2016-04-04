@@ -51,14 +51,24 @@ init([]) ->
         modules => [dcos_dns_handler_sup]
     },
 
+    SystemdSup = #{
+        id => dcos_dns_systemd,
+        start => {dcos_dns_systemd, start_link, []},
+        restart => permanent,
+        shutdown => 5000,
+        type => worker,
+        modules => [dcos_dns_systemd]
+    },
     %% Configure metrics.
     dcos_dns_metrics:setup(),
 
     %% Setup ready.spartan zone / record
     ok = dcos_dns_zone_setup(),
 
-    Children = [HandlerSup, ZkRecordServer, ConfigLoaderServer],
+    %% Systemd Sup intentionally goes last
+    Children = [HandlerSup, ZkRecordServer, ConfigLoaderServer, SystemdSup],
     Children1 = maybe_add_udp_servers(Children),
+
     %% The top level sup should never die.
     {ok, { {one_for_all, 10000, 1}, Children1} }.
 
@@ -66,9 +76,10 @@ init([]) ->
 %% Internal functions
 %%====================================================================
 
+
 %% @private
 maybe_add_udp_servers(Children) ->
-    case application:get_env(?APP, udp_server_enabled, true) of
+    case dcos_dns_config:udp_enabled() of
         true ->
             udp_servers() ++ Children;
         false ->

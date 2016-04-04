@@ -27,7 +27,7 @@
          waiting_for_rest_replies/2]).
 
 %% Private utility functions
--export([do_resolve/3]).
+-export([resolve/3]).
 
 %% API
 -export([start_link/2]).
@@ -61,6 +61,11 @@ start_link(From, Data) ->
 
 %% @private
 init([From, Data]) ->
+    %% My fate is sealed
+    %% I must die
+    %% This is a result of DCOS-5858... Bugs happen.
+    timer:exit_after(?TIMEOUT * 3, timeout_kill),
+    timer:kill_after(?TIMEOUT * 4),
     process_flag(trap_exit, true),
     case From of
         {dcos_dns_tcp_handler, Pid} when is_pid(Pid) ->
@@ -93,12 +98,15 @@ handle_info({'EXIT', FromPid, _Reason}, StateName,
     Upstream = lists:keyfind(FromPid, 2, OutstandingUpstreams0),
     dcos_dns_metrics:update([?MODULE, Upstream, failures], 1, ?COUNTER),
     OutstandingUpstreams = lists:keydelete(Upstream, 1, OutstandingUpstreams0),
-    {next_state, StateName, State#state{outstanding_upstreams=OutstandingUpstreams}};
+    {next_state, StateName, State#state{outstanding_upstreams=OutstandingUpstreams}, ?TIMEOUT};
 handle_info(Info, StateName, State) ->
     lager:debug("Got info: ~p", [Info]),
-    {next_state, StateName, State}.
+    {next_state, StateName, State, ?TIMEOUT}.
 
 %% @private
+terminate(timeout_kill, _StateName, _State) ->
+    dcos_dns_metrics:update([?APP, timeout_kill], 1, ?COUNTER),
+    ok;
 terminate(_Reason, _StateName, #state{from=From}) ->
     case From of
         {dcos_dns_tcp_handler, Pid} when is_pid(Pid) ->
@@ -130,7 +138,7 @@ execute(timeout, State = #state{data = Data}) ->
             {ok, QueryUpstreams} = take_upstreams(Upstreams0),
             OutstandingUpstreams = lists:map(fun(Upstream) ->
                             Pid = spawn_link(?MODULE,
-                                             do_resolve,
+                                             resolve,
                                              [self(), Upstream, State]),
                             {Upstream, Pid}
                             end, QueryUpstreams),
@@ -147,7 +155,6 @@ wait_for_reply({upstream_reply, Upstream, ReplyData},
 
     %% Reply immediately.
     reply_success(ReplyData, State),
-    dcos_dns_metrics:update([?MODULE, Upstream, successes], 1, ?COUNTER),
 
     %% Then, record latency metrics after response.
     Timestamp = os:timestamp(),
@@ -209,8 +216,24 @@ reply_fail(_State1 = #state{dns_message = DNSMessage, from = {FromModule, FromKe
     FromModule:do_reply(FromKey, EncodedReply).
 
 %% @private
+resolve(Parent, Upstream, State) ->
+    try do_resolve(Parent, Upstream, State) of
+        _ ->
+            ok
+    catch
+        exit:Exception ->
+            lager:warning("Resolver (~p) Process exited: ~p", [Upstream, erlang:get_stacktrace()]),
+            %% Reraise the exception
+            exit(Exception);
+        _:_ ->
+            lager:warning("Resolver (~p) Process exited: ~p", [Upstream, erlang:get_stacktrace()]),
+            exit(unknown_error)
+    end.
+
 do_resolve(Parent, Upstream = {UpstreamIP, UpstreamPort}, #state{data = Data, from = {dcos_dns_udp_server, _}}) ->
+    {ok, _} = timer:kill_after(?TIMEOUT),
     {ok, Socket} = gen_udp:open(0, [{reuseaddr, true}, {active, once}, binary]),
+    link(Socket),
     gen_udp:send(Socket, UpstreamIP, UpstreamPort, Data),
     %% Should put a timeout here given we're linked to our parents?
     receive
@@ -222,12 +245,16 @@ do_resolve(Parent, Upstream = {UpstreamIP, UpstreamPort}, #state{data = Data, fr
         after ?TIMEOUT ->
             lager:debug("Timed out waiting for upstream: ~p", [Upstream])
     end,
-    gen_udp:close(Socket);
+    gen_udp:close(Socket),
+    ok;
 
 %% @private
 do_resolve(Parent, Upstream = {UpstreamIP, UpstreamPort}, #state{data = Data, from = {dcos_dns_tcp_handler, _}}) ->
-    {ok, Socket} = gen_tcp:connect(UpstreamIP, UpstreamPort, [{active, once}, binary, {packet, 2}]),
-    gen_tcp:send(Socket, Data),
+    {ok, _} = timer:kill_after(?TIMEOUT),
+    TCPOptions = [{active, once}, binary, {packet, 2}, {send_timeout, 1000}],
+    {ok, Socket} = gen_tcp:connect(UpstreamIP, UpstreamPort, TCPOptions, ?TIMEOUT),
+    link(Socket),
+    ok = gen_tcp:send(Socket, Data),
     %% Should put a timeout here given we're linked to our parents?
     receive
         {tcp, Socket, ReplyData} ->
@@ -235,7 +262,8 @@ do_resolve(Parent, Upstream = {UpstreamIP, UpstreamPort}, #state{data = Data, fr
     after ?TIMEOUT ->
         ok
     end,
-    gen_tcp:close(Socket).
+    gen_tcp:close(Socket),
+    ok.
 
 %% @private
 take_upstreams(Upstreams0) ->

@@ -62,9 +62,9 @@ wait_for_reqid(ReqID, Timeout) ->
 
 %% @private
 maybe_start_tcp_listener() ->
-    case application:get_env(?APP, tcp_server_enabled, true) of
+    case dcos_dns_config:tcp_enabled() of
         true ->
-            Port = application:get_env(?APP, tcp_port, 5454),
+            Port = dcos_dns_config:tcp_port(),
             Acceptors = 100,
             Options = [{port, Port}],
             {ok, _} = ranch:start_listener(?TCP_LISTENER_NAME,
