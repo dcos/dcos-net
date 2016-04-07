@@ -27,7 +27,7 @@
                               generate_record/1,
                               ceiling/1]}]).
 
--define(REFRESH_INTERVAL, 1000).
+-define(REFRESH_INTERVAL, 10000).
 -define(REFRESH_MESSAGE,  refresh).
 
 -include("dcos_dns.hrl").
