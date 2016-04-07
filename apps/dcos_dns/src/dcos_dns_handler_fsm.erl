@@ -294,6 +294,8 @@ take_upstreams(Upstreams0) ->
     %% We know there will be at least two Upstreams in it
     {_Buckets, UpstreamBuckets} = lists:unzip(Buckets0),
     case UpstreamBuckets of
+        [Bucket0] ->
+            choose2(Bucket0);
         [Bucket0|_] when length(Bucket0) > 2 ->
             choose2(Bucket0);
         [Bucket0, Bucket1|_] ->
