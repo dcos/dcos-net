@@ -20,22 +20,22 @@ update(Metric, Value, Type) ->
 %% @doc Configure all metrics.
 setup() ->
     %% Successes and failures for the UDP server.
-    ok = exometer:ensure([dcos_dns_udp_server, successes], ?COUNTER, []),
-    ok = exometer:ensure([dcos_dns_udp_server, failures], ?COUNTER, []),
+    ok = exometer:ensure([dcos_dns_udp_server, successes], ?SPIRAL, []),
+    ok = exometer:ensure([dcos_dns_udp_server, failures], ?SPIRAL, []),
 
     %% Successes and failures for the TCP server.
-    ok = exometer:ensure([dcos_dns_tcp_handler, successes], ?COUNTER, []),
-    ok = exometer:ensure([dcos_dns_tcp_handler, failures], ?COUNTER, []),
+    ok = exometer:ensure([dcos_dns_tcp_handler, successes], ?SPIRAL, []),
+    ok = exometer:ensure([dcos_dns_tcp_handler, failures], ?SPIRAL, []),
 
     %% Number of queries received where we've answered only one of
     %% multiple questions presented.
-    ok = exometer:ensure([dcos_dns, ignored_questions], ?COUNTER, []),
+    ok = exometer:ensure([dcos_dns, ignored_questions], ?SPIRAL, []),
 
     %% No upstreams responded.
-    ok = exometer:ensure([dcos_dns, upstreams_failed], ?COUNTER, []),
+    ok = exometer:ensure([dcos_dns, upstreams_failed], ?SPIRAL, []),
 
     %% No upstreams available.
-    ok = exometer:ensure([dcos_dns, no_upstreams_available], ?COUNTER, []),
+    ok = exometer:ensure([dcos_dns, no_upstreams_available], ?SPIRAL, []),
 
     %% Number of times the dcos_dns_handler_fsm fell into being killed by a timer
-    ok = exometer:ensure([dcos_dns, timeout_kill], ?COUNTER, []).
+    ok = exometer:ensure([dcos_dns, timeout_kill], ?SPIRAL, []).
