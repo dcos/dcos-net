@@ -161,6 +161,8 @@ foreign_to_foreign_test() ->
   VIPs = orddict:store(VIP, [Backend], []),
   dcos_l4lb_vip_server:push_vips(VIPs),
   {ok, _} = dcos_l4lb_ewma:start_link(),
+  {ok, TreePid} = lashup_gm_route:start_link(),
+  unlink(TreePid),
 
   meck:new(dcos_l4lb_iface_server),
   meck:expect(dcos_l4lb_iface_server, is_local, fun is_local/1),
@@ -177,6 +179,7 @@ foreign_to_foreign_test() ->
   ?assertEqual({ok, ExpectedMapping}, to_mapping(Packet)),
   meck:unload(),
   ok = gen_server:call(dcos_l4lb_vip_server, stop),
-  ok = gen_server:call(dcos_l4lb_ewma, stop).
+  ok = gen_server:call(dcos_l4lb_ewma, stop),
+  gen_server:stop(TreePid, shutdown, 5000).
 
 -endif.

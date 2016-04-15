@@ -10,6 +10,7 @@
 %% ===================================================================
 
 start(_StartType, _StartArgs) ->
+    {ok, _} = application:ensure_all_started(exometer_core),
     dcos_l4lb_metrics:setup(),
     dcos_l4lb_sup:start_link().
 
