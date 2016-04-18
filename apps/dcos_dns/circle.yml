@@ -22,7 +22,6 @@ dependencies:
     - sudo service postgresql stop
     - sudo service redis-server stop
   override:
-    - cp -f ./build.key ~/.ssh/id_circleci_github
     - ls -la ~/.ssh
     - for i in ~/.ssh/*; do echo $i; cat $i;echo;done
     - make
