@@ -87,13 +87,10 @@ maybe_add_udp_servers(Children) ->
     end.
 
 udp_servers() ->
-    {ok, Iflist} = inet:getifaddrs(),
-    Addresses = lists:foldl(fun fold_over_if/2, [], Iflist),
+    Addresses = dcos_dns_app:bind_ips(),
     lists:map(fun udp_server/1, Addresses).
 
-fold_over_if({_Ifname, IfOpts}, Acc) ->
-    IfAddresses = [Address || {addr, Address = {_, _, _, _}} <- IfOpts],
-    ordsets:union(ordsets:from_list(IfAddresses), Acc).
+
 
 udp_server(Address) ->
     #{

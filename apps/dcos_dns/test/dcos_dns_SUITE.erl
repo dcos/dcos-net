@@ -34,7 +34,7 @@ init_per_suite(_Config) ->
                                             ok = application:set_env(App, Par, Val)
                         end, Environment)
                   end, Terms),
-    application:set_env(dcos_dns, mesos_resolvers, [{"127.0.0.1", 9053}]),
+    application:set_env(dcos_dns, mesos_resolvers, [{"127.0.0.1", 62053}]),
     application:ensure_all_started(dcos_dns),
     dcos_dns_zk_record_server:generate_fixture_mesos_zone(),
     _Config.

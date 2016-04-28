@@ -12,9 +12,9 @@
 -include("dcos_dns.hrl").
 
 %% API
--export([udp_enabled/0, tcp_enabled/0, tcp_port/0, udp_port/0]).
+-export([udp_enabled/0, tcp_enabled/0, tcp_port/0, udp_port/0, bind_interface/0]).
 udp_enabled() ->
-    application:get_env(?APP, tcp_server_enabled, true).
+    application:get_env(?APP, udp_server_enabled, true).
 
 tcp_enabled() ->
     application:get_env(?APP, tcp_server_enabled, true).
@@ -24,3 +24,6 @@ tcp_port() ->
 
 udp_port() ->
     application:get_env(?APP, udp_port, 5454).
+
+bind_interface() ->
+    application:get_env(?APP, bind_interface, undefined).

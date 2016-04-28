@@ -112,8 +112,9 @@ maybe_udp_healthcheck() ->
 
 tcp_healthcheck() ->
     TCPPort = dcos_dns_config:tcp_port(),
+    HealthcheckIP = healtcheck_ip(),
     DNSOpts = [
-        {nameservers, [{{127, 0, 0, 1}, TCPPort}]},
+        {nameservers, [{HealthcheckIP, TCPPort}]},
         {timeout, 1000},
         {usevc, true}
     ],
@@ -123,12 +124,16 @@ tcp_healthcheck() ->
 
 udp_healthcheck() ->
     UDPPort = dcos_dns_config:udp_port(),
+    HealthcheckIP = healtcheck_ip(),
     DNSOpts = [
-        {nameservers, [{{127, 0, 0, 1}, UDPPort}]},
+        {nameservers, [{HealthcheckIP, UDPPort}]},
         {timeout, 1000},
         {usevc, false}
     ],
     [{127, 0, 0, 1}] = inet_res:lookup("ready.spartan", in, a, DNSOpts),
     ok.
 
-
+healtcheck_ip() ->
+    BindIPs = dcos_dns_app:bind_ips(),
+    N = rand:uniform(length(BindIPs)),
+    lists:nth(N, BindIPs).
