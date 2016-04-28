@@ -13,3 +13,8 @@
 
 +C multi_time_warp
 +c true
+
+-epmd_port 61420
+
+-connect_all false
+
