@@ -1,6 +1,6 @@
 -name spartan@127.0.0.1
 
--setcookie spartan
+-setcookie minuteman
 
 ## Increase number of concurrent ports/sockets
 -env ERL_MAX_PORTS 100000
