@@ -20,7 +20,7 @@
 -export([start/2, stop/1, wait_for_reqid/2]).
 
 %% API
--export([parse_ipv4_address/1]).
+-export([parse_ipv4_address/1, bind_ips/0]).
 
 %%====================================================================
 %% API
@@ -45,9 +45,31 @@ parse_ipv4_address(Value) ->
     {ok, IP} = inet:parse_ipv4_address(Value),
     IP.
 
+%% @doc Gets the IPs to bind to
+bind_ips() ->
+    IFs0 = get_ip_interfaces(),
+    case dcos_dns_config:bind_interface() of
+        undefined ->
+            [Addr || {_IfName, Addr} <- IFs0];
+        ConfigInterfaceName ->
+            IFs1 = lists:filter(fun({IfName, _Addr}) -> string:equal(IfName, ConfigInterfaceName) end, IFs0),
+            [Addr || {_IfName, Addr} <- IFs1]
+    end.
+
 %%====================================================================
 %% Internal functions
 %%====================================================================
+
+%% @doc Gets all the IPs for the machine
+-spec(get_ip_interfaces() -> [{InterfaceName :: string(), inet:ipv4_address()}]).
+get_ip_interfaces() ->
+    %% The list comprehension makes it so we only get IPv4 addresses
+    {ok, Iflist} = inet:getifaddrs(),
+    lists:foldl(fun fold_over_if/2, [], Iflist).
+
+fold_over_if({IfName, IfOpts}, Acc) ->
+    IfAddresses = [{IfName, Address} || {addr, Address = {_, _, _, _}} <- IfOpts],
+    ordsets:union(ordsets:from_list(IfAddresses), Acc).
 
 %% @doc Wait for a response.
 wait_for_reqid(ReqID, Timeout) ->
@@ -64,19 +86,22 @@ wait_for_reqid(ReqID, Timeout) ->
 maybe_start_tcp_listener() ->
     case dcos_dns_config:tcp_enabled() of
         true ->
-            Port = dcos_dns_config:tcp_port(),
-            Acceptors = 100,
-            Options = [{port, Port}],
-            {ok, _} = ranch:start_listener(?TCP_LISTENER_NAME,
-                                           Acceptors,
-                                           ranch_tcp,
-                                           Options,
-                                           dcos_dns_tcp_handler,
-                                           []);
+            IPs = dcos_dns_app:bind_ips(),
+            lists:foreach(fun start_tcp_listener/1, IPs);
         false ->
             ok
     end.
 
+start_tcp_listener(IP) ->
+    Port = dcos_dns_config:tcp_port(),
+    Acceptors = 100,
+    Options = [{port, Port}, {ip, IP}],
+    {ok, _} = ranch:start_listener({?TCP_LISTENER_NAME, IP},
+        Acceptors,
+        ranch_tcp,
+        Options,
+        dcos_dns_tcp_handler,
+        []).
 % A normal configuration would look something like:
 %{
 %   "upstream_resolvers": ["169.254.169.253"],
@@ -101,6 +126,8 @@ process_config_tuple({<<"upstream_resolvers">>, UpstreamResolvers}) ->
     UpstreamResolverIPs = lists:map(fun parse_ipv4_address/1, UpstreamResolvers),
     ConfigValue = [{UpstreamResolverIP, 53} || UpstreamResolverIP <- UpstreamResolverIPs],
     application:set_env(?APP, upstream_resolvers, ConfigValue);
+process_config_tuple({Key, Value}) when is_binary(Value) ->
+    application:set_env(?APP, binary_to_atom(Key, utf8), binary_to_list(Value));
 process_config_tuple({Key, Value}) ->
     application:set_env(?APP, binary_to_atom(Key, utf8), Value).
 
