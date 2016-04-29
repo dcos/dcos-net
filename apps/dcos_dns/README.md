@@ -15,7 +15,7 @@ Spartan itself is very simple. Spartan itself has the dual-dispatch logic, and a
 Spartan learns its information from Exhibitor. For this reason, it is critical that Exhibitor is configured correctly on the masters. Alternatively, if the cluster is configured using static masters, it will load them from the static configuration file. 
 
 ## Zookeeper
-Spartan also enables high availability of Zookeepers. You can always use the addresses `zk-1.zk`, `zk-2.zk`, `zk-3.zk`, `zk-4.zk`, `zk-5.zk`. If there are fewer than 5 Zookeepers, we will point multipel records at a single Zookeeper. 
+Spartan also enables high availability of Zookeepers. You can always use the addresses `zk-1.zk`, `zk-2.zk`, `zk-3.zk`, `zk-4.zk`, `zk-5.zk`. If there are fewer than 5 Zookeepers, we will point multiple records at a single Zookeeper. 
 
 ## Watchdog
 Since DNS is such a specialized, sensitive subsystem we've chosen to protect it with a watchdog. There is a service installed on each node that runs every 5 minutes and checks whether or not it can query `ready.spartan`. To avoid harmonic effects, it sleeps for 1 minute past its initial start time to avoid racing spartan. 
