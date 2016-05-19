@@ -41,6 +41,7 @@ add_default_children(Children) ->
         ?CHILD(dcos_l4lb_ipsets, worker),
         ?CHILD(dcos_l4lb_vip_server, worker),
         ?CHILD(dcos_l4lb_metric_cleaner, worker),
+        ?CHILD(dcos_l4lb_lashup_vip_listener, worker),
         ?CHILD(dcos_l4lb_mesos_poller, worker),
         ?CHILD(dcos_l4lb_lashup_publish, worker),
         ?CHILD(dcos_l4lb_lashup_index, worker)|

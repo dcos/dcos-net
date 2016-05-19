@@ -83,3 +83,5 @@
   dcos_l4lb_ct_8
   ]
 ).
+
+-define(VIPS_KEY, [minuteman, vips]).
