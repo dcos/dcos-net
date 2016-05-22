@@ -15,7 +15,7 @@ upstreams_from_questions([#dns_query{name=Name}]) ->
     LowerName = dns:dname_to_lower(Name),
     Labels = dns:dname_to_labels(LowerName),
     ReversedLabels = lists:reverse(Labels),
-    lists:map(fun normalize_ip/1, upstream_from_labels(ReversedLabels));
+    lists:map(fun normalize_ip/1, find_upstream(Name, ReversedLabels));
 
 %% There is more than one question. This is beyond our capabilities at the moment
 upstreams_from_questions([Question|Others]) ->
@@ -68,11 +68,16 @@ default_resolvers() ->
     application:get_env(?APP, upstream_resolvers, Defaults).
 
 %% @private
-upstream_from_labels([<<"mesos">>|_]) ->
+find_upstream(_Name, [<<"mesos">>|_]) ->
     mesos_resolvers();
-upstream_from_labels([<<"zk">>|_]) ->
+find_upstream(_Name, [<<"zk">>|_]) ->
     erldns_resolvers();
-upstream_from_labels([<<"spartan">>|_]) ->
+find_upstream(_Name, [<<"spartan">>|_]) ->
     erldns_resolvers();
-upstream_from_labels(_) ->
-    default_resolvers().
+find_upstream(Name, _Labels) ->
+    case erldns_zone_cache:get_authority(Name) of
+        {ok, [#dns_rr{}]} ->
+            erldns_resolvers();
+        _ ->
+            default_resolvers()
+    end.
