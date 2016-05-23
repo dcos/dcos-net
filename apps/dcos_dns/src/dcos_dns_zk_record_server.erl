@@ -120,14 +120,16 @@ retrieve_state() ->
 %% @private
 %% @doc Retrieve state from the Mesos master about where the Zookeeper
 %%      instances are.
--spec retrieve_state() -> {ok, map()} | {error, unavailable}.
+-spec retrieve_state() -> {ok, [map()]} | {error, unavailable}.
 retrieve_state() ->
     case os:getenv("MESOS_FIXTURE", "false") of
         "false" ->
             Url = application:get_env(?APP, exhibitor_url, ?DEFAULT_EXHIBITOR_URL),
             case httpc:request(get, {Url, []}, [], [{body_format, binary}]) of
                 {ok, {{_, 200, _}, _, Body}} ->
-                    {ok, jsx:decode(Body, [return_maps])};
+                    DecodedJSON = jsx:decode(Body, [return_maps]),
+                    true = is_list(DecodedJSON),
+                    {ok, DecodedJSON};
                 Error ->
                     lager:info("Failed to retrieve information from exhibitor: ~p", [Error]),
                     {error, unavailable}
