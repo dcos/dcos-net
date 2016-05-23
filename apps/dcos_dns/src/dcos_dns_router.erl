@@ -68,6 +68,7 @@ default_resolvers() ->
     application:get_env(?APP, upstream_resolvers, Defaults).
 
 %% @private
+-spec(find_upstream(Name :: binary(), Labels :: [binary()]) -> [{string(), inet:port_number()}]).
 find_upstream(_Name, [<<"mesos">>|_]) ->
     mesos_resolvers();
 find_upstream(_Name, [<<"zk">>|_]) ->
@@ -76,7 +77,7 @@ find_upstream(_Name, [<<"spartan">>|_]) ->
     erldns_resolvers();
 find_upstream(Name, _Labels) ->
     case erldns_zone_cache:get_authority(Name) of
-        {ok, [#dns_rr{}]} ->
+        {ok, _} ->
             erldns_resolvers();
         _ ->
             default_resolvers()
