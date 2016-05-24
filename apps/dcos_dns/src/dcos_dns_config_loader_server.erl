@@ -25,7 +25,8 @@
 
 -include("dcos_dns.hrl").
 
--define(REFRESH_INTERVAL, 5000).
+-define(REFRESH_INTERVAL_NORMAL, 120000).
+-define(REFRESH_INTERVAL_FAIL, 5000).
 -define(REFRESH_MESSAGE,  refresh).
 -define(MESOS_DNS_PORT, 61053).
 
@@ -72,8 +73,14 @@ handle_cast(Msg, State) ->
 %% @private
 -spec handle_info(term(), #state{}) -> {noreply, #state{}}.
 handle_info(?REFRESH_MESSAGE, State) ->
-    maybe_load_masters(),
-    timer:send_after(?REFRESH_INTERVAL, ?REFRESH_MESSAGE),
+    NormalRefreshInterval = application:get_env(?APP, masters_refresh_interval_normal, ?REFRESH_INTERVAL_NORMAL),
+    FailRefreshInterval = application:get_env(?APP, masters_refresh_interval_fail, ?REFRESH_INTERVAL_FAIL),
+    case maybe_load_masters() of
+        ok ->
+            {ok, _} = timer:send_after(NormalRefreshInterval, ?REFRESH_MESSAGE);
+        error ->
+            {ok, _} = timer:send_after(FailRefreshInterval, ?REFRESH_MESSAGE)
+    end,
     {noreply, State};
 handle_info(Msg, State) ->
     lager:warning("Unhandled messages: ~p", [Msg]),
@@ -98,9 +105,10 @@ code_change(_OldVsn, State, _Extra) ->
 maybe_load_masters() ->
     case get_masters() of
         {ok, Masters} ->
-            application:set_env(?APP, mesos_resolvers, Masters);
+            application:set_env(?APP, mesos_resolvers, Masters),
+            ok;
         {error, _} ->
-            ok
+            error
     end.
 
 get_masters() ->

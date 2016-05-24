@@ -102,19 +102,46 @@ udp_server(Address) ->
         modules => [dcos_dns_udp_server]
     }.
 
+
 dcos_dns_zone_setup() ->
-    SOA = #dns_rr{
-        name = <<"spartan">>,
-        type = ?DNS_TYPE_SOA,
-        ttl = 5
-    },
-    RR = #dns_rr{
-        name = <<"ready.spartan">>,
-        type = ?DNS_TYPE_A,
-        ttl = 5,
-        data = #dns_rrdata_a{ip = {127, 0, 0, 1}}
-    },
-    Records = [SOA, RR],
+    Records = [
+        #dns_rr{
+            name = <<"spartan">>,
+            type = ?DNS_TYPE_SOA,
+            ttl = 5,
+            data = #dns_rrdata_soa{
+                mname = <<"ns.spartan">>, %% Nameserver
+                rname = <<"support.mesosphere.com">>,
+                serial = 0,
+                refresh = 60,
+                retry = 180,
+                expire = 86400,
+                minimum = 1
+            }
+        },
+        #dns_rr{
+            name = <<"ready.spartan">>,
+            type = ?DNS_TYPE_A,
+            ttl = 5,
+            data = #dns_rrdata_a{ip = {127, 0, 0, 1}}
+        },
+        #dns_rr{
+            name = <<"ns.spartan">>,
+            type = ?DNS_TYPE_A,
+            ttl = 5,
+            data = #dns_rrdata_a{
+                ip = {198, 51, 100, 1} %% Default dcos_dns IP
+            }
+        },
+        #dns_rr{
+            name = <<"spartan">>,
+            type = ?DNS_TYPE_NS,
+            ttl = 3600,
+            data = #dns_rrdata_ns{
+                dname = <<"ns.spartan">>
+            }
+        }
+    ],
     Sha = crypto:hash(sha, term_to_binary(Records)),
     case catch erldns_zone_cache:put_zone({<<"spartan">>, Sha, Records}) of
         ok ->
