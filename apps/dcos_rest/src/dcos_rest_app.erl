@@ -3,20 +3,23 @@
 %% @end
 %%%-------------------------------------------------------------------
 
--module(dcos_net_app).
+-module(dcos_rest_app).
 
 -behaviour(application).
 
 %% Application callbacks
--export([start/2
-        ,stop/1]).
+-export([
+    start/2,
+    stop/1
+]).
 
 %%====================================================================
 %% API
 %%====================================================================
 
 start(_StartType, _StartArgs) ->
-    'dcos_net_sup':start_link().
+    setup_cowboy(),
+    dcos_rest_sup:start_link().
 
 %%--------------------------------------------------------------------
 stop(_State) ->
@@ -25,3 +28,13 @@ stop(_State) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
+setup_cowboy() ->
+    Dispatch = cowboy_router:compile([
+        {'_', [
+            {"/lashup/kv/[...]", dcos_rest_lashup_handler, []}
+        ]}
+    ]),
+    Port = application:get_env(navstar, port, 62080),
+    {ok, _} = cowboy:start_http(http, 100, [{port, Port}], [
+        {env, [{dispatch, Dispatch}]}
+    ]).

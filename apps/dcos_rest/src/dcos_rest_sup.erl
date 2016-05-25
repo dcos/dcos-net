@@ -3,7 +3,7 @@
 %% @end
 %%%-------------------------------------------------------------------
 
--module('dcos_net_sup').
+-module(dcos_rest_sup).
 
 -behaviour(supervisor).
 

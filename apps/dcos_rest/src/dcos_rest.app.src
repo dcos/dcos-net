@@ -1,0 +1,20 @@
+{application, dcos_rest,
+    [{description, "An OTP application"},
+        {vsn, "0.1.0"},
+        {registered, []},
+        {mod, {dcos_rest_app, []}},
+        {applications,
+            [
+                kernel,
+                stdlib,
+                lashup,
+                jsx,
+                cowboy
+            ]},
+        {env,[]},
+        {modules, []},
+
+        {contributors, []},
+        {licenses, []},
+        {links, []}
+    ]}.
