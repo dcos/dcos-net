@@ -79,9 +79,9 @@ fetch_key(Key, Req, State) ->
     {<<>>, Req2, State}.
 
 key(Req) ->
-    ContentType = cowboy_req:header(<<"key-handler">>, Req),
+    KeyHandler = cowboy_req:header(<<"key-handler">>, Req),
     KeyData = cowboy_req:path_info(Req),
-    key(KeyData, ContentType).
+    key(KeyData, KeyHandler).
 
 key([], _) ->
     erlang:throw(invalid_key);
@@ -107,5 +107,24 @@ encode_key(Value) when is_binary(Value) ->
 encode_key(Value) when is_list(Value) ->
     #{
         type => string,
-        value => Value
+        value => list_to_binary(lists:flatten(Value))
+    };
+%% Probably an IP address?
+encode_key(IP = {A, B, C, D}) when is_integer(A) andalso is_integer(B) andalso is_integer(C) andalso is_integer(D)
+    andalso A >= 0 andalso B >= 0 andalso C >= 0 andalso D >= 0
+    andalso A =< 255 andalso B =< 255 andalso C =< 255 andalso D =< 255 ->
+    #{
+        type => ipaddress_tuple,
+        value => list_to_binary(lists:flatten(inet:ntoa(IP)))
+    };
+encode_key(Value) when is_tuple(Value) ->
+    #{
+        type => tuple,
+        value => list_to_binary(lists:flatten(io_lib:format("~p", [Value])))
+    };
+encode_key(Value) when is_tuple(Value) ->
+    #{
+        type => unknown,
+        value => list_to_binary(lists:flatten(io_lib:format("~p", [Value])))
     }.
+
