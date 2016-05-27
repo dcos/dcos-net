@@ -6,7 +6,10 @@
   {applications,
    [kernel,
     stdlib,
-    dcos_rest
+    dcos_rest,
+    dcos_dns,
+    lashup,
+    lager
    ]},
   {env,[]},
   {modules, []},

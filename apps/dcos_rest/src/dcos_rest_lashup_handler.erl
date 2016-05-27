@@ -58,7 +58,9 @@ perform_op(Key, Update, Clock, Req, State) ->
             Value1 = lists:map(fun encode_key/1, Value0),
             Body = jsx:encode(Value1),
             Req2 = cowboy_req:reply(200, [], Body, Req),
-            {<<>>, Req2, State}
+            {<<>>, Req2, State};
+        {error, concurrency} ->
+            {{false, <<"Concurrent update">>}, Req, State}
     end.
 
     %io:format("HeaderVal: ~p", [HeaderVal]),
