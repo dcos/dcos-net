@@ -8,7 +8,8 @@
                 kernel,
                 stdlib,
                 mesos_state,
-                lashup
+                lashup,
+                inets
             ]},
         {env,[]},
         {modules, []},
