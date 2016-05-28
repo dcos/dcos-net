@@ -1,0 +1,158 @@
+/**
+ * This file is © 2014 Mesosphere, Inc. (“Mesosphere”). Mesosphere
+ * licenses this file to you solely pursuant to the following terms
+ * (and you may not use this file except in compliance with such
+ * terms):
+ *
+ * 1) Subject to your compliance with the following terms, Mesosphere
+ * hereby grants you a nonexclusive, limited, personal,
+ * non-sublicensable, non-transferable, royalty-free license to use
+ * this file solely for your internal business purposes.
+ *
+ * 2) You may not (and agree not to, and not to authorize or enable
+ * others to), directly or indirectly:
+ *   (a) copy, distribute, rent, lease, timeshare, operate a service
+ *   bureau, or otherwise use for the benefit of a third party, this
+ *   file; or
+ *
+ *   (b) remove any proprietary notices from this file.  Except as
+ *   expressly set forth herein, as between you and Mesosphere,
+ *   Mesosphere retains all right, title and interest in and to this
+ *   file.
+ *
+ * 3) Unless required by applicable law or otherwise agreed to in
+ * writing, Mesosphere provides this file on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied,
+ * including, without limitation, any warranties or conditions of
+ * TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+ * PARTICULAR PURPOSE.
+ *
+ * 4) In no event and under no legal theory, whether in tort (including
+ * negligence), contract, or otherwise, unless required by applicable
+ * law (such as deliberate and grossly negligent acts) or agreed to in
+ * writing, shall Mesosphere be liable to you for damages, including
+ * any direct, indirect, special, incidental, or consequential damages
+ * of any character arising as a result of these terms or out of the
+ * use or inability to use this file (including but not limited to
+ * damages for loss of goodwill, work stoppage, computer failure or
+ * malfunction, or any and all other commercial damages or losses),
+ * even if Mesosphere has been advised of the possibility of such
+ * damages.
+ */
+
+package mesos.modules.overlay;
+
+
+message BridgeInfo {
+	// The device name for the bridge.
+  required string name = 1;
+
+	// IP in CIDR format allocated to this bridge. The bridge will act
+	// as a gateway for all containers associated with it.
+  required string ip = 2;
+}
+
+
+message VxLANInfo {
+  required uint32 vni = 1;
+  required string vtep_name = 2;
+  required string vtep_ip = 3;
+  required string vtep_mac = 4;
+}
+
+
+// The different backends that can be used to tunnel ingress and
+// egress traffic.
+message BackendInfo {
+  optional VxLANInfo vxlan = 1;
+}
+
+
+// This message describes a particular overlay network.  There can be
+// multiple overlay networks that exist simultaneously.
+message OverlayInfo {
+  // Canonical name identifying the overlay network.
+  required string name = 1;
+
+  // The subnet associated with this overlay network.
+  required string subnet = 2;
+
+  // The prefix length used to carve out subnets for Agents, from the
+  // subnet assigned to this overlay.
+  required uint32 prefix = 3;
+}
+
+
+// This message defines the properties of an overlay network that
+// exist on an Agent.
+message AgentOverlayInfo {
+  // The overlay to which this instance belongs.
+  required OverlayInfo info = 1;
+
+  // The subnet of the overlay that is associated with this Agent.
+  // NOTE: This subnet should be a subset of the `overlay` subnet.
+  // TODO(jieyu): We might want to support multiple subnets per agent
+  // in case that agent request more IPs than that's available in that
+  // subnet.
+  required string subnet = 2;
+
+	// The bridges which will be used to support this overlay instance
+	// on this Agent.
+  // TODO(jieyu): Similarly, we might want to have multiple Mesos or
+  // Docker bridges per agent for each overlay.
+  optional BridgeInfo mesos_bridge = 3;
+  optional BridgeInfo docker_bridge = 4;
+
+  // The backend used to tunnel ingress and egress traffic.
+  required BackendInfo backend = 5;
+
+  message State {
+    enum Status {
+      STATUS_INVALID = 0;
+      STATUS_OK = 1;
+      STATUS_FAILED = 2;
+    }
+
+    required Status status = 1;
+    optional string error = 2;
+  }
+
+  optional State state = 6;
+}
+
+
+message AgentInfo {
+  // The IP address of the agent.
+  required string ip = 1;
+
+  // The overlay networks that exist on this agent.
+  repeated AgentOverlayInfo overlays = 2;
+}
+
+
+message State {
+  // The overlay networks that exist in the cluster.
+  repeated OverlayInfo overlays = 1;
+
+  // Agent that run an instance of the overlay networks. On each
+  // Agent there can be at most one instance of each overlay network.
+  repeated AgentInfo agents = 2;
+}
+
+
+// Message describing the parameters required to configure a network on
+// a Mesos cluster. A network can consist of multiple overlay networks
+// with non-overlapping address spaces.
+message NetworkConfig {
+  // The subnet used to allocate IP address to VTEPs on Agents.
+  required string vtep_subnet = 1;
+
+  // The first 24-bits of VTEP MAC address. When the master assigns
+  // VTEPs to Agents it will choose a different lower 24-bit address 
+  // for each Agent.
+  required string vtep_mac_oui = 2;
+
+  // The overlay networks that need to be configured on the DC/OS
+  // cluster.
+  repeated OverlayInfo overlays = 3;
+}
