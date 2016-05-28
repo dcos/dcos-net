@@ -266,18 +266,7 @@ maybe_add_ip_rule(_Overlay = #mesos_state_agentoverlayinfo{info = #mesos_state_o
             ok
     end.
 
-run_command(Command, Opts) ->
-    Cmd = lists:flatten(io_lib:format(Command, Opts)),
-    run_command(Cmd).
 
--spec(run_command(Command :: string()) ->
-    {ok, Output :: string()} | {error, ErrorCode :: non_neg_integer(), ErrorString :: string()}).
-
-run_command("ip link show dev vtep1024") ->
-    {error, 1, ""};
-run_command(Command) ->
-    io:format("Would run command: ~p~n", [Command]),
-    {ok, ""}.
 
 %% Always return an ordered set of masters
 -spec(masters() -> [node()]).
@@ -414,3 +403,57 @@ configure_overlay_entry(Overlay, VTEPIPPrefix = {VTEPIP, _PrefixLen}, LashupValu
     %bridge fdb add to 00:17:42:8a:b4:05 dst 192.19.0.2 dev vxlan0
     {ok, _} = run_command("bridge fdb add to ~s dst ~s dev ~s", [FormattedMAC, FormattedAgentIP, VTEPName]),
     State1.
+
+run_command(Command, Opts) ->
+    Cmd = lists:flatten(io_lib:format(Command, Opts)),
+    run_command(Cmd).
+
+-compile(export_all).
+
+-spec(run_command(Command :: string()) ->
+    {ok, Output :: string()} | {error, ErrorCode :: non_neg_integer(), ErrorString :: string()}).
+-ifdef(DEV).
+run_command("ip link show dev vtep1024") ->
+    {error, 1, ""};
+run_command(Command) ->
+    io:format("Would run command: ~p~n", [Command]),
+    {ok, ""}.
+-else.
+run_command(Command) ->
+    Port = open_port({spawn, Command}, [stream, in, eof, hide, exit_status]),
+    get_data(Port, []).
+
+get_data(Port, Sofar) ->
+    receive
+        {Port, {data, []}} ->
+            get_data(Port, Sofar);
+        {Port, {data, Bytes}} ->
+            get_data(Port, [Sofar|Bytes]);
+        {Port, eof} ->
+            return_data(Port, Sofar)
+    end.
+return_data(Port, Sofar) ->
+    Port ! {self(), close},
+    receive
+        {Port, closed} ->
+            true
+    end,
+    receive
+        {'EXIT',  Port,  _} ->
+            ok
+    after 1 ->              % force context switch
+        ok
+    end,
+    ExitCode =
+        receive
+            {Port, {exit_status, Code}} ->
+                Code
+        end,
+    case ExitCode of
+        0 ->
+            {ok, lists:flatten(Sofar)};
+        _ ->
+            {error, ExitCode, lists:flatten(Sofar)}
+    end.
+
+-endif.
