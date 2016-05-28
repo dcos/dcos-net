@@ -7,7 +7,8 @@
             [
                 kernel,
                 stdlib,
-                mesos_state
+                mesos_state,
+                lashup
             ]},
         {env,[]},
         {modules, []},
