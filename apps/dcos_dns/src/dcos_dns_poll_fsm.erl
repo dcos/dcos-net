@@ -112,11 +112,18 @@ leader({timeout, _Ref, try_master}, State0 = #state{master_list = MasterList0}) 
             {next_state, not_leader, State1}
     end;
 
-leader({timeout, _Ref, poll}, State0 = #state{consecutive_polls = CP}) ->
+leader({timeout, _Ref, poll}, State0 = #state{consecutive_polls = CP, master_list = MasterList0}) ->
     State1 = State0#state{consecutive_polls = CP + 1},
-    State2 = poll(State1),
+    Rep =
+        case poll(State1) of
+            {ok, State2} ->
+                {next_state, leader, State2};
+            {error, _} ->
+                global:del_lock({?MODULE, self()}, MasterList0),
+                {next_state, not_leader, State1}
+        end,
     gen_fsm:start_timer(poll_period(), poll),
-    {next_state, leader, State2}.
+    Rep.
 
 
 leader(_Event, _From, State) ->
@@ -268,5 +275,10 @@ poll(State0) ->
     lager:info("Navstar DNS polling"),
     IP = inet:ntoa(mesos_state:ip()),
     URI = lists:flatten(io_lib:format("http://~s:5050/state", [IP])),
-    {ok, _MAS} = mesos_state_client:poll(URI),
-    State0.
+    case mesos_state_client:poll(URI) of
+        {ok, _MAS0} ->
+            {ok, State0};
+        Error ->
+            lager:warning("Could not poll mesos state: ~p", [Error]),
+            {error, Error}
+    end.

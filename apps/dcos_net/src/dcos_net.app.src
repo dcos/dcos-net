@@ -8,6 +8,7 @@
     stdlib,
     dcos_rest,
     dcos_dns,
+    dcos_overlay,
     lashup,
     lager
    ]},

@@ -18,7 +18,7 @@
 
 start(_StartType, _StartArgs) ->
     load_config(),
-    'dcos_dns_sup':start_link().
+    'dcos_overlay_sup':start_link().
 
 %%--------------------------------------------------------------------
 stop(_State) ->
