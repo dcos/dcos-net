@@ -392,16 +392,21 @@ configure_overlay_entry(Overlay, VTEPIPPrefix = {VTEPIP, _PrefixLen}, LashupValu
     } = Overlay,
     {_, MAC} = lists:keyfind({mac, riak_dt_lwwreg}, 1, LashupValue),
     {_, AgentIP} = lists:keyfind({agent_ip, riak_dt_lwwreg}, 1, LashupValue),
+    {_, {SubnetIP, SubnetPrefixLen}} = lists:keyfind({subnet, riak_dt_lwwreg}, 1, LashupValue),
     FormattedMAC = vtep_mac(MAC),
     FormattedAgentIP = inet:ntoa(AgentIP),
     FormattedVTEPIP = inet:ntoa(VTEPIP),
-
+    FormattedSubnetIP = inet:ntoa(SubnetIP),
 
     %ip neigh replace 5.5.5.5 lladdr ff:ff:ff:ff:ff:ff dev eth0 nud permanent
     {ok, _} = run_command("ip neigh replace ~s lladdr ~s dev ~s nud permanent",
         [FormattedVTEPIP, FormattedMAC, VTEPName]),
     %bridge fdb add to 00:17:42:8a:b4:05 dst 192.19.0.2 dev vxlan0
     {ok, _} = run_command("bridge fdb add to ~s dst ~s dev ~s", [FormattedMAC, FormattedAgentIP, VTEPName]),
+
+    {ok, _} = run_command("ip route add ~s/32 via ~s table 42", [FormattedAgentIP, FormattedVTEPIP]),
+    {ok, _} = run_command("ip route add ~s/~B via ~s", [FormattedSubnetIP, SubnetPrefixLen, FormattedVTEPIP]),
+
     State1.
 
 run_command(Command, Opts) ->
