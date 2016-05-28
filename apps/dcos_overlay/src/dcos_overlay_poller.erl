@@ -402,10 +402,10 @@ configure_overlay_entry(Overlay, VTEPIPPrefix = {VTEPIP, _PrefixLen}, LashupValu
     {ok, _} = run_command("ip neigh replace ~s lladdr ~s dev ~s nud permanent",
         [FormattedVTEPIP, FormattedMAC, VTEPName]),
     %bridge fdb add to 00:17:42:8a:b4:05 dst 192.19.0.2 dev vxlan0
-    {ok, _} = run_command("bridge fdb add to ~s dst ~s dev ~s", [FormattedMAC, FormattedAgentIP, VTEPName]),
+    {ok, _} = run_command("bridge fdb replace to ~s dst ~s dev ~s", [FormattedMAC, FormattedAgentIP, VTEPName]),
 
-    {ok, _} = run_command("ip route add ~s/32 via ~s table 42", [FormattedAgentIP, FormattedVTEPIP]),
-    {ok, _} = run_command("ip route add ~s/~B via ~s", [FormattedSubnetIP, SubnetPrefixLen, FormattedVTEPIP]),
+    {ok, _} = run_command("ip route replace ~s/32 via ~s table 42", [FormattedAgentIP, FormattedVTEPIP]),
+    {ok, _} = run_command("ip route replace ~s/~B via ~s", [FormattedSubnetIP, SubnetPrefixLen, FormattedVTEPIP]),
 
     State1.
 
@@ -425,7 +425,7 @@ run_command(Command) ->
     {ok, ""}.
 -else.
 run_command(Command) ->
-    Port = open_port({spawn, Command}, [stream, in, eof, hide, exit_status]),
+    Port = open_port({spawn, Command}, [stream, in, eof, hide, exit_status, stderr_to_stdout]),
     get_data(Port, []).
 
 get_data(Port, Sofar) ->
