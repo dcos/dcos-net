@@ -1,0 +1,49 @@
+{
+  "TTL": 60,
+  "Serial": 1464907739,
+  "RefreshSeconds": 30,
+  "Mname": "ns1.mesos.",
+  "Rname": "root.ns1.mesos.",
+  "Domain": "mesos",
+  "Records": {
+    "As": {
+      "leader.mesos.": [
+        "10.0.6.47"
+      ],
+      "marathon.mesos.": [
+        "10.0.6.47"
+      ],
+      "master.mesos.": [
+        "10.0.6.47"
+      ],
+      "master0.mesos.": [
+        "10.0.6.47"
+      ],
+      "root.ns1.mesos.": [
+        "10.0.6.47",
+        "172.17.0.1",
+        "198.51.100.1",
+        "198.51.100.2",
+        "198.51.100.3"
+      ],
+      "slave.mesos.": [
+        "10.0.5.155",
+        "10.0.3.101"
+      ]
+    },
+    "SRVs": {
+      "_framework._tcp.marathon.mesos.": [
+        "marathon.mesos.:36241"
+      ],
+      "_leader._tcp.mesos.": [
+        "leader.mesos.:5050"
+      ],
+      "_leader._udp.mesos.": [
+        "leader.mesos.:5050"
+      ],
+      "_slave._tcp.mesos.": [
+        "slave.mesos.:5051"
+      ]
+    }
+  }
+}

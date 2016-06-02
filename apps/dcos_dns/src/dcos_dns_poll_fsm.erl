@@ -11,6 +11,20 @@
 
 -behaviour(gen_fsm).
 
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-compile(export_all).
+-endif.
+
+-include("dcos_dns.hrl").
+-include_lib("mesos_state/include/mesos_state.hrl").
+-include_lib("dns/include/dns.hrl").
+-define(DCOS_DOMAIN, <<"dcos.thisdcos.directory">>).
+-define(MESOS_DOMAIN, <<"mesos.thisdcos.directory">>).
+-define(TTL, 5).
+
+
 %% API
 -export([start_link/0, status/0]).
 
@@ -30,11 +44,14 @@
 
 -define(MASTERS_KEY, {masters, riak_dt_orswot}).
 -define(MAX_CONSECUTIVE_POLLS, 10).
+-define(PROTOCOLS, [<<"_tcp">>, <<"_udp">>]).
 
 -record(state, {
-    master_list = [] :: node(),
+    master_list = [] :: [node()],
     consecutive_polls = 0 :: non_neg_integer()
 }).
+
+-type ip_resolver() :: fun((task()) -> ({Prefix :: binary(), IP :: inet:ipv4_address()})).
 
 %%%===================================================================
 %%% API
@@ -115,9 +132,9 @@ leader({timeout, _Ref, try_master}, State0 = #state{master_list = MasterList0}) 
 leader({timeout, _Ref, poll}, State0 = #state{consecutive_polls = CP, master_list = MasterList0}) ->
     State1 = State0#state{consecutive_polls = CP + 1},
     Rep =
-        case poll(State1) of
-            {ok, State2} ->
-                {next_state, leader, State2};
+        case poll() of
+            ok ->
+                {next_state, leader, State1};
             {error, _} ->
                 global:del_lock({?MODULE, self()}, MasterList0),
                 {next_state, not_leader, State1}
@@ -271,14 +288,476 @@ try_master1(State = #state{master_list = Masters}) ->
             {not_leader, State}
     end.
 
-poll(State0) ->
+mesos_master_uri() ->
+    case inet:getaddr("leader.mesos", inet) of
+        {ok, _} ->
+            "http://leader.mesos:5050/state";
+        _ ->
+            IP = inet:ntoa(mesos_state:ip()),
+            lists:flatten(io_lib:format("http://~s:5050/state", [IP]))
+    end.
+
+mesos_dns_uri() ->
+    case inet:getaddr("master.mesos", inet) of
+        {ok, _} ->
+            "http://master.mesos:8123/v1/axfr";
+        _ ->
+            IP = inet:ntoa(mesos_state:ip()),
+            lists:flatten(io_lib:format("http://~s:8123/v1/axfr", [IP]))
+    end.
+
+
+poll() ->
     lager:info("Navstar DNS polling"),
-    IP = inet:ntoa(mesos_state:ip()),
-    URI = lists:flatten(io_lib:format("http://~s:5050/state", [IP])),
+    case mesos_master_poll() of
+        ok ->
+            mesos_dns_poll();
+        Ret = {error, _} ->
+            Ret
+    end.
+
+mesos_dns_poll() ->
+    Options = [
+        {timeout, application:get_env(?APP, timeout, ?DEFAULT_TIMEOUT)},
+        {connect_timeout, application:get_env(?APP, connect_timeout, ?DEFAULT_CONNECT_TIMEOUT)}
+    ],
+    URI = mesos_dns_uri(),
+    Headers = [{"Accept", "application/json"}],
+    Response = httpc:request(get, {URI, Headers}, Options, [{body_format, binary}]),
+    case handle_mesos_dns_response(Response) of
+        {error, Reason} ->
+            lager:warning("Unable to poll mesos-dns: ~p", [Reason]),
+            {error, Reason};
+        {ok, ZoneName, Records} ->
+            ok = push_zone_to_lashup(ZoneName, Records),
+            ok
+    end.
+
+handle_mesos_dns_response({error, Reason}) ->
+    {error, Reason};
+handle_mesos_dns_response({ok, {_StatusLine = {_HTTPVersion, 200 = _StatusCode, _ReasonPhrase}, _Headers, Body}}) ->
+    DecodedBody = jsx:decode(Body, [return_maps]),
+    handle_mesos_dns_body(DecodedBody);
+handle_mesos_dns_response({ok, {StatusLine, _Headers, _Body}}) ->
+    {error, StatusLine}.
+
+handle_mesos_dns_body(_Body = #{<<"Domain">> := Domain0, <<"Records">> := MesosDNSRecords}) ->
+    %% We don't want to use atoms here because the records are awkward
+    Domain1 = <<Domain0/binary, ".">>,
+    Records0 = base_records(?MESOS_DOMAIN),
+    #{<<"As">> := ARecords, <<"SRVs">> := SRVRecords} = MesosDNSRecords,
+    Records1 = maps:fold(fun(RecordName, Values, Acc) ->
+        add_mesos_dns_a_recs(RecordName, Values, Domain1, Acc) end, Records0, ARecords),
+    Records2 = maps:fold(fun(RecordName, Values, Acc) ->
+        add_mesos_dns_srv_recs(RecordName, Values, Domain1, Acc) end, Records1, SRVRecords),
+    Records3 = lists:usort(Records2),
+    {ok, ?MESOS_DOMAIN, Records3}.
+
+chop_name(RecordName0, DomainName) ->
+    DomainNameSize = size(DomainName),
+    binary:part(RecordName0, 0, size(RecordName0) - DomainNameSize).
+
+add_mesos_dns_a_recs(RecordName0, Values, MesosDNSDomain, Acc) ->
+    RecordName1 = chop_name(RecordName0, MesosDNSDomain),
+    lists:foldl(fun(X, SubAcc) -> add_mesos_dns_a_rec(X, RecordName1, SubAcc) end, Acc, Values).
+
+add_mesos_dns_a_rec(IPBin, RecordName0, Acc) ->
+    RecordName1 = <<RecordName0/binary, ?MESOS_DOMAIN/binary>>,
+    IPStr = binary_to_list(IPBin),
+    {ok, IP} = inet:parse_ipv4_address(IPStr),
+    Record =
+        #dns_rr{
+            name = RecordName1,
+            type = ?DNS_TYPE_A,
+            ttl = ?TTL,
+            data = #dns_rrdata_a{ip = IP}
+        },
+    [Record|Acc].
+
+
+add_mesos_dns_srv_recs(RecordName0, Values, MesosDNSDomain, Acc) ->
+    RecordName1 = chop_name(RecordName0, MesosDNSDomain),
+    lists:foldl(fun(X, SubAcc) -> add_mesos_dns_srv_rec(X, RecordName1, MesosDNSDomain, SubAcc) end, Acc, Values).
+
+add_mesos_dns_srv_rec(SRV, RecordName0, MesosDNSDomain, Acc) ->
+    RecordName1 = <<RecordName0/binary, ?MESOS_DOMAIN/binary>>,
+    [SRVTarget0, SRVPort0] = binary:split(SRV, <<":">>),
+    SRVPort1 = binary_to_integer(SRVPort0),
+    SRVTarget1 = chop_name(SRVTarget0, MesosDNSDomain),
+    SRVTarget2 = <<SRVTarget1/binary, ?MESOS_DOMAIN/binary>>,
+    Record =
+        #dns_rr{
+            name = RecordName1,
+            type = ?DNS_TYPE_SRV,
+            ttl = ?TTL,
+            data = #dns_rrdata_srv{
+                target = SRVTarget2,
+                port = SRVPort1,
+                weight = 0,
+                priority = 0
+            }
+        },
+    [Record|Acc].
+
+mesos_master_poll() ->
+    URI = mesos_master_uri(),
     case mesos_state_client:poll(URI) of
-        {ok, _MAS0} ->
-            {ok, State0};
+        {ok, MAS0} ->
+            {ZoneName, Records} = build_zone(MAS0),
+            ok = push_zone_to_lashup(ZoneName, Records),
+            ok;
         Error ->
             lager:warning("Could not poll mesos state: ~p", [Error]),
             {error, Error}
     end.
+
+
+-spec(task_ip_by_agent(task()) -> {binary(), inet:ip4_address()}).
+task_ip_by_agent(_Task = #task{slave = #slave{pid = #libprocess_pid{ip = IP}}}) ->
+    {<<"agentip">>, IP}.
+
+-spec(task_ip_by_network_infos(task()) -> {binary(), inet:ip4_address()}).
+task_ip_by_network_infos(
+    #task{statuses = [#task_status{container_status = #container_status{network_infos = NetworkInfos}}|_]}) ->
+    [#network_info{ip_addresses = IPAddresses}|_] = NetworkInfos,
+    [#ip_address{ip_address = IP}|_] = IPAddresses,
+    {<<"containerip">>, IP}.
+
+%% Creates the zone:
+%% .mesos.thisdcos.directory
+%% With ip sources based on (.containerip/.agentip).mesos.thisdcos.directory
+build_zone(MAS) ->
+    Records0 = lists:usort(add_task_records(MAS, [])),
+    Records1 = ordsets:union(Records0, base_records(?DCOS_DOMAIN)),
+    {?DCOS_DOMAIN, Records1}.
+
+-spec(add_task_records(mesos_state_client:mesos_agent_state(), [dns:dns_rr()]) -> [dns:dns_rr()]).
+add_task_records(MAS, Records0) ->
+    Tasks = mesos_state_client:tasks(MAS),
+    lists:foldl(
+        fun add_task_record/2,
+        Records0,
+        Tasks
+    ).
+
+-spec(add_task_record(task(), [dns:dns_rr()]) -> [dns:dns_rr()]).
+add_task_record(_Task = #task{state = TaskState}, Acc0) when TaskState =/= running->
+    Acc0;
+add_task_record(Task =
+        #task{statuses = [#task_status{container_status = #container_status{network_infos = NetworkInfos}}|_]}, Acc0)
+        when is_list(NetworkInfos) ->
+
+    Acc1 = add_task_record(fun task_ip_by_agent/1, Task, Acc0),
+    add_task_record(fun task_ip_by_network_infos/1, Task, Acc1);
+add_task_record(Task, Acc0) ->
+    add_task_record(fun task_ip_by_agent/1, Task, Acc0).
+
+
+-spec(add_task_record(ip_resolver(), task(), [dns:dns_rr()]) -> [dns:dns_rr()]).
+add_task_record(IPResolver, Task = #task{discovery = undefined}, Acc) ->
+    #task{name = Name} = Task,
+    add_task_records(Name, IPResolver, Task, Acc);
+add_task_record(IPResolver, Task = #task{discovery = Discovery = #discovery{}}, Acc) ->
+    #discovery{name = Name} = Discovery,
+    add_task_records(Name, IPResolver, Task, Acc).
+
+add_task_records(Name, IPResolver, Task, Acc0) when is_binary(Name) ->
+    Acc1 = canonical_task_records(Name, IPResolver, Task, Acc0),
+    Acc2 = slave_task_record(Name, Task, Acc1),
+    basic_task_record(Name, IPResolver, Task, Acc2).
+
+slave_task_record(Name, Task = #task{framework = #framework{name = FrameworkName}}, Acc) ->
+    {_, IP} = task_ip_by_agent(Task),
+    Record =
+        #dns_rr{
+        name = format_name([Name, FrameworkName], <<"slave">>),
+        type = ?DNS_TYPE_A,
+        ttl = ?TTL,
+        data = #dns_rrdata_a{ip = IP}
+
+    },
+    [Record|Acc].
+
+basic_task_record(Name, IPResolver, Task = #task{framework = #framework{name = FrameworkName}}, Acc) ->
+    {Postfix, IP} = IPResolver(Task),
+    Record =
+        #dns_rr{
+            name = format_name([Name, FrameworkName], Postfix),
+            type = ?DNS_TYPE_A,
+            ttl = ?TTL,
+            data = #dns_rrdata_a{ip = IP}
+        },
+    [Record | Acc].
+
+
+canonical_task_records(Name, IPResolver, Task, Acc0) ->
+    #task{
+        framework = #framework{
+            name = FrameworkName
+        }, id = TaskID0,
+        slave = #slave{
+            slave_id = SlaveID0
+        }
+    } = Task,
+    {Postfix, IP} = IPResolver(Task),
+    SlaveIDParts = binary:split(SlaveID0, <<"-">>, [global]),
+    SlaveID1 = lists:nth(length(SlaveIDParts), SlaveIDParts),
+    TaskID1 = hash_string(TaskID0),
+
+    Canonical = <<Name/binary, <<"-">>/binary, TaskID1/binary, <<"-">>/binary, SlaveID1/binary>>,
+    CanonicalFQDN = format_name([Canonical, FrameworkName], Postfix),
+
+    %_liquor-store._tcp.marathon.mesos.  -> ip + ports
+    %_liquor-store._tcp.marathon.$POSTIFX.mesos.$DOMAIN -> ip + ports
+    % every protocol + port combination
+
+    Record =
+        #dns_rr{
+            name = CanonicalFQDN,
+            type = ?DNS_TYPE_A,
+            ttl = ?TTL,
+            data = #dns_rrdata_a{ip = IP}
+        },
+    Acc1 = [Record|Acc0],
+    Acc2 = maybe_port_records(Name, Postfix, CanonicalFQDN, Task, Acc1),
+    maybe_discover_info_records(Postfix, CanonicalFQDN, Task, Acc2).
+
+
+maybe_discover_info_records(Postfix, CanonicalFQDN, Task = #task{discovery = Discovery = #discovery{}}, Acc0) ->
+    #discovery{ports = DiscoveryPorts, name = DiscoveryName} = Discovery,
+    #task{
+        framework = #framework{
+            name = FrameworkName
+        }
+    } = Task,
+    %_big-dog._tcp.marathon.mesos. -- all the discoveryports for that given name
+    %_https._liquor-store._tcp.marathon.mesos. -- all the discoveryports for that given port + name
+    SafeFrameworkName = list_to_binary(mesos_state:label(FrameworkName)),
+    SafeDiscoveryName = make_srv_like(DiscoveryName),
+    PortlessRecords = [
+        #dns_rr{
+            name = format_name2([SafeDiscoveryName, Protocol, SafeFrameworkName, Postfix]),
+            type = ?DNS_TYPE_SRV,
+            ttl = ?TTL,
+            data = #dns_rrdata_srv{
+                priority = 10,
+                weight = 10,
+                port = PortNumber,
+                target = CanonicalFQDN
+            }
+        }
+        || Protocol <- ?PROTOCOLS, #mesos_port{number = PortNumber} <- DiscoveryPorts],
+    PortedRecords = [
+        [
+            #dns_rr{
+                name = format_name2([make_srv_like(PortName), SafeDiscoveryName, make_srv_like(Protocol),
+                    SafeFrameworkName, Postfix]),
+                type = ?DNS_TYPE_SRV,
+                ttl = ?TTL,
+                data = #dns_rrdata_srv{
+                    priority = 10,
+                    weight = 10,
+                    port = PortNumber,
+                    target = CanonicalFQDN
+                }
+            }
+            || #mesos_port{name = PortName, number = PortNumber, protocol = Protocol} <- DiscoveryPorts]
+    ],
+    PortlessRecords ++ PortedRecords ++ Acc0;
+maybe_discover_info_records(_Postfix, _CanonicalFQDN, _Task, Acc0) ->
+    Acc0.
+
+
+maybe_port_records(Name, Postfix, CanonicalFQDN,
+    _Task = #task{
+        framework = #framework{
+            name = FrameworkName
+        },
+        resources = #{ports := Ports}
+    }, Acc0) ->
+    SafeName = make_srv_like(Name),
+    SafeFrameworkName = list_to_binary(mesos_state:label(FrameworkName)),
+    Records = [
+        #dns_rr{
+            name = format_name2([SafeName, Protocol, SafeFrameworkName, Postfix]),
+            type = ?DNS_TYPE_SRV,
+            ttl = ?TTL,
+            data = #dns_rrdata_srv{
+                priority = 10,
+                weight = 10,
+                port = Port,
+                target = CanonicalFQDN
+            }
+        }
+        || Protocol <- ?PROTOCOLS, Port <- Ports],
+    Records ++ Acc0;
+
+maybe_port_records(_Name, _Postfix, _CanonicalFQDN, _Task, Acc0) ->
+    Acc0.
+
+hash_string(String) ->
+    SHA1 = crypto:hash(sha, String),
+    <<Ret:5/binary, _/binary>> = zbase32:encode(SHA1),
+    Ret.
+
+make_srv_like(Name0) when is_atom(Name0) ->
+    make_srv_like(atom_to_binary(Name0, utf8));
+make_srv_like(Name0) ->
+    Name1 = list_to_binary(mesos_state:label(Name0)),
+    <<"_", Name1/binary>>.
+
+format_name(ListOfNames0, Postfix) ->
+    ListOfNames1 = lists:map(fun mesos_state:label/1, ListOfNames0),
+    ListOfNames2 = lists:map(fun list_to_binary/1, ListOfNames1),
+    Init = <<Postfix/binary, ".", ?DCOS_DOMAIN/binary>>,
+    lists:foldr(
+        fun(Part, Acc) ->
+            <<Part/binary, ".", Acc/binary>>
+        end,
+        Init,
+        ListOfNames2
+    ).
+format_name2(ListOfNames) ->
+    lists:foldr(
+        fun(Part, Acc) ->
+            <<Part/binary, ".", Acc/binary>>
+        end,
+        ?DCOS_DOMAIN,
+        ListOfNames
+    ).
+
+base_records(ZoneName) ->
+    ordsets:from_list(
+    [
+        #dns_rr{
+            name = ZoneName,
+            type = ?DNS_TYPE_SOA,
+            ttl = 3600,
+            data = #dns_rrdata_soa{
+                mname = <<"ns.spartan">>, %% Nameserver
+                rname = <<"support.mesosphere.com">>,
+                serial = 1,
+                refresh = 60,
+                retry = 180,
+                expire = 86400,
+                minimum = 1
+            }
+        },
+        #dns_rr{
+            name = ZoneName,
+            type = ?DNS_TYPE_NS,
+            ttl = 3600,
+            data = #dns_rrdata_ns{
+                dname = <<"ns.spartan">>
+            }
+        }
+    ]).
+
+ops(OldRecords, NewRecords) ->
+    RecordsToDelete = ordsets:subtract(OldRecords, NewRecords),
+    RecordsToAdd = ordsets:subtract(NewRecords, OldRecords),
+    Ops0 = [],
+    Ops1 = lists:foldl(fun delete_op/2, Ops0, RecordsToDelete),
+    lists:foldl(fun add_op/2, Ops1, RecordsToAdd).
+
+push_zone_to_lashup(ZoneName, NewRecords) ->
+    Key = [navstar, dns, zones, ZoneName],
+    {OriginalMap, VClock} = lashup_kv:value2(Key),
+    OldRecords =
+        case lists:keyfind(?RECORDS_FIELD, 1, OriginalMap) of
+            false ->
+                [];
+            {_, Value} ->
+                lists:usort(Value)
+        end,
+    Result =
+    case ops(OldRecords, NewRecords) of
+        [] ->
+            {ok, no_change};
+        Ops ->
+            lashup_kv:request_op(Key, VClock, {update, Ops})
+    end,
+    case Result of
+        {error, concurrency} ->
+            ok;
+        {ok, _} ->
+            ok
+    end.
+delete_op(Record, Acc0) ->
+    Op = {update, ?RECORDS_FIELD, {remove, Record}},
+    [Op|Acc0].
+add_op(Record, Acc0) ->
+    Op = {update, ?RECORDS_FIELD, {add, Record}},
+    [Op|Acc0].
+
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+zone_records_fake_test() ->
+    DataDir = code:priv_dir(dcos_dns),
+    Filename = filename:join(DataDir, "fake.json"),
+    {ok, Data} = file:read_file(Filename),
+    {ok, ParsedBody} = mesos_state_client:parse_response(Data),
+    Zone = dcos_dns_poll_fsm:build_zone(ParsedBody),
+    ?debugFmt("Zone: ~p", [Zone]).
+
+
+zone_records_state3_test() ->
+    DataDir = code:priv_dir(dcos_dns),
+    Filename = filename:join(DataDir, "state3.json"),
+    {ok, Data} = file:read_file(Filename),
+    {ok, ParsedBody} = mesos_state_client:parse_response(Data),
+    Zone = dcos_dns_poll_fsm:build_zone(ParsedBody),
+    ?debugFmt("Zone: ~p", [Zone]).
+
+zone_records_mesos_dns_test() ->
+    DataDir = code:priv_dir(dcos_dns),
+    Filename = filename:join(DataDir, "axfr.json"),
+    {ok, Data} = file:read_file(Filename),
+    DecodedData = jsx:decode(Data, [return_maps]),
+    {ok, ?MESOS_DOMAIN, Records} =  handle_mesos_dns_body(DecodedData),
+    ExpectedRecords =
+        [{dns_rr,<<"_framework._tcp.marathon.mesos.thisdcos.directory">>,1,
+            33,5,
+            {dns_rrdata_srv,0,0,36241,
+                <<"marathon.mesos.thisdcos.directory">>}},
+            {dns_rr,<<"_leader._tcp.mesos.thisdcos.directory">>,1,33,5,
+                {dns_rrdata_srv,0,0,5050,
+                    <<"leader.mesos.thisdcos.directory">>}},
+            {dns_rr,<<"_leader._udp.mesos.thisdcos.directory">>,1,33,5,
+                {dns_rrdata_srv,0,0,5050,
+                    <<"leader.mesos.thisdcos.directory">>}},
+            {dns_rr,<<"_slave._tcp.mesos.thisdcos.directory">>,1,33,5,
+                {dns_rrdata_srv,0,0,5051,
+                    <<"slave.mesos.thisdcos.directory">>}},
+            {dns_rr,<<"leader.mesos.thisdcos.directory">>,1,1,5,
+                {dns_rrdata_a,{10,0,6,47}}},
+            {dns_rr,<<"marathon.mesos.thisdcos.directory">>,1,1,5,
+                {dns_rrdata_a,{10,0,6,47}}},
+            {dns_rr,<<"master.mesos.thisdcos.directory">>,1,1,5,
+                {dns_rrdata_a,{10,0,6,47}}},
+            {dns_rr,<<"master0.mesos.thisdcos.directory">>,1,1,5,
+                {dns_rrdata_a,{10,0,6,47}}},
+            {dns_rr,<<"mesos.thisdcos.directory">>,1,2,3600,
+                {dns_rrdata_ns,<<"ns.spartan">>}},
+            {dns_rr,<<"mesos.thisdcos.directory">>,1,6,3600,
+                {dns_rrdata_soa,<<"ns.spartan">>,
+                    <<"support.mesosphere.com">>,1,60,180,86400,
+                    1}},
+            {dns_rr,<<"root.ns1.mesos.thisdcos.directory">>,1,1,5,
+                {dns_rrdata_a,{10,0,6,47}}},
+            {dns_rr,<<"root.ns1.mesos.thisdcos.directory">>,1,1,5,
+                {dns_rrdata_a,{172,17,0,1}}},
+            {dns_rr,<<"root.ns1.mesos.thisdcos.directory">>,1,1,5,
+                {dns_rrdata_a,{198,51,100,1}}},
+            {dns_rr,<<"root.ns1.mesos.thisdcos.directory">>,1,1,5,
+                {dns_rrdata_a,{198,51,100,2}}},
+            {dns_rr,<<"root.ns1.mesos.thisdcos.directory">>,1,1,5,
+                {dns_rrdata_a,{198,51,100,3}}},
+            {dns_rr,<<"slave.mesos.thisdcos.directory">>,1,1,5,
+                {dns_rrdata_a,{10,0,3,101}}},
+            {dns_rr,<<"slave.mesos.thisdcos.directory">>,1,1,5,
+                {dns_rrdata_a,{10,0,5,155}}}],
+    ?assertEqual(ExpectedRecords, Records).
+-endif.

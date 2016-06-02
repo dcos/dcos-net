@@ -22,6 +22,11 @@
     terminate/2,
     code_change/3]).
 
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
+
 -define(SERVER, ?MODULE).
 -define(POLL_PERIOD, 5000).
 -include("dcos_overlay.hrl").
@@ -460,5 +465,16 @@ return_data(Port, Sofar) ->
         _ ->
             {error, ExitCode, lists:flatten(Sofar)}
     end.
+
+-endif.
+
+-ifdef(TEST).
+
+deserialize_overlay_test() ->
+    DataDir = code:priv_dir(dcos_overlay),
+    OverlayFilename = filename:join(DataDir, "overlay.bindata.pb"),
+    {ok, OverlayData} = file:read_file(OverlayFilename),
+    Msg = mesos_state_overlay_pb:decode_msg(OverlayData, mesos_state_agentinfo),
+    ?assertEqual(<<"10.0.0.160:5051">>, Msg#mesos_state_agentinfo.ip).
 
 -endif.
