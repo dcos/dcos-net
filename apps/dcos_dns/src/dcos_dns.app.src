@@ -8,7 +8,10 @@
                 kernel,
                 stdlib,
                 mesos_state,
-                lashup
+                lashup,
+                jsx,
+                enacl,
+                erlzk
             ]},
         {env,[]},
         {modules, []},

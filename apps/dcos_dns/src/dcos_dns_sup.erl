@@ -33,7 +33,18 @@ start_link() ->
 %% ===================================================================
 
 init([]) ->
+    KeyMgr =
+    #{
+        id => dcos_dns_key_mgr,
+        start => {dcos_dns_key_mgr, start_link, []},
+        restart => transient,
+        modules => [dcos_dns_key_mgr],
+        type => worker,
+        shutdown => 5000
+    },
     {ok, {{one_for_all, 5, 10}, [
+
         ?CHILD(dcos_dns_poll_fsm, worker),
-        ?CHILD(dcos_dns_listener, worker)
+        ?CHILD(dcos_dns_listener, worker),
+        KeyMgr
     ]}}.

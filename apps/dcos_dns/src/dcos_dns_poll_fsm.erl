@@ -42,7 +42,6 @@
 
 -define(SERVER, ?MODULE).
 
--define(MASTERS_KEY, {masters, riak_dt_orswot}).
 -define(MAX_CONSECUTIVE_POLLS, 10).
 -define(PROTOCOLS, [<<"_tcp">>, <<"_udp">>]).
 
@@ -118,10 +117,9 @@ leader({timeout, _Ref, try_master}, State0 = #state{consecutive_polls = CP, mast
     State1 = State0#state{consecutive_polls = 0},
     {next_state, not_leader, State1};
 leader({timeout, _Ref, try_master}, State0 = #state{master_list = MasterList0}) ->
-    MasterList1 = MasterList0,
     gen_fsm:start_timer(master_period(), try_master),
-    case masters() of
-        MasterList1 ->
+    case dcos_dns:masters() of
+        MasterList0 ->
             {next_state, leader, State0};
         NewMasterList ->
             global:del_lock({?MODULE, self()}, MasterList0),
@@ -252,22 +250,13 @@ poll_period() ->
 master_period() ->
     application:get_env(dcos_dns, master_period, 15000).
 
-%% Always return an ordered set of masters
--spec(masters() -> [node()]).
-masters() ->
-    Masters = lashup_kv:value([masters]),
-    case orddict:find(?MASTERS_KEY, Masters) of
-        error ->
-            [];
-        {ok, Value} ->
-            ordsets:from_list(Value)
-    end.
+
 
 %% Should only be called in not_leader
 try_master(State0) ->
-    Masters = masters(),
+    Masters = dcos_dns:masters(),
     State1 = State0#state{master_list = Masters},
-    case ordsets:is_element(node(), Masters) of
+    case dcos_dns:is_master() of
         true ->
             try_master1(State1);
         false ->
@@ -548,21 +537,19 @@ maybe_discover_info_records(Postfix, CanonicalFQDN, Task = #task{discovery = Dis
         }
         || Protocol <- ?PROTOCOLS, #mesos_port{number = PortNumber} <- DiscoveryPorts],
     PortedRecords = [
-        [
-            #dns_rr{
-                name = format_name2([make_srv_like(PortName), SafeDiscoveryName, make_srv_like(Protocol),
-                    SafeFrameworkName, Postfix]),
-                type = ?DNS_TYPE_SRV,
-                ttl = ?TTL,
-                data = #dns_rrdata_srv{
-                    priority = 10,
-                    weight = 10,
-                    port = PortNumber,
-                    target = CanonicalFQDN
-                }
+        #dns_rr{
+            name = format_name2([make_srv_like(PortName), SafeDiscoveryName, make_srv_like(Protocol),
+                SafeFrameworkName, Postfix]),
+            type = ?DNS_TYPE_SRV,
+            ttl = ?TTL,
+            data = #dns_rrdata_srv{
+                priority = 10,
+                weight = 10,
+                port = PortNumber,
+                target = CanonicalFQDN
             }
-            || #mesos_port{name = PortName, number = PortNumber, protocol = Protocol} <- DiscoveryPorts]
-    ],
+        }
+        || #mesos_port{name = PortName, number = PortNumber, protocol = Protocol} <- DiscoveryPorts],
     PortlessRecords ++ PortedRecords ++ Acc0;
 maybe_discover_info_records(_Postfix, _CanonicalFQDN, _Task, Acc0) ->
     Acc0.
