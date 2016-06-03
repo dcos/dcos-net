@@ -658,16 +658,17 @@ push_zone_to_lashup(ZoneName, NewRecords) ->
                 lists:usort(Value)
         end,
     Result =
-    case ops(OldRecords, NewRecords) of
-        [] ->
-            {ok, no_change};
-        Ops ->
-            lashup_kv:request_op(Key, VClock, {update, Ops})
-    end,
+        case ops(OldRecords, NewRecords) of
+            [] ->
+                {ok, no_change};
+            Ops ->
+                lashup_kv:request_op(Key, VClock, {update, Ops})
+        end,
     case Result of
         {error, concurrency} ->
             ok;
         {ok, _} ->
+            dcos_dns_world:push_zone_to_world(ZoneName, NewRecords),
             ok
     end.
 delete_op(Record, Acc0) ->

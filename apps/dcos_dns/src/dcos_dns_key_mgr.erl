@@ -120,7 +120,8 @@ handle_info(check_lashup, State = #state{lashup_checks = 0}) ->
     case check_lashup_key()  of
         false ->
             lashup_kv ! bloom_wakeup,
-            timer:send_after(?LASHUP_CHECK_INTERVAL, check_lashup);
+            timer:send_after(?LASHUP_CHECK_INTERVAL, check_lashup),
+            {noreply, State#state{lashup_checks = 1}};
         true ->
             {stop, normal, State}
     end;

@@ -1,0 +1,32 @@
+// The Zone gets posted with the original .thisdcos.directory
+// We rewrite it to $ID.dcos.directory
+
+// The message is posted with the public key + the actual protobuf signed by the public key
+// I think it's better to pass the public key via a header rather than double protobufing
+
+message SRVRecord {
+  required int32 priority = 1;
+  required int32 weight = 2;
+  required string target = 3;
+  required int32 port = 4;
+}
+
+message ARecord {
+  required uint32 ip = 1;
+}
+
+message Record {
+  required string name = 1;
+  enum Type {
+    A = 0;
+    SRV = 1;
+  }
+  required Type type = 2;
+  optional SRVRecord srv_record = 3;
+  optional ARecord a_record = 4;
+}
+
+message Zone {
+  required string name = 1;
+  repeated Record records = 2;
+}
