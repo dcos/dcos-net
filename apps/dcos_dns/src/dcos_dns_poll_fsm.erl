@@ -322,7 +322,7 @@ mesos_dns_poll() ->
         {connect_timeout, application:get_env(?APP, connect_timeout, ?DEFAULT_CONNECT_TIMEOUT)}
     ],
     URI = mesos_dns_uri(),
-    Headers = [{"Accept", "application/json"}],
+    Headers = [],
     Response = httpc:request(get, {URI, Headers}, Options, [{body_format, binary}]),
     case handle_mesos_dns_response(Response) of
         {error, Reason} ->
