@@ -4,6 +4,10 @@
 // The message is posted with the public key + the actual protobuf signed by the public key
 // I think it's better to pass the public key via a header rather than double protobufing
 
+
+option java_package = "io.dcos.navstar";
+option java_outer_classname = "NavstarProtos";
+
 message SRVRecord {
   required int32 priority = 1;
   required int32 weight = 2;

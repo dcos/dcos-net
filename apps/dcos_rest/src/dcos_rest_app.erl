@@ -31,7 +31,8 @@ stop(_State) ->
 setup_cowboy() ->
     Dispatch = cowboy_router:compile([
         {'_', [
-            {"/lashup/kv/[...]", dcos_rest_lashup_handler, []}
+            {"/lashup/kv/[...]", dcos_rest_lashup_handler, []},
+            {"/lashup/key", dcos_rest_key_handler, []}
         ]}
     ]),
     Port = application:get_env(navstar, port, 62080),

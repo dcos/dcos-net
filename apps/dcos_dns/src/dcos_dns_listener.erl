@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0]).
+-export([start_link/0, convert_zone/3]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -24,6 +24,10 @@
 
 -define(SERVER, ?MODULE).
 
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
+
 -record(state, {
     ref = erlang:error() :: reference()
 }).
@@ -32,6 +36,8 @@
 
 -include("dcos_dns.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
+-include_lib("dns/include/dns.hrl").
+
 
 %%%===================================================================
 %%% API
@@ -182,10 +188,132 @@ spartan_push(Zone = {ZoneName, _, _}) ->
     case rpc:call(spartan_name(), erldns_zone_cache, put_zone, [Zone], ?RPC_TIMEOUT) of
         Reason = {badrpc, _} ->
             lager:warning("Unable to push records to spartan: ~p", [Reason]),
-            {ok, _} = timer:send_after(?SPARTAN_RETRY, {retry_spartan, [navstar, dns, zones, ZoneName]}),
+            setup_retry(ZoneName),
+            ok;
+        ok ->
+            maybe_push_signed_zone(Zone),
+            ok
+    end.
+
+setup_retry(ZoneName) ->
+    {ok, _} = timer:send_after(?SPARTAN_RETRY, {retry_spartan, [navstar, dns, zones, ZoneName]}).
+
+
+maybe_push_signed_zone(Zone) ->
+    case dcos_dns:key() of
+        false ->
+            ok;
+        #{public_key := PublicKey} ->
+
+            push_signed_zone(PublicKey, Zone)
+    end.
+
+push_signed_zone(PublicKey, _Zone0 = {ZoneName0, _ZoneSha, Records0}) ->
+    {ZoneName1, Records1} = convert_zone(PublicKey, ZoneName0, Records0),
+    Sha = crypto:hash(sha, term_to_binary(Records1)),
+    Zone1 = {ZoneName1, Sha, Records1},
+    case rpc:call(spartan_name(), erldns_zone_cache, put_zone, [Zone1], ?RPC_TIMEOUT) of
+        Reason = {badrpc, _} ->
+            lager:warning("Unable to push signed records to spartan: ~p", [Reason]),
+            setup_retry(ZoneName0),
             ok;
         ok ->
             ok
     end.
 
 
+convert_zone(PublicKey, ZoneName0, Records0) ->
+    PublicKeyEncoded = zbase32:encode(PublicKey),
+    NewPostfix = <<PublicKeyEncoded/binary, <<".dcos.directory">>/binary>>,
+    convert_zone(ZoneName0, Records0, ?POSTFIX, NewPostfix).
+
+%% For our usage postfix -> thisdcos.directory
+%% New Postfix is $(zbase32(public_key).thisdcos.directory)
+convert_zone(ZoneName0, Records0, Postfix, NewPostfix) ->
+    ZoneName1 = convert_name(ZoneName0, Postfix, NewPostfix),
+    Records1 = lists:filtermap(fun(Record) -> convert_record(Record, Postfix, NewPostfix) end, Records0),
+    {ZoneName1, Records1}.
+
+convert_name(Name, Postfix, NewPostfix) ->
+    true = size(Postfix) == binary:longest_common_suffix([Name, Postfix]),
+    FrontName = binary:part(Name, 0, size(Name) - size(Postfix)),
+    <<FrontName/binary, NewPostfix/binary>>.
+
+
+convert_record(Record0 = #dns_rr{type = ?DNS_TYPE_A, name = Name0}, Postfix, NewPostfix) ->
+    Name1 = convert_name(Name0, Postfix, NewPostfix),
+    Record1 = Record0#dns_rr{name = Name1},
+    {true, Record1};
+
+
+convert_record(Record0 = #dns_rr{type = ?DNS_TYPE_SRV, name = Name0, data = Data0 = #dns_rrdata_srv{target = Target0}},
+        Postfix, NewPostfix) ->
+    Name1 = convert_name(Name0, Postfix, NewPostfix),
+    Target1 = convert_name(Target0, Postfix, NewPostfix),
+    Data1 = Data0#dns_rrdata_srv{target = Target1},
+    Record1 = Record0#dns_rr{name = Name1, data = Data1},
+    {true, Record1};
+convert_record(_, _, _) ->
+    false.
+
+
+
+
+-ifdef(TEST).
+zone_convert_test() ->
+
+    Records =[{dns_rr,<<"_framework._tcp.marathon.mesos.thisdcos.directory">>,1,
+        33,5,
+        {dns_rrdata_srv,0,0,36241,
+            <<"marathon.mesos.thisdcos.directory">>}},
+        {dns_rr,<<"_leader._tcp.mesos.thisdcos.directory">>,1,33,5,
+            {dns_rrdata_srv,0,0,5050,
+                <<"leader.mesos.thisdcos.directory">>}},
+        {dns_rr,<<"_leader._udp.mesos.thisdcos.directory">>,1,33,5,
+            {dns_rrdata_srv,0,0,5050,
+                <<"leader.mesos.thisdcos.directory">>}},
+        {dns_rr,<<"_slave._tcp.mesos.thisdcos.directory">>,1,33,5,
+            {dns_rrdata_srv,0,0,5051,
+                <<"slave.mesos.thisdcos.directory">>}},
+        {dns_rr,<<"leader.mesos.thisdcos.directory">>,1,1,5,
+            {dns_rrdata_a,{10,0,6,47}}},
+        {dns_rr,<<"marathon.mesos.thisdcos.directory">>,1,1,5,
+            {dns_rrdata_a,{10,0,6,47}}},
+        {dns_rr,<<"master.mesos.thisdcos.directory">>,1,1,5,
+            {dns_rrdata_a,{10,0,6,47}}},
+        {dns_rr,<<"master0.mesos.thisdcos.directory">>,1,1,5,
+            {dns_rrdata_a,{10,0,6,47}}},
+        {dns_rr,<<"mesos.thisdcos.directory">>,1,2,3600,
+            {dns_rrdata_ns,<<"ns.spartan">>}},
+        {dns_rr,<<"mesos.thisdcos.directory">>,1,6,3600,
+            {dns_rrdata_soa,<<"ns.spartan">>,
+                <<"support.mesosphere.com">>,1,60,180,86400,
+                1}},
+        {dns_rr,<<"root.ns1.mesos.thisdcos.directory">>,1,1,5,
+            {dns_rrdata_a,{10,0,6,47}}},
+        {dns_rr,<<"root.ns1.mesos.thisdcos.directory">>,1,1,5,
+            {dns_rrdata_a,{172,17,0,1}}},
+        {dns_rr,<<"root.ns1.mesos.thisdcos.directory">>,1,1,5,
+            {dns_rrdata_a,{198,51,100,1}}},
+        {dns_rr,<<"root.ns1.mesos.thisdcos.directory">>,1,1,5,
+            {dns_rrdata_a,{198,51,100,2}}},
+        {dns_rr,<<"root.ns1.mesos.thisdcos.directory">>,1,1,5,
+            {dns_rrdata_a,{198,51,100,3}}},
+        {dns_rr,<<"slave.mesos.thisdcos.directory">>,1,1,5,
+            {dns_rrdata_a,{10,0,3,101}}},
+        {dns_rr,<<"slave.mesos.thisdcos.directory">>,1,1,5,
+            {dns_rrdata_a,{10,0,5,155}}}],
+    PublicKey = <<86,39,137,9,82,47,191,138,216,134,104,152,135,11,173,38,150,107,238,7,78,
+        78,17,127,194,164,28,239,31,178,219,57>>,
+    _SecretKey = <<243,180,170,246,243,250,151,209,107,185,80,245,39,121,7,61,151,249,79,98,
+            212,191,61,252,40,107,219,230,21,215,108,98,86,39,137,9,82,47,191,138,216,
+            134,104,152,135,11,173,38,150,107,238,7,78,78,17,127,194,164,28,239,31,
+            178,219,57>>,
+    PublicKeyEncoded = zbase32:encode(PublicKey),
+    Postfix = <<"thisdcos.directory">>,
+    NewPostfixA = <<PublicKeyEncoded/binary, <<".dcos.directory">>/binary>>,
+    %NewPostfixA = <<PublicKeyEncoded/binary, <<".dcos.directory">>>>
+    {NewName, NewRecords} = convert_zone(<<"mesos.thisdcos.directory">>, Records, Postfix, NewPostfixA),
+    ?debugFmt("new name: ~p", [NewName]),
+    ?debugFmt("new records: ~p", [NewRecords]).
+-endif.

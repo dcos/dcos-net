@@ -42,7 +42,7 @@ init([]) ->
         type => worker,
         shutdown => 5000
     },
-    {ok, {{one_for_all, 5, 10}, [
+    {ok, {{one_for_one, 5, 10}, [
 
         ?CHILD(dcos_dns_poll_fsm, worker),
         ?CHILD(dcos_dns_listener, worker),

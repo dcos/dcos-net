@@ -14,7 +14,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
--define(SERVICES_URI, "http://navstar.dcos.services/v1/push").
+-define(SERVICES_URI, "https://kyd5j6245k.execute-api.us-west-2.amazonaws.com/prod/push").
 
 %% API
 -export([push_zone_to_world/2]).
@@ -25,29 +25,41 @@
 
 
 push_zone_to_world(ZoneName, NewRecords) ->
-    MaybeNavstarKey = lashup_kv:value([navstar, key]),
-
-    case {lists:keyfind({secret_key,riak_dt_lwwreg}, 1, MaybeNavstarKey),
-        lists:keyfind({public_key,riak_dt_lwwreg}, 1, MaybeNavstarKey)} of
-        {{_, SecretKey}, {_, PublicKey}} ->
+    case dcos_dns:key() of
+        #{public_key := PublicKey, secret_key := SecretKey} ->
             push_zone_to_world(SecretKey, PublicKey, ZoneName, NewRecords);
         _ ->
             ok
     end.
 
-push_zone_to_world(SecretKey, PublicKey, ZoneName, NewRecords) ->
-    ZoneRecord = zone2proto(ZoneName, NewRecords),
-    ZoneBin = dcos_dns_dcos_dns_pb:encode_msg(ZoneRecord),
-    ZoneBinSigned = enacl:sign(ZoneBin, SecretKey),
+%% TODO: REFACTOR
+push_zone_to_world(SecretKey, PublicKey, ZoneName0, Records0) ->
+    {ZoneName1, Records1} = dcos_dns_listener:convert_zone(PublicKey, ZoneName0, Records0),
+    ZoneRecords = zone2proto(ZoneName1, Records1),
+    ZoneBin = dcos_dns_dcos_dns_pb:encode_msg(ZoneRecords),
+    ZoneBinSignature = binary_to_list(enacl:sign_detached(ZoneBin, SecretKey)),
     Options = [
         {timeout, application:get_env(?APP, timeout, ?DEFAULT_TIMEOUT)},
         {connect_timeout, application:get_env(?APP, connect_timeout, ?DEFAULT_CONNECT_TIMEOUT)}
     ],
-    PublicKeyBase64 = base64:encode(PublicKey),
-    Headers = [{<<"Public-Key">>, PublicKeyBase64}],
     %% We don't retry this. Retry logic is too damn hard
-    httpc:request(post, {?SERVICES_URI, Headers, "application/x-protobuf", ZoneBinSigned}, Options, []),
+    URI = application:get_env(?APP, services_uri, ?SERVICES_URI),
+    %% I fucking hate AWS Lambda
+    LambdaRequest = #{
+        <<"publickey">> => base64:encode(PublicKey),
+        <<"signature">> => base64:encode(ZoneBinSignature),
+        <<"zone">> => base64:encode(ZoneBin),
+        <<"zonename">> => ZoneName1
+    },
+    LambdaRequestBin = jsx:encode(LambdaRequest),
+    Response = httpc:request(post, {URI, _Headers = [], "application/json", LambdaRequestBin}, Options, []),
+    handle_response(Response),
     ok.
+handle_response({ok, {_StatusLine, _Headers, Body}}) ->
+    lager:debug("Success: ~p", [jsx:decode(list_to_binary(Body), [return_maps])]);
+handle_response({error, Response}) ->
+    lager:warning("Could not post to service: ~p", [Response]).
+
 zone2proto(ZoneName, NewRecords) ->
     ProtoRecords = lists:filtermap(fun record2proto2/1, NewRecords),
     #dcos_dns_zone{name = ZoneName, records = ProtoRecords}.

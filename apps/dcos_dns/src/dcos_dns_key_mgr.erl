@@ -231,10 +231,14 @@ do_create_zk_key(Pid) ->
     end.
 
 push_data_to_lashup(#{public := Pk, secret := Sk}) ->
+    PkZBase32 = zbase32:encode(Pk),
+    SkZBase32 = zbase32:encode(Sk),
     {ok, _} = lashup_kv:request_op(?LASHUP_KEY,
         {update, [
             {update, {public_key, riak_dt_lwwreg}, {assign, Pk, erlang:system_time(nano_seconds)}},
-            {update, {secret_key, riak_dt_lwwreg}, {assign, Sk, erlang:system_time(nano_seconds)}}
+            {update, {secret_key, riak_dt_lwwreg}, {assign, Sk, erlang:system_time(nano_seconds)}},
+            {update, {public_key_zbase32, riak_dt_lwwreg}, {assign, PkZBase32, erlang:system_time(nano_seconds)}},
+            {update, {secret_key_zbase32, riak_dt_lwwreg}, {assign, SkZBase32, erlang:system_time(nano_seconds)}}
             ]}),
     true.
 

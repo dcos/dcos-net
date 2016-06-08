@@ -318,7 +318,7 @@ mesos_dns_poll() ->
             lager:warning("Unable to poll mesos-dns: ~p", [Reason]),
             {error, Reason};
         {ok, ZoneName, Records} ->
-            ok = push_zone_to_lashup(ZoneName, Records),
+            ok = push_zone(ZoneName, Records),
             ok
     end.
 
@@ -393,7 +393,7 @@ mesos_master_poll() ->
     case mesos_state_client:poll(URI) of
         {ok, MAS0} ->
             {ZoneName, Records} = build_zone(MAS0),
-            ok = push_zone_to_lashup(ZoneName, Records),
+            ok = push_zone(ZoneName, Records),
             ok;
         Error ->
             lager:warning("Could not poll mesos state: ~p", [Error]),
@@ -647,6 +647,10 @@ ops(OldRecords, NewRecords) ->
     Ops1 = lists:foldl(fun delete_op/2, Ops0, RecordsToDelete),
     lists:foldl(fun add_op/2, Ops1, RecordsToAdd).
 
+push_zone(ZoneName, NewRecords) ->
+    push_zone_to_lashup(ZoneName, NewRecords),
+    dcos_dns_world:push_zone_to_world(ZoneName, NewRecords),
+    ok.
 push_zone_to_lashup(ZoneName, NewRecords) ->
     Key = [navstar, dns, zones, ZoneName],
     {OriginalMap, VClock} = lashup_kv:value2(Key),
@@ -668,7 +672,6 @@ push_zone_to_lashup(ZoneName, NewRecords) ->
         {error, concurrency} ->
             ok;
         {ok, _} ->
-            dcos_dns_world:push_zone_to_world(ZoneName, NewRecords),
             ok
     end.
 delete_op(Record, Acc0) ->
