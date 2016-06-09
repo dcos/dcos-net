@@ -11,7 +11,9 @@
                 lashup,
                 jsx,
                 enacl,
-                erlzk
+                erlzk,
+                ssl,
+                crypto
             ]},
         {env,[]},
         {modules, []},

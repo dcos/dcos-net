@@ -649,7 +649,6 @@ ops(OldRecords, NewRecords) ->
 
 push_zone(ZoneName, NewRecords) ->
     push_zone_to_lashup(ZoneName, NewRecords),
-    dcos_dns_world:push_zone_to_world(ZoneName, NewRecords),
     ok.
 push_zone_to_lashup(ZoneName, NewRecords) ->
     Key = [navstar, dns, zones, ZoneName],
