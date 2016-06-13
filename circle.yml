@@ -14,6 +14,9 @@ dependencies:
     - curl -O -L https://raw.githubusercontent.com/yrashk/kerl/master/kerl && chmod 755 kerl
     - if [ ! -d ~/extras/otp/18.3 ]; then ./kerl build 18.3 18.3; ./kerl install 18.3 ~/extras/otp/18.3; fi
     - ./rebar3 update
+    - sudo add-apt-repository ppa:chris-lea/libsodium
+    - wget http://ppa.launchpad.net/chris-lea/libsodium/ubuntu/pool/main/libs/libsodium/libsodium13_1.0.3-1chl1~trusty1_amd64.deb
+    - dpkg -i libsodium13_1.0.3-1chl1~trusty1_amd64.deb
     - sudo service mongodb stop
     - sudo service rabbitmq-server stop
     - sudo service couchdb stop
