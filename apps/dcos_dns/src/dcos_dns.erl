@@ -30,8 +30,8 @@ is_master() ->
 
 key() ->
     MaybeNavstarKey = lashup_kv:value([navstar, key]),
-    case {lists:keyfind({secret_key,riak_dt_lwwreg}, 1, MaybeNavstarKey),
-        lists:keyfind({public_key,riak_dt_lwwreg}, 1, MaybeNavstarKey)} of
+    case {lists:keyfind({secret_key, riak_dt_lwwreg}, 1, MaybeNavstarKey),
+        lists:keyfind({public_key, riak_dt_lwwreg}, 1, MaybeNavstarKey)} of
         {{_, SecretKey}, {_, PublicKey}} ->
             #{public_key => PublicKey, secret_key => SecretKey};
         _ ->

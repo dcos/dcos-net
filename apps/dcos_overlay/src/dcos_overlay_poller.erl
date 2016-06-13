@@ -418,8 +418,6 @@ run_command(Command, Opts) ->
     Cmd = lists:flatten(io_lib:format(Command, Opts)),
     run_command(Cmd).
 
--compile(export_all).
-
 -spec(run_command(Command :: string()) ->
     {ok, Output :: string()} | {error, ErrorCode :: non_neg_integer(), ErrorString :: string()}).
 -ifdef(DEV).
@@ -477,4 +475,6 @@ deserialize_overlay_test() ->
     Msg = mesos_state_overlay_pb:decode_msg(OverlayData, mesos_state_agentinfo),
     ?assertEqual(<<"10.0.0.160:5051">>, Msg#mesos_state_agentinfo.ip).
 
+run_command_test() ->
+    Out = run_command("exit 1").
 -endif.

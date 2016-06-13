@@ -47,7 +47,7 @@ perform_op(Req, State) ->
             {ok, Body0, Req2} = cowboy_req:body(Req),
             Body1 = binary_to_list(Body0),
             {ok, Scanned, _} = erl_scan:string(Body1),
-            {ok,Parsed} = erl_parse:parse_exprs(Scanned),
+            {ok, Parsed} = erl_parse:parse_exprs(Scanned),
             {value, Update, _Bindings} = erl_eval:exprs(Parsed, erl_eval:new_bindings()),
             perform_op(Key, Update, Clock1, Req2, State)
     end.
@@ -97,20 +97,11 @@ encode_key({{Name, Type = riak_dt_orswot}, Value}) ->
     {Name, [{type, Type}, {value, lists:map(fun encode_key/1, Value)}]};
 
 encode_key(Value) when is_atom(Value) ->
-    #{
-        type => atom,
-        value => Value
-    };
+    #{type => atom, value => Value};
 encode_key(Value) when is_binary(Value) ->
-    #{
-        type => binary,
-        value => Value
-    };
+    #{type => binary, value => Value};
 encode_key(Value) when is_list(Value) ->
-    #{
-        type => string,
-        value => list_to_binary(lists:flatten(Value))
-    };
+    #{type => string, value => list_to_binary(lists:flatten(Value))};
 %% Probably an IP address?
 encode_key(IP = {A, B, C, D}) when is_integer(A) andalso is_integer(B) andalso is_integer(C) andalso is_integer(D)
     andalso A >= 0 andalso B >= 0 andalso C >= 0 andalso D >= 0
