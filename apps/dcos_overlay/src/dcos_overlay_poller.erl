@@ -476,5 +476,6 @@ deserialize_overlay_test() ->
     ?assertEqual(<<"10.0.0.160:5051">>, Msg#mesos_state_agentinfo.ip).
 
 run_command_test() ->
-    Out = run_command("exit 1").
+    ?assertEqual({error, 1, ""}, run_command("false")),
+    ?assertEqual({ok, ""}, run_command("true")).
 -endif.
