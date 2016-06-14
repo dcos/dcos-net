@@ -12,7 +12,7 @@ dependencies:
     - ~/.cache
   pre:
     - curl -O -L https://raw.githubusercontent.com/yrashk/kerl/master/kerl && chmod 755 kerl
-    - if [ ! -d ~/extras/otp/18.3 ]; then ./kerl build 18.3 18.3; ./kerl install 18.3 ~/extras/otp/18.3; fi
+    - if [ ! -d ~/extras/otp/18.3 ]; then KERL_CONFIGURE_OPTIONS="--enable-dirty-schedulers --disable-hipe --enable-kernel-poll" ./kerl build 18.3 18.3; ./kerl install 18.3 ~/extras/otp/18.3; fi
     - ./rebar3 update
     - curl 'http://keyserver.ubuntu.com:11371/pks/lookup?op=get&search=0xB9316A7BC7917B12' | sudo apt-key add - 
     - wget http://ppa.launchpad.net/chris-lea/libsodium/ubuntu/pool/main/libs/libsodium/libsodium13_1.0.3-1chl1~trusty1_amd64.deb
