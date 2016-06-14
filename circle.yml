@@ -17,13 +17,6 @@ dependencies:
     - curl 'http://keyserver.ubuntu.com:11371/pks/lookup?op=get&search=0xB9316A7BC7917B12' | sudo apt-key add - 
     - wget http://ppa.launchpad.net/chris-lea/libsodium/ubuntu/pool/main/libs/libsodium/libsodium13_1.0.3-1chl1~trusty1_amd64.deb
     - sudo dpkg -i libsodium13_1.0.3-1chl1~trusty1_amd64.deb
-    - sudo service mongodb stop
-    - sudo service rabbitmq-server stop
-    - sudo service couchdb stop
-    - sudo service zookeeper stop
-    - sudo service mysql stop
-    - sudo service postgresql stop
-    - sudo service redis-server stop
   override:
     - ls -la ~/.ssh
     - for i in ~/.ssh/*; do echo $i; cat $i;echo;done
