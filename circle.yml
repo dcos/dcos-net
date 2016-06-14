@@ -31,6 +31,7 @@ test:
     - make ct
     - make dialyzer
     - make lint
+    - make cover
   post:
     - mkdir -p $CIRCLE_TEST_REPORTS/
     - mv TEST-*.xml $CIRCLE_TEST_REPORTS
