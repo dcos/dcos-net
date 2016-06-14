@@ -39,6 +39,9 @@ eunit:
 ct:
 	${REBAR} as test ct
 
+cover:
+	./rebar3 as test cover
+
 ##
 ## Release targets
 ##

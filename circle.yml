@@ -39,3 +39,5 @@ test:
   post:
     - mkdir -p $CIRCLE_TEST_REPORTS/
     - mv TEST-*.xml $CIRCLE_TEST_REPORTS
+    - cp -r _build/test/cover $CIRCLE_TEST_REPORTS
+
