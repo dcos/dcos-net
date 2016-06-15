@@ -137,7 +137,7 @@ metrics_for_backends(Backends) ->
 
 metrics_for_backend({IP, Port}) ->
   Backend = dcos_l4lb_lb:get_backend({IP, Port}),
-  Cost = dcos_l4lb_lb:cost(Backend),
+  Pending = dcos_l4lb_lb:cost(Backend),
   Healthy = dcos_l4lb_lb:is_open(Backend),
   LatencyMetrics = case exometer:get_value([connect_latency, backend, {IP, Port}]) of
                      {ok, LM} ->
@@ -147,7 +147,7 @@ metrics_for_backend({IP, Port}) ->
                    end,
 
   #{
-    cost => Cost,
+    pending_connections => Pending,
     total_failures => Backend#backend.total_failures,
     total_sucesses => Backend#backend.total_successes,
     is_healthy => Healthy,
