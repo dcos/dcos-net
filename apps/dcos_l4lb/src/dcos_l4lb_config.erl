@@ -31,7 +31,7 @@ master_uri() ->
 
 
 agent_poll_interval() ->
-  application:get_env(dcos_l4lb, agent_poll_interval, 500).
+  application:get_env(dcos_l4lb, agent_poll_interval, 2000).
 
 tcp_connect_threshold() ->
   application:get_env(dcos_l4lb, tcp_connect_threshold, 400).
