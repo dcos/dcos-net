@@ -113,6 +113,8 @@ maybe_load_masters() ->
 
 get_masters() ->
     case os:getenv("MASTER_SOURCE") of
+        "exhibitor_uri" ->
+            get_masters_exhibitor_uri();
         "exhibitor" ->
             get_masters_exhibitor();
         "master_list" ->
@@ -128,10 +130,18 @@ get_masters_file() ->
     IPAddresses = lists:map(fun dcos_dns_app:parse_ipv4_address/1, MastersBinIPs),
     {ok, [{IPAddress, ?MESOS_DNS_PORT} || IPAddress <- IPAddresses]}.
 
+get_masters_exhibitor_uri() ->
+    ExhibitorURI = os:getenv("EXHIBITOR_URI"),
+    get_masters_exhibitor(ExhibitorURI).
+
+
 get_masters_exhibitor() ->
     ExhibitorAddress = os:getenv("EXHIBITOR_ADDRESS"),
-    Url = lists:flatten(io_lib:format("http://~s:8181/exhibitor/v1/cluster/status", [ExhibitorAddress])),
-    case httpc:request(get, {Url, []}, [], [{body_format, binary}]) of
+    URI = lists:flatten(io_lib:format("http://~s:8181/exhibitor/v1/cluster/status", [ExhibitorAddress])),
+    get_masters_exhibitor(URI).
+
+get_masters_exhibitor(URI) ->
+    case httpc:request(get, {URI, []}, [], [{body_format, binary}]) of
         {ok, {{_, 200, _}, _, Body}} ->
             ExhibitorStatuses = jsx:decode(Body, [return_maps]),
             ExhibitorHostnames = [Hostname || #{<<"hostname">> := Hostname} <- ExhibitorStatuses],
