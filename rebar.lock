@@ -52,7 +52,7 @@
   0},
  {<<"mesos_state">>,
   {git,"git://github.com/dcos/mesos_state",
-       {ref,"68329208e03771c2decfd2a4b2fd5fc08782721f"}},
+       {ref,"6c0d04bb832042d93d3d7d87cbd85e0f5495c845"}},
   0},
  {<<"ranch">>,
   {git,"https://github.com/ninenines/ranch",
