@@ -178,6 +178,14 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
+scheme() ->
+    case os:getenv("MESOS_STATE_SSL_ENABLED") of
+        "true" ->
+            "https";
+        _ ->
+            "http"
+    end.
+
 poll(State0) ->
     Options = [
         {timeout, application:get_env(?APP, timeout, ?DEFAULT_TIMEOUT)},
@@ -188,9 +196,9 @@ poll(State0) ->
     BaseURI =
         case ordsets:is_element(node(), Masters) of
             true ->
-                "http://~s:5050/overlay-agent/overlay";
+                scheme() ++ "://~s:5050/overlay-agent/overlay";
             false ->
-                "http://~s:5051/overlay-agent/overlay"
+                scheme() ++ "://~s:5051/overlay-agent/overlay"
         end,
 
     URI = lists:flatten(io_lib:format(BaseURI, [IP])),
