@@ -23,6 +23,7 @@
 -define(DCOS_DOMAIN, <<"dcos.thisdcos.directory">>).
 -define(MESOS_DOMAIN, <<"mesos.thisdcos.directory">>).
 -define(TTL, 5).
+-define(MESOS_DNS_URI, "http://localhost:8123/v1/axfr").
 
 
 %% API
@@ -277,25 +278,25 @@ try_master1(State = #state{master_list = Masters}) ->
             {not_leader, State}
     end.
 
+scheme() ->
+    case os:getenv("MESOS_STATE_SSL_ENABLED") of
+        "true" ->
+            "https";
+        _ ->
+            "http"
+    end.
+
+%% Gotta query the leader for all the tasks
 mesos_master_uri() ->
     case inet:getaddr("leader.mesos", inet) of
         {ok, _} ->
-            "http://leader.mesos:5050/state";
+            lists:flatten(scheme() ++ "://leader.mesos:5050/state");
         _ ->
             IP = inet:ntoa(mesos_state:ip()),
-            lists:flatten(io_lib:format("http://~s:5050/state", [IP]))
+            lists:flatten(io_lib:format("~s://~s:5050/state", [scheme(), IP]))
     end.
 
-mesos_dns_uri() ->
-    case inet:getaddr("master.mesos", inet) of
-        {ok, _} ->
-            "http://127.0.0.1:8123/v1/axfr";
-        _ ->
-            IP = inet:ntoa(mesos_state:ip()),
-            lists:flatten(io_lib:format("http://~s:8123/v1/axfr", [IP]))
-    end.
-
-
+%% We should only ever poll mesos dns on the masters
 poll() ->
     lager:info("Navstar DNS polling"),
     case mesos_master_poll() of
@@ -310,9 +311,8 @@ mesos_dns_poll() ->
         {timeout, application:get_env(?APP, timeout, ?DEFAULT_TIMEOUT)},
         {connect_timeout, application:get_env(?APP, connect_timeout, ?DEFAULT_CONNECT_TIMEOUT)}
     ],
-    URI = mesos_dns_uri(),
     Headers = [],
-    Response = httpc:request(get, {URI, Headers}, Options, [{body_format, binary}]),
+    Response = httpc:request(get, {?MESOS_DNS_URI, Headers}, Options, [{body_format, binary}]),
     case handle_mesos_dns_response(Response) of
         {error, Reason} ->
             lager:warning("Unable to poll mesos-dns: ~p", [Reason]),
