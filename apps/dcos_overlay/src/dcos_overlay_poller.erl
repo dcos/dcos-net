@@ -36,7 +36,6 @@
 
 -record(state, {
     known_overlays = ordsets:new(),
-    known_neighbors = ordsets:new(),
     ip = undefined :: undefined | inet:ip4_address()
 }).
 
@@ -178,6 +177,14 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
+scheme() ->
+    case os:getenv("MESOS_STATE_SSL_ENABLED") of
+        "true" ->
+            "https";
+        _ ->
+            "http"
+    end.
+
 poll(State0) ->
     Options = [
         {timeout, application:get_env(?APP, timeout, ?DEFAULT_TIMEOUT)},
@@ -188,9 +195,9 @@ poll(State0) ->
     BaseURI =
         case ordsets:is_element(node(), Masters) of
             true ->
-                "http://~s:5050/overlay-agent/overlay";
+                scheme() ++ "://~s:5050/overlay-agent/overlay";
             false ->
-                "http://~s:5051/overlay-agent/overlay"
+                scheme() ++ "://~s:5051/overlay-agent/overlay"
         end,
 
     URI = lists:flatten(io_lib:format(BaseURI, [IP])),
@@ -372,22 +379,12 @@ maybe_configure_overlay_entry(Overlay, {{VTEPIPPrefix, riak_dt_map}, Value}, Sta
         MyIP ->
             State;
         _ ->
-            maybe_configure_overlay_entry2(Overlay, VTEPIPPrefix, Value, State)
+            configure_overlay_entry(Overlay, VTEPIPPrefix, Value, State)
     end.
 
-maybe_configure_overlay_entry2(Overlay, VTEPIPPrefix, LashupValue,
-        State = #state{known_neighbors = KnownNeighbors0}) ->
-    case ordsets:is_element(VTEPIPPrefix, KnownNeighbors0) of
-        true ->
-            State;
-        false ->
-            configure_overlay_entry(Overlay, VTEPIPPrefix, LashupValue, State)
-    end.
 
-configure_overlay_entry(Overlay, VTEPIPPrefix = {VTEPIP, _PrefixLen}, LashupValue,
-        State0 = #state{known_neighbors = KnownNeighbors0}) ->
-    KnownNeighbors1 = ordsets:add_element(VTEPIPPrefix, KnownNeighbors0),
-    State1 = State0#state{known_neighbors = KnownNeighbors1},
+configure_overlay_entry(Overlay, _VTEPIPPrefix = {VTEPIP, _PrefixLen}, LashupValue,
+        State0 = #state{}) ->
     #mesos_state_agentoverlayinfo{
         backend = #mesos_state_backendinfo{
             vxlan = #mesos_state_vxlaninfo{
@@ -412,7 +409,7 @@ configure_overlay_entry(Overlay, VTEPIPPrefix = {VTEPIP, _PrefixLen}, LashupValu
     {ok, _} = run_command("ip route replace ~s/32 via ~s table 42", [FormattedAgentIP, FormattedVTEPIP]),
     {ok, _} = run_command("ip route replace ~s/~B via ~s", [FormattedSubnetIP, SubnetPrefixLen, FormattedVTEPIP]),
 
-    State1.
+    State0.
 
 run_command(Command, Opts) ->
     Cmd = lists:flatten(io_lib:format(Command, Opts)),
