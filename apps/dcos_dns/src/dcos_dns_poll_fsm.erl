@@ -289,7 +289,7 @@ mesos_master_uri() ->
 mesos_dns_uri() ->
     case inet:getaddr("master.mesos", inet) of
         {ok, _} ->
-            "http://master.mesos:8123/v1/axfr";
+            "http://127.0.0.1:8123/v1/axfr";
         _ ->
             IP = inet:ntoa(mesos_state:ip()),
             lists:flatten(io_lib:format("http://~s:8123/v1/axfr", [IP]))
