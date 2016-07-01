@@ -48,7 +48,7 @@
   0},
  {<<"lashup">>,
   {git,"git://github.com/dcos/lashup.git",
-       {ref,"7bf380e8bf84d54695ee9fd6b3db26209244887a"}},
+       {ref,"bfeb372a1c944cf1056a1713f38c9ecd780ca8b7"}},
   0},
  {<<"mesos_state">>,
   {git,"git://github.com/dcos/mesos_state",
@@ -60,5 +60,5 @@
   1},
  {<<"riak_dt">>,
   {git,"https://github.com/sargun/riak_dt.git",
-       {ref,"27b261f6c1f5c519bbcf0bd3f469c4dfe4e0e604"}},
+       {ref,"df69cd4a4cb11d7bb97c2ea739c31e614d886bcf"}},
   1}].
