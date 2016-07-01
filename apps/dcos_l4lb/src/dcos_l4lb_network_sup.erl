@@ -53,7 +53,7 @@ init([]) ->
     ?CHILD(dcos_l4lb_ct_sup, supervisor),
     ?CHILD(dcos_l4lb_iface_server, worker),
     ?CHILD(dcos_l4lb_routes, worker),
-    ?CHILD(dcos_l4lb_ewma, worker),
+    ?CHILD(dcos_l4lb_lb, worker),
     ?CHILD(dcos_l4lb_ct_latency_observer, worker),
     ?CHILD(dcos_l4lb_worker_sup, supervisor),
     ?CHILD(dcos_l4lb_nfq_sup, supervisor)

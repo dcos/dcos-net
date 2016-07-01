@@ -167,8 +167,7 @@ handle_cast(_Request, State) ->
   {stop, Reason :: term(), NewState :: #state{}}).
 handle_info({check_conn_connected, {ID, IP, Port, VIP, VIPPort}}, State) ->
   case ets:take(connection_timers, ID) of
-    [#ct_timer{timer_id = TimerID, start_time = StartTime}] ->
-      TimeDelta = erlang:monotonic_time(nano_seconds) - StartTime,
+    [#ct_timer{timer_id = TimerID}] ->
       timer:cancel(TimerID),
       Success = false,
 
@@ -177,9 +176,7 @@ handle_info({check_conn_connected, {ID, IP, Port, VIP, VIPPort}}, State) ->
       telemetry:counter(mm_connect_failures, Tags, AggTags, 1),
 
       dcos_l4lb_metrics:update([timeouts], 1, counter),
-      dcos_l4lb_ewma:observe(TimeDelta,
-                             {IP, Port},
-                             Success);
+      dcos_l4lb_lb:decr_pending({IP, Port}, Success);
     _ ->
       % we've already cleared it
       ok
@@ -288,16 +285,14 @@ mark_replied(ID,
           record_replied_metrics(VIP, VIPPort, DstIP, DstPort, TimeDelta),
 
           Success = true,
-          dcos_l4lb_ewma:observe(TimeDelta,
-                                 {DstIP, DstPort},
-                                 Success);
+          dcos_l4lb_lb:decr_pending({DstIP, DstPort}, Success);
         _ ->
           % we've already cleared it, or we never saw its initial SYN
           ok
       end;
     false ->
       dcos_l4lb_metrics:update([observed_conns], 1, counter),
-      dcos_l4lb_ewma:set_pending({DstIP, DstPort}),
+      dcos_l4lb_lb:incr_pending({DstIP, DstPort}),
       lager:debug("marking backend ~p:~p in-flight", [DstIP, DstPort]),
       % Set up a timer and schedule a connection check at the
       % configured threshold.
