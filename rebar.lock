@@ -48,7 +48,7 @@
   0},
  {<<"lashup">>,
   {git,"git://github.com/dcos/lashup.git",
-       {ref,"bfeb372a1c944cf1056a1713f38c9ecd780ca8b7"}},
+       {ref,"716aba55c4462898450c7d40c50fc15de6fa6238"}},
   0},
  {<<"mesos_state">>,
   {git,"git://github.com/dcos/mesos_state",
