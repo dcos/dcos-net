@@ -131,7 +131,7 @@ retrieve_state() ->
                     true = is_list(DecodedJSON),
                     {ok, DecodedJSON};
                 Error ->
-                    lager:info("Failed to retrieve information from exhibitor: ~p", [Error]),
+                    lager:warning("Failed to retrieve information from exhibitor: ~p", [Error]),
                     {error, unavailable}
             end;
         _ ->
