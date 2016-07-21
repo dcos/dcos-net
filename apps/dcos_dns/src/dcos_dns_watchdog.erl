@@ -117,6 +117,7 @@ run_healthchecks(HealthFun, N) ->
         true ->
             ok;
         false ->
+            lager:warning("Healthcheck ~p failed", [HealthFun]),
             run_healthchecks(HealthFun, N - 1)
     end.
 
