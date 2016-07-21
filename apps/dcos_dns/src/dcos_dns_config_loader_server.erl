@@ -148,7 +148,7 @@ get_masters_exhibitor(URI) ->
             IPAddresses = lists:map(fun dcos_dns_app:parse_ipv4_address/1, ExhibitorHostnames),
             {ok, [{IPAddress, ?MESOS_DNS_PORT} || IPAddress <- IPAddresses]};
         Error ->
-            lager:info("Failed to retrieve information from exhibitor to configure dcos_dns: ~p", [Error]),
+            lager:warning("Failed to retrieve information from exhibitor to configure dcos_dns: ~p", [Error]),
             {error, unavailable}
     end.
 
