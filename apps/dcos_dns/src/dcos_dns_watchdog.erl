@@ -97,7 +97,7 @@ healthcheck() ->
 maybe_tcp_healthcheck() ->
     case dcos_dns_config:tcp_enabled() of
         true ->
-            ok = tcp_healthcheck();
+            ok = run_healthchecks(fun tcp_healthcheck/0, 5);
         _ ->
             ok
     end.
@@ -105,35 +105,43 @@ maybe_tcp_healthcheck() ->
 maybe_udp_healthcheck() ->
     case application:get_env(?APP, udp_server_enabled, true) of
         true ->
-            ok = udp_healthcheck();
+            ok = run_healthchecks(fun udp_healthcheck/0, 5);
         _ ->
             ok
     end.
 
+run_healthchecks(_HealthFun, 0) ->
+    false;
+run_healthchecks(HealthFun, N) ->
+    case HealthFun() of
+        true ->
+            ok;
+        false ->
+            run_healthchecks(HealthFun, N - 1)
+    end.
+
 tcp_healthcheck() ->
     TCPPort = dcos_dns_config:tcp_port(),
-    HealthcheckIP = healtcheck_ip(),
+    HealthcheckIP = healthcheck_ip(),
     DNSOpts = [
         {nameservers, [{HealthcheckIP, TCPPort}]},
-        {timeout, 1000},
+        {timeout, 5000},
         {usevc, true}
     ],
-    [{127, 0, 0, 1}] = inet_res:lookup("ready.spartan", in, a, DNSOpts),
-    ok.
+    [{127, 0, 0, 1}] == inet_res:lookup("ready.spartan", in, a, DNSOpts).
 
 
 udp_healthcheck() ->
     UDPPort = dcos_dns_config:udp_port(),
-    HealthcheckIP = healtcheck_ip(),
+    HealthcheckIP = healthcheck_ip(),
     DNSOpts = [
         {nameservers, [{HealthcheckIP, UDPPort}]},
-        {timeout, 1000},
+        {timeout, 5000},
         {usevc, false}
     ],
-    [{127, 0, 0, 1}] = inet_res:lookup("ready.spartan", in, a, DNSOpts),
-    ok.
+    [{127, 0, 0, 1}] == inet_res:lookup("ready.spartan", in, a, DNSOpts).
 
-healtcheck_ip() ->
+healthcheck_ip() ->
     BindIPs = dcos_dns_app:bind_ips(),
     N = rand:uniform(length(BindIPs)),
     lists:nth(N, BindIPs).
