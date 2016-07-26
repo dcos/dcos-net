@@ -143,6 +143,6 @@ udp_healthcheck() ->
     [{127, 0, 0, 1}] == inet_res:lookup("ready.spartan", in, a, DNSOpts).
 
 healthcheck_ip() ->
-    BindIPs = dcos_dns_app:bind_ips(),
+    BindIPs = dcos_dns_config:bind_ips(),
     N = rand:uniform(length(BindIPs)),
     lists:nth(N, BindIPs).

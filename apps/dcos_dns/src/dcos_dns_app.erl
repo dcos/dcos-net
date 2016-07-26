@@ -20,7 +20,7 @@
 -export([start/2, stop/1, wait_for_reqid/2]).
 
 %% API
--export([parse_ipv4_address/1, bind_ips/0]).
+-export([parse_ipv4_address/1]).
 
 %%====================================================================
 %% API
@@ -45,31 +45,11 @@ parse_ipv4_address(Value) ->
     {ok, IP} = inet:parse_ipv4_address(Value),
     IP.
 
-%% @doc Gets the IPs to bind to
-bind_ips() ->
-    IFs0 = get_ip_interfaces(),
-    case dcos_dns_config:bind_interface() of
-        undefined ->
-            [Addr || {_IfName, Addr} <- IFs0];
-        ConfigInterfaceName ->
-            IFs1 = lists:filter(fun({IfName, _Addr}) -> string:equal(IfName, ConfigInterfaceName) end, IFs0),
-            [Addr || {_IfName, Addr} <- IFs1]
-    end.
-
 %%====================================================================
 %% Internal functions
 %%====================================================================
 
-%% @doc Gets all the IPs for the machine
--spec(get_ip_interfaces() -> [{InterfaceName :: string(), inet:ipv4_address()}]).
-get_ip_interfaces() ->
-    %% The list comprehension makes it so we only get IPv4 addresses
-    {ok, Iflist} = inet:getifaddrs(),
-    lists:foldl(fun fold_over_if/2, [], Iflist).
 
-fold_over_if({IfName, IfOpts}, Acc) ->
-    IfAddresses = [{IfName, Address} || {addr, Address = {_, _, _, _}} <- IfOpts],
-    ordsets:union(ordsets:from_list(IfAddresses), Acc).
 
 %% @doc Wait for a response.
 wait_for_reqid(ReqID, Timeout) ->
@@ -86,7 +66,7 @@ wait_for_reqid(ReqID, Timeout) ->
 maybe_start_tcp_listener() ->
     case dcos_dns_config:tcp_enabled() of
         true ->
-            IPs = dcos_dns_app:bind_ips(),
+            IPs = dcos_dns_config:bind_ips(),
             lists:foreach(fun start_tcp_listener/1, IPs);
         false ->
             ok

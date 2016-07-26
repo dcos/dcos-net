@@ -87,7 +87,7 @@ maybe_add_udp_servers(Children) ->
     end.
 
 udp_servers() ->
-    Addresses = dcos_dns_app:bind_ips(),
+    Addresses = dcos_dns_config:bind_ips(),
     lists:map(fun udp_server/1, Addresses).
 
 
