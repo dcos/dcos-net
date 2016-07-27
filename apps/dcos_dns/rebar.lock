@@ -64,7 +64,7 @@
   0},
  {<<"lager">>,
   {git,"https://github.com/basho/lager",
-       {ref,"b2cb2735713e3021e0761623ff595d53a545438e"}},
+       {ref,"8187757388c9adc915379caaab36a2f2ca26e944"}},
   0},
  {<<"meck">>,
   {git,"git://github.com/eproxus/meck.git",
