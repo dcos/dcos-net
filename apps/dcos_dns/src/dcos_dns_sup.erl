@@ -64,6 +64,7 @@ init([]) ->
 
     %% Setup ready.spartan zone / record
     ok = dcos_dns_zone_setup(),
+    ok = localhost_zone_setup(),
 
     %% Systemd Sup intentionally goes last
     Children = [HandlerSup, ZkRecordServer, ConfigLoaderServer, WatchdogSup],
@@ -102,6 +103,45 @@ udp_server(Address) ->
         modules => [dcos_dns_udp_server]
     }.
 
+
+localhost_zone_setup() ->
+    Records = [
+        #dns_rr{
+            name = <<"localhost">>,
+            type = ?DNS_TYPE_SOA,
+            ttl = 5,
+            data = #dns_rrdata_soa{
+                mname = <<"ns.spartan">>, %% Nameserver
+                rname = <<"support.mesosphere.com">>,
+                serial = 1,
+                refresh = 60,
+                retry = 180,
+                expire = 86400,
+                minimum = 1
+            }
+        },
+        #dns_rr{
+            name = <<"localhost">>,
+            type = ?DNS_TYPE_A,
+            ttl = 5,
+            data = #dns_rrdata_a{ip = {127, 0, 0, 1}}
+        },
+        #dns_rr{
+            name = <<"localhost">>,
+            type = ?DNS_TYPE_NS,
+            ttl = 3600,
+            data = #dns_rrdata_ns{
+                dname = <<"ns.spartan">>
+            }
+        }
+    ],
+    Sha = crypto:hash(sha, term_to_binary(Records)),
+    case catch erldns_zone_cache:put_zone({<<"localhost">>, Sha, Records}) of
+        ok ->
+            ok;
+        Else ->
+            {error, Else}
+    end.
 
 dcos_dns_zone_setup() ->
     Records = [
