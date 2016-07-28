@@ -20,6 +20,10 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("kernel/include/inet.hrl").
 
+
+-include_lib("dns/include/dns_terms.hrl").
+-include_lib("dns/include/dns_records.hrl").
+
 -define(CONFIG, "../../../../config/sys.config").
 
 %% ===================================================================
@@ -34,9 +38,9 @@ init_per_suite(_Config) ->
                                             ok = application:set_env(App, Par, Val)
                         end, Environment)
                   end, Terms),
-    application:set_env(dcos_dns, mesos_resolvers, [{"127.0.0.1", 62053}]),
+    application:set_env(dcos_dns, mesos_resolvers, [{{127, 0, 0, 1}, 62053}]),
     application:ensure_all_started(dcos_dns),
-    dcos_dns_zk_record_server:generate_fixture_mesos_zone(),
+    generate_fixture_mesos_zone(),
     _Config.
 
 end_per_suite(_Config) ->
@@ -54,6 +58,40 @@ all() ->
      mesos_test,
      zk_test
     ].
+
+generate_fixture_mesos_zone() ->
+    Records = [
+        #dns_rr{
+            name = <<"mesos">>,
+            type = ?DNS_TYPE_SOA,
+            ttl = 5,
+            data = #dns_rrdata_soa{
+                mname = <<"ns.spartan">>, %% Nameserver
+                rname = <<"support.mesosphere.com">>,
+                serial = 0,
+                refresh = 60,
+                retry = 180,
+                expire = 86400,
+                minimum = 1
+            }
+        },
+        #dns_rr{
+            name = <<"master.mesos">>,
+            type = ?DNS_TYPE_A,
+            ttl = 5,
+            data = #dns_rrdata_a{ip = {127, 0, 0, 1}}
+        },
+        #dns_rr{
+            name = <<"spartan">>,
+            type = ?DNS_TYPE_NS,
+            ttl = 3600,
+            data = #dns_rrdata_ns{
+                dname = <<"ns.spartan">>
+            }
+        }
+    ],
+    Sha = crypto:hash(sha, term_to_binary(Records)),
+    ok = erldns_zone_cache:put_zone({<<"mesos">>, Sha, Records}).
 
 %% ===================================================================
 %% tests
@@ -78,15 +116,16 @@ mesos_test(_Config) ->
     {ok, DnsMsg} = inet_res:resolve("master.mesos", in, a, resolver_options()),
     [Answer] = inet_dns:msg(DnsMsg, anlist),
     Data = inet_dns:rr(Answer, data),
-    ?assertMatch({127,0,0,1}, Data),
+    ?assertMatch({127, 0, 0, 1}, Data),
     ok.
 
 %% @doc Assert we can resolve the Zookeeper records.
 zk_test(_Config) ->
+    gen_server:call(dcos_dns_zk_record_server, refresh),
     {ok, DnsMsg} = inet_res:resolve("zk-1.zk", in, a, resolver_options()),
     [Answer] = inet_dns:msg(DnsMsg, anlist),
     Data = inet_dns:rr(Answer, data),
-    ?assertMatch({10,0,4,160}, Data),
+    ?assertMatch({127, 0, 0, 1}, Data),
     ok.
 
 %% @private
