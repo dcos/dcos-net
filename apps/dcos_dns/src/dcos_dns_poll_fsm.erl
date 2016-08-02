@@ -11,7 +11,6 @@
 
 -behaviour(gen_fsm).
 
-
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 -compile(export_all).
@@ -401,9 +400,27 @@ mesos_master_poll() ->
     end.
 
 
+%%
+%% Tasks IPs are identified with up to three DNS A records: agentip, containerip and autoip.
+%% The autoip is derived from the containerip or agentip.  The autoip is defined as matching
+%% the containerip, if it is reachable.  A containerip is reachable if port mappings don't exist
+%% and the containerip exists.
+%%
+%% Pseudo Code
+%%
+%% if If task.network_info.ip_address AND NOT task.port_mappings
+%%     return task.networkinfo.ip_address
+%% else
+%%     return agent_ip
+%%
+
 -spec(task_ip_by_agent(task()) -> {binary(), inet:ip4_address()}).
 task_ip_by_agent(_Task = #task{slave = #slave{pid = #libprocess_pid{ip = IP}}}) ->
     {<<"agentip">>, IP}.
+
+-spec(task_ip_by_agent(task(), binary()) -> {binary(), inet:ip4_address()}).
+task_ip_by_agent(_Task = #task{slave = #slave{pid = #libprocess_pid{ip = IP}}}, Label) ->
+    {Label, IP}.
 
 -spec(task_ip_by_network_infos(task()) -> {binary(), inet:ip4_address()}).
 task_ip_by_network_infos(
@@ -411,6 +428,23 @@ task_ip_by_network_infos(
     [#network_info{ip_addresses = IPAddresses}|_] = NetworkInfos,
     [#ip_address{ip_address = IP}|_] = IPAddresses,
     {<<"containerip">>, IP}.
+
+-spec(task_ip_by_network_infos(task(), binary()) -> {binary(), inet:ip4_address()}).
+task_ip_by_network_infos(
+    #task{statuses = [#task_status{container_status = #container_status{network_infos = NetworkInfos}}|_]}, Label) ->
+    [#network_info{ip_addresses = IPAddresses}|_] = NetworkInfos,
+    [#ip_address{ip_address = IP}|_] = IPAddresses,
+    {Label, IP};
+task_ip_by_network_infos(Task, Label) ->
+   task_ip_by_agent(Task, Label).
+
+-spec(task_ip_autoip(task()) -> {binary(), inet:ip4_address()}).
+task_ip_autoip(Task = #task{container = #container{type = docker, docker = #docker{port_mappings = []}}}) ->
+    task_ip_by_agent(Task, <<"autoip">>);
+task_ip_autoip(Task) ->
+    task_ip_by_network_infos(Task, <<"autoip">>).
+
+
 
 %% Creates the zone:
 %% .mesos.thisdcos.directory
@@ -437,10 +471,11 @@ add_task_record(Task =
         when is_list(NetworkInfos) ->
 
     Acc1 = add_task_record(fun task_ip_by_agent/1, Task, Acc0),
-    add_task_record(fun task_ip_by_network_infos/1, Task, Acc1);
+    Acc2 = add_task_record(fun task_ip_by_network_infos/1, Task, Acc1),
+    add_task_record(fun task_ip_autoip/1, Task, Acc2);
 add_task_record(Task, Acc0) ->
-    add_task_record(fun task_ip_by_agent/1, Task, Acc0).
-
+    Acc1 = add_task_record(fun task_ip_by_agent/1, Task, Acc0),
+    add_task_record(fun task_ip_autoip/1, Task, Acc1).
 
 -spec(add_task_record(ip_resolver(), task(), [dns:dns_rr()]) -> [dns:dns_rr()]).
 add_task_record(IPResolver, Task = #task{discovery = undefined}, Acc) ->
@@ -694,6 +729,69 @@ zone_records_fake_test() ->
     {ok, [ExpectedRecords]} = file:consult(RecordFileName),
     ?assertEqual(ExpectedRecords, Records).
 
+zone_records_single_agentip_test() ->
+    DataDir = code:priv_dir(dcos_dns),
+    Filename = filename:join(DataDir, "fake.json"),
+    {ok, Data} = file:read_file(Filename),
+    {ok, ParsedBody} = mesos_state_client:parse_response(Data),
+    Tasks = mesos_state_client:tasks(ParsedBody),
+    [A|_T] = Tasks,
+    Result = dcos_dns_poll_fsm:task_ip_by_agent(A),
+    ExpectedResult = {<<"agentip">>, {1, 2, 3, 12}},
+    ?assertEqual(ExpectedResult, Result).
+
+zone_records_single_autoip_test() ->
+    DataDir = code:priv_dir(dcos_dns),
+    Filename = filename:join(DataDir, "fake.json"),
+    {ok, Data} = file:read_file(Filename),
+    {ok, ParsedBody} = mesos_state_client:parse_response(Data),
+    Tasks = mesos_state_client:tasks(ParsedBody),
+    [A|_T] = Tasks,
+    Result = dcos_dns_poll_fsm:task_ip_autoip(A),
+    ExpectedResult = {<<"autoip">>, {1, 2, 3, 12}},
+    ?assertEqual(ExpectedResult, Result).
+
+zone_records_agentip_test() ->
+    DataDir = code:priv_dir(dcos_dns),
+    Filename = filename:join(DataDir, "fake.json"),
+    {ok, Data} = file:read_file(Filename),
+    {ok, ParsedBody} = mesos_state_client:parse_response(Data),
+    Tasks = mesos_state_client:tasks(ParsedBody),
+    AgentIPList = [dcos_dns_poll_fsm:task_ip_by_agent(X) || X <- Tasks],
+    %% ?debugFmt("Agentip List: ~p", [AgentIPList]).
+    ?assertEqual(expected_agentip_list(), AgentIPList).
+
+expected_agentip_list() ->
+    [{<<"agentip">>, {1, 2, 3, 12}},
+    {<<"agentip">>, {1, 2, 3, 11}},
+    {<<"agentip">>, {1, 2, 3, 11}},
+    {<<"agentip">>, {1, 2, 3, 11}},
+    {<<"agentip">>, {1, 2, 3, 12}},
+    {<<"agentip">>, {1, 2, 3, 11}},
+    {<<"agentip">>, {1, 2, 3, 11}},
+    {<<"agentip">>, {1, 2, 3, 11}},
+    {<<"agentip">>, {1, 2, 3, 11}}].
+
+zone_records_autoip_test() ->
+    DataDir = code:priv_dir(dcos_dns),
+    Filename = filename:join(DataDir, "fake.json"),
+    {ok, Data} = file:read_file(Filename),
+    {ok, ParsedBody} = mesos_state_client:parse_response(Data),
+    Tasks = mesos_state_client:tasks(ParsedBody),
+    AutoIPList = [dcos_dns_poll_fsm:task_ip_autoip(X) || X <- Tasks],
+    %% ?debugFmt("Autoip List: ~p", [AutoIPList]).
+    ?assertEqual(expected_autoip_list(), AutoIPList).
+
+expected_autoip_list() ->
+    [{<<"autoip">>, {1, 2, 3, 12}},
+    {<<"autoip">>, {1, 2, 3, 11}},
+    {<<"autoip">>, {1, 2, 3, 11}},
+    {<<"autoip">>, {1, 2, 3, 11}},
+    {<<"autoip">>, {1, 2, 3, 12}},
+    {<<"autoip">>, {1, 2, 3, 11}},
+    {<<"autoip">>, {1, 2, 3, 11}},
+    {<<"autoip">>, {1, 2, 3, 11}},
+    {<<"autoip">>, {1, 2, 3, 11}}].
 
 zone_records_state3_test() ->
     DataDir = code:priv_dir(dcos_dns),
@@ -714,4 +812,5 @@ zone_records_mesos_dns_test() ->
     RecordFileName = filename:join(DataDir, "axfr_records"),
     {ok, [ExpectedRecords]} = file:consult(RecordFileName),
     ?assertEqual(ExpectedRecords, Records).
+
 -endif.
