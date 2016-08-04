@@ -11,6 +11,8 @@
 
 -behaviour(gen_fsm).
 
+-compile(export_all).
+
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 -compile(export_all).
@@ -800,6 +802,16 @@ zone_records_state3_test() ->
     {ok, ParsedBody} = mesos_state_client:parse_response(Data),
     {_Zone, Records} = dcos_dns_poll_fsm:build_zone(ParsedBody),
     RecordFileName = filename:join(DataDir, "state3_records"),
+    {ok, [ExpectedRecords]} = file:consult(RecordFileName),
+    ?assertEqual(ExpectedRecords, Records).
+
+zone_records_state5_test() ->
+    DataDir = code:priv_dir(dcos_dns),
+    JSONFilename = filename:join(DataDir, "state5.json"),
+    {ok, Data} = file:read_file(JSONFilename),
+    {ok, ParsedBody} = mesos_state_client:parse_response(Data),
+    {_Zone, Records} = dcos_dns_poll_fsm:build_zone(ParsedBody),
+    RecordFileName = filename:join(DataDir, "state5_records"),
     {ok, [ExpectedRecords]} = file:consult(RecordFileName),
     ?assertEqual(ExpectedRecords, Records).
 
