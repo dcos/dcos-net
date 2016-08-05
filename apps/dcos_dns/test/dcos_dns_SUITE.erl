@@ -131,4 +131,5 @@ zk_test(_Config) ->
 %% @private
 %% @doc Use the dcos_dns resolver.
 resolver_options() ->
-    [{nameservers, [{{127,0,0,1}, 8053}]}].
+    LocalResolver = "127.0.0.1:8053",
+    [{nameservers, [dcos_dns_app:parse_ipv4_address_with_port(LocalResolver, 53)]}].
