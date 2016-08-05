@@ -20,7 +20,7 @@
 -export([start/2, stop/1, wait_for_reqid/2]).
 
 %% API
--export([parse_ipv4_address/1]).
+-export([parse_ipv4_address/1, parse_ipv4_address_with_port/2]).
 
 %%====================================================================
 %% API
@@ -37,13 +37,22 @@ stop(_State) ->
     ranch:stop_listener(?TCP_LISTENER_NAME),
     ok.
 
-
-%% @doc Parse an IP Address
+%% @doc Parse an IPv4 Address
+-spec parse_ipv4_address(binary()|list()) -> inet:ip4_address().
 parse_ipv4_address(Value) when is_binary(Value) ->
     parse_ipv4_address(binary_to_list(Value));
 parse_ipv4_address(Value) ->
     {ok, IP} = inet:parse_ipv4_address(Value),
     IP.
+
+%% @doc Parse an IPv4 Address with an optionally specified port.
+%% The default port will be substituted in if not given.
+-spec parse_ipv4_address_with_port(binary()|list(), pos_integer()) -> {inet:ip4_address(), pos_integer()}.
+parse_ipv4_address_with_port(Value, DefaultPort) ->
+    case re:split(Value, ":") of
+        [IP, Port] -> {parse_ipv4_address(IP), parse_port(Port)};
+        [IP] -> {parse_ipv4_address(IP), DefaultPort}
+    end.
 
 %%====================================================================
 %% Internal functions
@@ -61,6 +70,12 @@ wait_for_reqid(ReqID, Timeout) ->
     after Timeout ->
         {error, timeout}
     end.
+
+-spec parse_port(binary()|list()) -> pos_integer().
+parse_port(Port) when is_binary(Port) ->
+    binary_to_integer(Port);
+parse_port(Port) when is_list(Port) ->
+    list_to_integer(Port).
 
 %% @private
 maybe_start_tcp_listener() ->
@@ -103,12 +118,20 @@ load_json_config(FileBin) ->
     lists:foreach(fun process_config_tuple/1, ConfigTuples).
 
 process_config_tuple({<<"upstream_resolvers">>, UpstreamResolvers}) ->
-    UpstreamResolverIPs = lists:map(fun parse_ipv4_address/1, UpstreamResolvers),
-    ConfigValue = [{UpstreamResolverIP, 53} || UpstreamResolverIP <- UpstreamResolverIPs],
-    application:set_env(?APP, upstream_resolvers, ConfigValue);
+    UpstreamIpsAndPorts = lists:map(fun (Resolver) -> parse_ipv4_address_with_port(Resolver, 53) end, UpstreamResolvers),
+    application:set_env(?APP, upstream_resolvers, UpstreamIpsAndPorts);
 process_config_tuple({Key, Value}) when is_binary(Value) ->
     application:set_env(?APP, binary_to_atom(Key, utf8), binary_to_list(Value));
 process_config_tuple({Key, Value}) ->
     application:set_env(?APP, binary_to_atom(Key, utf8), Value).
 
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
 
+parse_ipv4_addres_with_port_test() ->
+    %% With explicit port
+    ?assert({{127, 0, 0, 1}, 9000} == parse_ipv4_address_with_port("127.0.0.1:9000", 42)),
+    %% Fallback to default
+    ?assert({{8, 8, 8, 8}, 12345} == parse_ipv4_address_with_port("8.8.8.8", 12345)).
+
+-endif.
