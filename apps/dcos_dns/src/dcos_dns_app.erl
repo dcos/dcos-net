@@ -2,11 +2,19 @@
 -author("Christopher Meiklejohn <christopher.meiklejohn@gmail.com>").
 
 -behaviour(application).
+-export([start/2, stop/1]).
+
+%% Application
+-export([
+    wait_for_reqid/2,
+    parse_ipv4_address/1,
+    parse_ipv4_address_with_port/2
+]).
 
 -include("dcos_dns.hrl").
-
 -include_lib("dns/include/dns_terms.hrl").
 -include_lib("dns/include/dns_records.hrl").
+
 -define(TCP_LISTENER_NAME, dcos_dns_tcp_listener).
 
 -define(COMPILE_OPTIONS,
@@ -16,14 +24,9 @@
          no_error_module_mismatch,
          {source, undefined}]).
 
-%% Application callbacks
--export([start/2, stop/1, wait_for_reqid/2]).
-
-%% API
--export([parse_ipv4_address/1, parse_ipv4_address_with_port/2]).
 
 %%====================================================================
-%% API
+%% Application Behavior
 %%====================================================================
 
 start(_StartType, _StartArgs) ->
@@ -32,33 +35,13 @@ start(_StartType, _StartArgs) ->
     maybe_start_tcp_listener(),
     Ret.
 
-%%--------------------------------------------------------------------
 stop(_State) ->
     ranch:stop_listener(?TCP_LISTENER_NAME),
     ok.
 
-%% @doc Parse an IPv4 Address
--spec parse_ipv4_address(binary()|list()) -> inet:ip4_address().
-parse_ipv4_address(Value) when is_binary(Value) ->
-    parse_ipv4_address(binary_to_list(Value));
-parse_ipv4_address(Value) ->
-    {ok, IP} = inet:parse_ipv4_address(Value),
-    IP.
-
-%% @doc Parse an IPv4 Address with an optionally specified port.
-%% The default port will be substituted in if not given.
--spec parse_ipv4_address_with_port(binary()|list(), pos_integer()) -> {inet:ip4_address(), pos_integer()}.
-parse_ipv4_address_with_port(Value, DefaultPort) ->
-    case re:split(Value, ":") of
-        [IP, Port] -> {parse_ipv4_address(IP), parse_port(Port)};
-        [IP] -> {parse_ipv4_address(IP), DefaultPort}
-    end.
-
 %%====================================================================
-%% Internal functions
+%% General API
 %%====================================================================
-
-
 
 %% @doc Wait for a response.
 wait_for_reqid(ReqID, Timeout) ->
@@ -71,13 +54,33 @@ wait_for_reqid(ReqID, Timeout) ->
         {error, timeout}
     end.
 
--spec parse_port(binary()|list()) -> pos_integer().
+%% @doc Parse an IPv4 Address
+-spec parse_ipv4_address(binary()|list()) -> inet:ip4_address().
+parse_ipv4_address(Value) when is_binary(Value) ->
+    parse_ipv4_address(binary_to_list(Value));
+parse_ipv4_address(Value) ->
+    {ok, IP} = inet:parse_ipv4_address(Value),
+    IP.
+
+%% @doc Parse an IPv4 Address with an optionally specified port.
+%% The default port will be substituted in if not given.
+-spec parse_ipv4_address_with_port(binary()|list(), inet:port_number()) -> {inet:ip4_address(), inet:port_number()}.
+parse_ipv4_address_with_port(Value, DefaultPort) ->
+    case re:split(Value, ":") of
+        [IP, Port] -> {parse_ipv4_address(IP), parse_port(Port)};
+        [IP] -> {parse_ipv4_address(IP), DefaultPort}
+    end.
+
+%%====================================================================
+%% Internal functions
+%%====================================================================
+
+-spec parse_port(binary()|list()) -> inet:port_number().
 parse_port(Port) when is_binary(Port) ->
     binary_to_integer(Port);
 parse_port(Port) when is_list(Port) ->
     list_to_integer(Port).
 
-%% @private
 maybe_start_tcp_listener() ->
     case dcos_dns_config:tcp_enabled() of
         true ->
@@ -97,13 +100,13 @@ start_tcp_listener(IP) ->
         Options,
         dcos_dns_tcp_handler,
         []).
-% A normal configuration would look something like:
-%{
-%   "upstream_resolvers": ["169.254.169.253"],
-%   "udp_port": 53,
-%   "tcp_port": 53
-%}
 
+% A normal configuration would look something like:
+%  {
+%    "upstream_resolvers": ["169.254.169.253"],
+%    "udp_port": 53,
+%    "tcp_port": 53
+%  }
 maybe_load_json_config() ->
     case file:read_file("/opt/mesosphere/etc/spartan.json") of
         {ok, FileBin} ->
@@ -118,12 +121,16 @@ load_json_config(FileBin) ->
     lists:foreach(fun process_config_tuple/1, ConfigTuples).
 
 process_config_tuple({<<"upstream_resolvers">>, UpstreamResolvers}) ->
-    UpstreamIpsAndPorts = lists:map(fun (Resolver) -> parse_ipv4_address_with_port(Resolver, 53) end, UpstreamResolvers),
-    application:set_env(?APP, upstream_resolvers, UpstreamIpsAndPorts);
+    UpstreamIPsAndPorts = lists:map(fun (Resolver) -> parse_ipv4_address_with_port(Resolver, 53) end, UpstreamResolvers),
+    application:set_env(?APP, upstream_resolvers, UpstreamIPsAndPorts);
 process_config_tuple({Key, Value}) when is_binary(Value) ->
     application:set_env(?APP, binary_to_atom(Key, utf8), binary_to_list(Value));
 process_config_tuple({Key, Value}) ->
     application:set_env(?APP, binary_to_atom(Key, utf8), Value).
+
+%%====================================================================
+%% Unit Tests
+%%====================================================================
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
