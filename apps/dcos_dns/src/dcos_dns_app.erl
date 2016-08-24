@@ -8,8 +8,10 @@
 -behaviour(application).
 
 %% Application callbacks
--export([start/2
-    ,stop/1]).
+-export([
+    start/2,
+    stop/1
+]).
 -define(DEFAULT_CONFIG_LOCATION, "/opt/mesosphere/etc/navstar.app.config").
 
 %%====================================================================
