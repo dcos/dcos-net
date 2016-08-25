@@ -35,7 +35,8 @@ setup_cowboy() ->
             {"/lashup/key", dcos_rest_key_handler, []}
         ]}
     ]),
+    Ip = application:get_env(navstar, ip, {127, 0, 0, 1}),
     Port = application:get_env(navstar, port, 62080),
-    {ok, _} = cowboy:start_http(http, 100, [{port, Port}], [
+    {ok, _} = cowboy:start_http(http, 100, [{ip, Ip}, {port, Port}], [
         {env, [{dispatch, Dispatch}]}
     ]).
