@@ -815,6 +815,16 @@ zone_records_state5_test() ->
     {ok, [ExpectedRecords]} = file:consult(RecordFileName),
     ?assertEqual(ExpectedRecords, Records).
 
+zone_records_state6_test() ->
+    DataDir = code:priv_dir(dcos_dns),
+    JSONFilename = filename:join(DataDir, "state6.json"),
+    {ok, Data} = file:read_file(JSONFilename),
+    {ok, ParsedBody} = mesos_state_client:parse_response(Data),
+    {_Zone, Records} = dcos_dns_poll_fsm:build_zone(ParsedBody),
+    RecordFileName = filename:join(DataDir, "state6_records"),
+    {ok, [ExpectedRecords]} = file:consult(RecordFileName),
+    ?assertEqual(ExpectedRecords, Records).
+
 zone_records_mesos_dns_test() ->
     DataDir = code:priv_dir(dcos_dns),
     JSONFilename = filename:join(DataDir, "axfr.json"),
