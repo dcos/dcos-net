@@ -48,7 +48,7 @@
 
 -record(state, {
     from = erlang:error() :: from(),
-    dns_message :: dns_message(),
+    dns_message :: dns_message() | undefined,
     data = erlang:error() :: binary(),
     outstanding_upstreams = [] :: [outstanding_upstream()],
     send_query_time :: integer(),
@@ -76,7 +76,11 @@ init([From, Data]) ->
             %% Don't link.
             ok
     end,
-    {ok, execute, #state{from=From, data=Data}, 0}.
+    %% Set send query time to avoid typespec issues. This also requires that we don't make any blocking calls
+    %% between now, and execute. This is also okay, because timeout = 0, so we should immediately transition
+    %% to execute
+    Now = erlang:monotonic_time(),
+    {ok, execute, #state{from=From, data=Data, send_query_time = Now}, 0}.
 
 %% @private
 handle_event(_Event, StateName, State) ->
@@ -139,7 +143,7 @@ execute(timeout, State = #state{data = Data}) ->
     %% in case the data we've received is 'corrupt'
     DNSMessage = #dns_message{} = dns:decode_message(Data),
     Questions = DNSMessage#dns_message.questions,
-    State1 = State#state{dns_message = DNSMessage, send_query_time = erlang:monotonic_time()},
+    State1 = State#state{dns_message = DNSMessage},
     case dcos_dns_router:upstreams_from_questions(Questions) of
         [] ->
             dcos_dns_metrics:update([?APP, no_upstreams_available], 1, ?SPIRAL),
