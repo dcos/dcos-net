@@ -70,6 +70,10 @@ export SERVER_DEPTH
 MESOS_STATE_SSL_ENABLED=${MESOS_STATE_SSL_ENABLED:=false}
 export MESOS_STATE_SSL_ENABLED
 
+## Lock Disterl port by default
+DISTERL_PORT=${DISTERL_PORT:=62502}
+export DISTERL_PORT
+
 ## SSL / Distributed Erlang config
 export ERL_FLAGS="${ERL_FLAGS} -proto_dist ${ERLANG_DISTRIBUTION}"
 export ERL_FLAGS="${ERL_FLAGS} -ssl_dist_opt client_cacertfile ${CLIENT_CACERTFILE}"
@@ -87,5 +91,7 @@ export ERL_FLAGS="${ERL_FLAGS} -ssl_dist_opt server_depth ${SERVER_DEPTH}"
 ## Mesos state config (SSL)
 export ERL_FLAGS="${ERL_FLAGS} -mesos_state ssl ${MESOS_STATE_SSL_ENABLED}"
 
+## Distributed Erlang
+export ERL_FLAGS="${ERL_FLAGS} -kernel inet_dist_listen_min ${DISTERL_PORT} -kernel inet_dist_listen_max ${DISTERL_PORT}"
 
 NAME=${NAME} RELX_REPLACE_OS_VARS=true ERL_EPMD_PORT=61420 ${RELNAME} $@
