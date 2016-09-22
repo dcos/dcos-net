@@ -28,7 +28,7 @@
 -endif.
 
 -define(SERVER, ?MODULE).
--define(POLL_PERIOD, 5000).
+-define(POLL_PERIOD, 30000).
 -include("dcos_overlay.hrl").
 -include_lib("mesos_state/include/mesos_state_overlay_pb.hrl").
 -define(MASTERS_KEY, {masters, riak_dt_orswot}).
