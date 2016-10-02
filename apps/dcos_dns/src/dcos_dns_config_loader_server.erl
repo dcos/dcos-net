@@ -142,7 +142,11 @@ get_masters_exhibitor() ->
     get_masters_exhibitor(URI).
 
 get_masters_exhibitor(URI) ->
-    case httpc:request(get, {URI, []}, [], [{body_format, binary}]) of
+    Options = [
+        {timeout, dcos_dns_config:timeout()},
+        {connect_timeout, dcos_dns_config:connect_timeout()}
+    ],
+    case httpc:request(get, {URI, []}, Options, [{body_format, binary}]) of
         {ok, {{_, 200, _}, _, Body}} ->
             ExhibitorStatuses = jsx:decode(Body, [return_maps]),
             ExhibitorHostnames = [Hostname || #{<<"hostname">> := Hostname} <- ExhibitorStatuses],
