@@ -143,8 +143,8 @@ get_masters_exhibitor() ->
 
 get_masters_exhibitor(URI) ->
     Options = [
-        {timeout, dcos_dns_config:timeout()},
-        {connect_timeout, dcos_dns_config:connect_timeout()}
+        {timeout, dcos_dns_config:exhibitor_timeout()},
+        {connect_timeout, dcos_dns_config:exhibitor_timeout()}
     ],
     case httpc:request(get, {URI, []}, Options, [{body_format, binary}]) of
         {ok, {{_, 200, _}, _, Body}} ->
