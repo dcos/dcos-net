@@ -244,8 +244,6 @@ convert_record(Record0 = #dns_rr{type = ?DNS_TYPE_A, name = Name0}, Postfix, New
     Name1 = convert_name(Name0, Postfix, NewPostfix),
     Record1 = Record0#dns_rr{name = Name1},
     {true, Record1};
-
-
 convert_record(Record0 = #dns_rr{type = ?DNS_TYPE_SRV, name = Name0, data = Data0 = #dns_rrdata_srv{target = Target0}},
         Postfix, NewPostfix) ->
     Name1 = convert_name(Name0, Postfix, NewPostfix),
@@ -253,10 +251,10 @@ convert_record(Record0 = #dns_rr{type = ?DNS_TYPE_SRV, name = Name0, data = Data
     Data1 = Data0#dns_rrdata_srv{target = Target1},
     Record1 = Record0#dns_rr{name = Name1, data = Data1},
     {true, Record1};
-convert_record(_, _, _) ->
-    false.
-
-
+convert_record(Record0 = #dns_rr{name = Name0}, Postfix, NewPostfix) ->
+    Name1 = convert_name(Name0, Postfix, NewPostfix),
+    Record1 = Record0#dns_rr{name = Name1},
+    {true, Record1}.
 
 
 -ifdef(TEST).
@@ -347,6 +345,12 @@ zone_convert_test() ->
             {dns_rr, <<"master0.mesos.kaualnklf69aisrgpnceqn7pr4mgz5o8j38bn96nwoqq687l5cho.dcos.directory">>,
                 1, 1, 5,
                 {dns_rrdata_a, {10, 0, 6, 47}}},
+            {dns_rr, <<"mesos.kaualnklf69aisrgpnceqn7pr4mgz5o8j38bn96nwoqq687l5cho.dcos.directory">>, 1, 2, 3600,
+                {dns_rrdata_ns, <<"ns.spartan">>}},
+            {dns_rr, <<"mesos.kaualnklf69aisrgpnceqn7pr4mgz5o8j38bn96nwoqq687l5cho.dcos.directory">>, 1, 6, 3600,
+                {dns_rrdata_soa, <<"ns.spartan">>,
+                    <<"support.mesosphere.com">>, 1, 60, 180, 86400,
+                    1}},
             {dns_rr, <<"root.ns1.mesos.kaualnklf69aisrgpnceqn7pr4mgz5o8j38bn96nwoqq687l5cho.dcos.directory">>,
                 1, 1, 5,
                 {dns_rrdata_a, {10, 0, 6, 47}}},
