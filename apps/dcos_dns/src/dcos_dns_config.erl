@@ -12,7 +12,10 @@
 -include("dcos_dns.hrl").
 
 %% API
--export([udp_enabled/0, tcp_enabled/0, tcp_port/0, udp_port/0, bind_interface/0, bind_ips/0]).
+-export([exhibitor_timeout/0, udp_enabled/0, tcp_enabled/0, tcp_port/0, udp_port/0, bind_interface/0, bind_ips/0]).
+exhibitor_timeout() ->
+    application:get_env(?APP, exhibitor_timeout, ?EXHIBITOR_TIMEOUT).
+
 udp_enabled() ->
     application:get_env(?APP, udp_server_enabled, true).
 
