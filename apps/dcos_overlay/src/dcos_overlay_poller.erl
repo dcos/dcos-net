@@ -28,15 +28,20 @@
 -endif.
 
 -define(SERVER, ?MODULE).
--define(POLL_PERIOD, 30000).
+-define(MIN_POLL_PERIOD, 30000). %% 30 secs
+-define(MAX_POLL_PERIOD, 120000). %% 120 secs
+
 -include("dcos_overlay.hrl").
+-include_lib("stdlib/include/ms_transform.hrl").
 -include_lib("mesos_state/include/mesos_state_overlay_pb.hrl").
 -define(MASTERS_KEY, {masters, riak_dt_orswot}).
 
 
 -record(state, {
     known_overlays = ordsets:new(),
-    ip = undefined :: undefined | inet:ip4_address()
+    ip = undefined :: undefined | inet:ip4_address(),
+    ref = erlang:error() :: reference(),
+    poll_period = ?MIN_POLL_PERIOD :: integer()
 }).
 
 
@@ -78,7 +83,8 @@ start_link() ->
     {stop, Reason :: term()} | ignore).
 init([]) ->
     timer:send_after(0, poll),
-    {ok, #state{}}.
+    {ok, Ref} = lashup_kv_events_helper:start_link(ets:fun2ms(fun({[navstar, overlay, '_']}) -> true end)),
+    {ok, #state{ref = Ref}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -133,13 +139,17 @@ handle_info(poll, State0) ->
         case poll(State0) of
             {error, Reason} ->
                 lager:warning("Overlay Poller could not poll: ~p~n", [Reason]),
-                State0;
+                State0#state{poll_period = ?MIN_POLL_PERIOD};
             {ok, NewState} ->
-                NewState
+                NewPollPeriod = update_poll_period(NewState#state.poll_period),
+                NewState#state{poll_period = NewPollPeriod}
         end,
-    State2 = try_configure_overlays(State1),
-    timer:send_after(?POLL_PERIOD, poll),
-    {noreply, State2};
+    timer:send_after(State1#state.poll_period, poll),
+    {noreply, State1};
+handle_info({lashup_kv_events, Event = #{key := [navstar, overlay, Subnet], ref := Reference}},
+    State = #state{ref = Ref}) when Ref == Reference, is_tuple(Subnet), tuple_size(Subnet) == 2 ->
+    handle_event(Event, State),
+    {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -184,6 +194,11 @@ scheme() ->
         _ ->
             "http"
     end.
+
+update_poll_period(OldPollPeriod) when OldPollPeriod*2 =< ?MAX_POLL_PERIOD ->
+    OldPollPeriod*2;
+update_poll_period(_) ->
+    ?MAX_POLL_PERIOD.
 
 poll(State0) ->
     Options = [
@@ -355,23 +370,27 @@ vtep_mac(IntList) ->
     HexList = lists:map(fun(X) -> erlang:integer_to_list(X, 16) end, IntList),
     lists:flatten(string:join(HexList, ":")).
 
-try_configure_overlays(State0 = #state{known_overlays = KnownOverlays}) ->
-   lists:foldl(
-       fun try_configure_overlay/2,
-       State0,
-       KnownOverlays
-   ).
+handle_event(Event, State0 = #state{known_overlays = KnownOverlays}) ->
+    lists:foldl(
+        fun(Overlay, Acc) -> try_configure_overlay(Event, Overlay, Acc) end,
+        State0,
+        KnownOverlays
+    ).
 
-try_configure_overlay(Overlay, State0) ->
+try_configure_overlay(Event, Overlay, State0) ->
     #mesos_state_agentoverlayinfo{info = #mesos_state_overlayinfo{subnet = Subnet}} = Overlay,
     ParsedSubnet = parse_subnet(Subnet),
-    Key = [navstar, overlay, ParsedSubnet],
-    LashupValue = lashup_kv:value(Key),
+    try_configure_overlay2(Event, Overlay, ParsedSubnet, State0).
+
+try_configure_overlay2(_Event = #{key := [navstar, overlay, Subnet], value := LashupValue},
+    Overlay, ParsedSubnet, State0) when Subnet == ParsedSubnet ->
     lists:foldl(
         fun(Entry, Acc) -> maybe_configure_overlay_entry(Overlay, Entry, Acc) end,
         State0,
         LashupValue
-    ).
+    );
+try_configure_overlay2(_, _, _, State0) ->
+    State0.
 
 maybe_configure_overlay_entry(Overlay, {{VTEPIPPrefix, riak_dt_map}, Value}, State = #state{ip = MyIP}) ->
     {_, AgentIP} = lists:keyfind({agent_ip, riak_dt_lwwreg}, 1, Value),
