@@ -1,6 +1,6 @@
 machine:
   environment:
-    PATH: ${HOME}/extras/bin:${HOME}/extras/otp/19.0/bin:${PATH}
+    PATH: ${HOME}/extras/bin:${HOME}/extras/otp/19.1/bin:${PATH}
 dependencies:
   cache_directories:
     - ~/extras
@@ -11,7 +11,8 @@ dependencies:
     - ~/.cache
   pre:
     - curl -O -L https://raw.githubusercontent.com/yrashk/kerl/master/kerl && chmod 755 kerl
-    - if [ ! -d ~/extras/otp/19.0 ]; then KERL_CONFIGURE_OPTIONS="--enable-dirty-schedulers --disable-hipe --enable-kernel-poll" ./kerl build 19.0 19.0; ./kerl install 19.0 ~/extras/otp/19.0; fi
+    - if [ ! -d ~/extras/otp/19.1 ]; then KERL_CONFIGURE_OPTIONS="--enable-dirty-schedulers --disable-hipe --enable-kernel-poll" ./kerl build 19.1 19.1; ./kerl install 19.1 ~/extras/otp/19.1; fi:
+        timeout: 1800
     - ./rebar3 update
     - curl 'http://keyserver.ubuntu.com:11371/pks/lookup?op=get&search=0xB9316A7BC7917B12' | sudo apt-key add - 
     - wget http://ppa.launchpad.net/chris-lea/libsodium/ubuntu/pool/main/libs/libsodium/libsodium13_1.0.3-1chl1~trusty1_amd64.deb
@@ -25,14 +26,19 @@ dependencies:
 
 test:
   override:
-    - make xref
-    - make eunit
-    - make ct
-    - make dialyzer
-    - make lint
-    - make cover
+    - make check
   post:
+    - ./rebar3 covertool generate
+    - sudo pip install codecov
     - mkdir -p $CIRCLE_TEST_REPORTS/
     - mv TEST-*.xml $CIRCLE_TEST_REPORTS
+    - codecov -X gcov -f _build/test/covertool/navstar.covertool.xml 
+    - codecov -X gcov -f _build/test/covertool/navstar_dns.covertool.xml
+    - codecov -X gcov -f _build/test/covertool/navstar_overlay.covertool.xml
+    - codecov -X gcov -f _build/test/covertool/navstar_rest.covertool.xml
+    - mkdir -p $CIRCLE_ARTIFACTS
     - cp -r _build/test/cover $CIRCLE_TEST_REPORTS
-
+    - cp -r apps/navstar_rest/doc $CIRCLE_ARTIFACTS
+    - cp -r apps/navstar_overlay/doc $CIRCLE_ARTIFACTS
+    - cp -r apps/navstar/doc $CIRCLE_ARTIFACTS
+    - cp -r apps/navstar_dns/doc $CIRCLE_ARTIFACTS
