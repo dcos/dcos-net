@@ -33,6 +33,7 @@ start_link() ->
 %% ===================================================================
 
 init([]) ->
-    {ok, {{one_for_all, 5, 10}, [
-        ?CHILD(dcos_overlay_poller, worker)
+    {ok, {{rest_for_one, 5, 10}, [
+        ?CHILD(dcos_overlay_poller, worker),
+        ?CHILD(dcos_overlay_lashup_kv_listener, worker)
     ]}}.
