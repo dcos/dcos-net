@@ -1,9 +1,8 @@
-PACKAGE         ?= spartan
+PACKAGE         ?= navstar
 VERSION         ?= $(shell git describe --tags)
 BASE_DIR         = $(shell pwd)
 ERLANG_BIN       = $(shell dirname $(shell which erl))
 REBAR            = $(shell pwd)/rebar3
-MAKE						 = make
 
 .PHONY: rel deps test eqc
 
@@ -23,7 +22,7 @@ clean:
 ## Test targets
 ##
 
-check: test xref dialyzer lint
+check: test xref dialyzer lint cover edoc
 
 test: ct eunit
 
@@ -41,6 +40,9 @@ ct:
 
 cover:
 	./rebar3 as test cover
+
+edoc:
+	./rebar3 edoc
 
 ##
 ## Release targets
