@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, ip/0]).
+-export([start_link/0, ip/0, overlays/0]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -40,7 +40,6 @@
 -record(state, {
     known_overlays = ordsets:new(),
     ip = undefined :: undefined | inet:ip4_address(),
-    ref = erlang:error() :: reference(),
     poll_period = ?MIN_POLL_PERIOD :: integer()
 }).
 
@@ -51,6 +50,9 @@
 
 ip() ->
     gen_server:call(?SERVER, ip).
+
+overlays() ->
+    gen_server:call(?SERVER, overlays).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -83,8 +85,7 @@ start_link() ->
     {stop, Reason :: term()} | ignore).
 init([]) ->
     timer:send_after(0, poll),
-    {ok, Ref} = lashup_kv_events_helper:start_link(ets:fun2ms(fun({[navstar, overlay, '_']}) -> true end)),
-    {ok, #state{ref = Ref}}.
+    {ok, #state{}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -103,6 +104,8 @@ init([]) ->
     {stop, Reason :: term(), NewState :: #state{}}).
 handle_call(ip, _From, State = #state{ip = IP}) ->
     {reply, IP, State};
+handle_call(overlays, _From, State = #state{known_overlays = KnownOverlays}) ->
+    {reply, KnownOverlays, State};
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
@@ -146,10 +149,6 @@ handle_info(poll, State0) ->
         end,
     timer:send_after(State1#state.poll_period, poll),
     {noreply, State1};
-handle_info({lashup_kv_events, Event = #{key := [navstar, overlay, Subnet], ref := Reference}},
-    State = #state{ref = Ref}) when Ref == Reference, is_tuple(Subnet), tuple_size(Subnet) == 2 ->
-    handle_event(Event, State),
-    {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -268,15 +267,15 @@ maybe_create_vtep(_Overlay = #mesos_state_agentoverlayinfo{backend = Backend}) -
         vtep_mac = VTEPMAC,
         vtep_name = VTEPName
     } = VXLan,
-    case run_command("ip link show dev ~s", [VTEPName]) of
+    case dcos_overlay_helper:run_command("ip link show dev ~s", [VTEPName]) of
         {ok, _Output} ->
             ok;
         {error, 1, _} ->
-            {ok, _} = run_command("ip link add dev ~s type vxlan id ~B dstport 64000", [VTEPName, VNI])
+            {ok, _} = dcos_overlay_helper:run_command("ip link add dev ~s type vxlan id ~B dstport 64000", [VTEPName, VNI])
     end,
-    {ok, _} = run_command("ip link set ~s address ~s", [VTEPName, VTEPMAC]),
-    {ok, _} = run_command("ip link set ~s up", [VTEPName]),
-    case run_command("ip addr add ~s dev ~s", [VTEPIP, VTEPName]) of
+    {ok, _} = dcos_overlay_helper:run_command("ip link set ~s address ~s", [VTEPName, VTEPMAC]),
+    {ok, _} = dcos_overlay_helper:run_command("ip link set ~s up", [VTEPName]),
+    case dcos_overlay_helper:run_command("ip addr add ~s dev ~s", [VTEPIP, VTEPName]) of
         {ok, _} ->
             ok;
         {error, 2, "RTNETLINK answers: File exists\n"} ->
@@ -285,10 +284,10 @@ maybe_create_vtep(_Overlay = #mesos_state_agentoverlayinfo{backend = Backend}) -
 
 maybe_add_ip_rule(_Overlay = #mesos_state_agentoverlayinfo{info = #mesos_state_overlayinfo{subnet = Subnet}}) ->
     RuleStr = lists:flatten(io_lib:format("from ~s lookup 42", [Subnet])),
-    {ok, Rules} = run_command("ip rule show"),
+    {ok, Rules} = dcos_overlay_helper:run_command("ip rule show"),
     case string:str(Rules, RuleStr) of
         0 ->
-            {ok, _} = run_command("ip rule add from ~s lookup 42", [Subnet]);
+            {ok, _} = dcos_overlay_helper:run_command("ip rule add from ~s lookup 42", [Subnet]);
         _ ->
             ok
     end.
@@ -366,122 +365,6 @@ parse_vtep_mac(MAC) ->
         end,
         MACComponents).
 
-vtep_mac(IntList) ->
-    HexList = lists:map(fun(X) -> erlang:integer_to_list(X, 16) end, IntList),
-    lists:flatten(string:join(HexList, ":")).
-
-handle_event(Event, State0 = #state{known_overlays = KnownOverlays}) ->
-    lists:foldl(
-        fun(Overlay, Acc) -> try_configure_overlay(Event, Overlay, Acc) end,
-        State0,
-        KnownOverlays
-    ).
-
-try_configure_overlay(Event, Overlay, State0) ->
-    #mesos_state_agentoverlayinfo{info = #mesos_state_overlayinfo{subnet = Subnet}} = Overlay,
-    ParsedSubnet = parse_subnet(Subnet),
-    try_configure_overlay2(Event, Overlay, ParsedSubnet, State0).
-
-try_configure_overlay2(_Event = #{key := [navstar, overlay, Subnet], value := LashupValue},
-    Overlay, ParsedSubnet, State0) when Subnet == ParsedSubnet ->
-    lists:foldl(
-        fun(Entry, Acc) -> maybe_configure_overlay_entry(Overlay, Entry, Acc) end,
-        State0,
-        LashupValue
-    );
-try_configure_overlay2(_, _, _, State0) ->
-    State0.
-
-maybe_configure_overlay_entry(Overlay, {{VTEPIPPrefix, riak_dt_map}, Value}, State = #state{ip = MyIP}) ->
-    {_, AgentIP} = lists:keyfind({agent_ip, riak_dt_lwwreg}, 1, Value),
-    case AgentIP of
-        MyIP ->
-            State;
-        _ ->
-            configure_overlay_entry(Overlay, VTEPIPPrefix, Value, State)
-    end.
-
-
-configure_overlay_entry(Overlay, _VTEPIPPrefix = {VTEPIP, _PrefixLen}, LashupValue,
-        State0 = #state{}) ->
-    #mesos_state_agentoverlayinfo{
-        backend = #mesos_state_backendinfo{
-            vxlan = #mesos_state_vxlaninfo{
-                vtep_name = VTEPName
-            }
-        }
-    } = Overlay,
-    {_, MAC} = lists:keyfind({mac, riak_dt_lwwreg}, 1, LashupValue),
-    {_, AgentIP} = lists:keyfind({agent_ip, riak_dt_lwwreg}, 1, LashupValue),
-    {_, {SubnetIP, SubnetPrefixLen}} = lists:keyfind({subnet, riak_dt_lwwreg}, 1, LashupValue),
-    FormattedMAC = vtep_mac(MAC),
-    FormattedAgentIP = inet:ntoa(AgentIP),
-    FormattedVTEPIP = inet:ntoa(VTEPIP),
-    FormattedSubnetIP = inet:ntoa(SubnetIP),
-
-    %ip neigh replace 5.5.5.5 lladdr ff:ff:ff:ff:ff:ff dev eth0 nud permanent
-    {ok, _} = run_command("ip neigh replace ~s lladdr ~s dev ~s nud permanent",
-        [FormattedVTEPIP, FormattedMAC, VTEPName]),
-    %bridge fdb add to 00:17:42:8a:b4:05 dst 192.19.0.2 dev vxlan0
-    {ok, _} = run_command("bridge fdb replace to ~s dst ~s dev ~s", [FormattedMAC, FormattedAgentIP, VTEPName]),
-
-    {ok, _} = run_command("ip route replace ~s/32 via ~s table 42", [FormattedAgentIP, FormattedVTEPIP]),
-    {ok, _} = run_command("ip route replace ~s/~B via ~s", [FormattedSubnetIP, SubnetPrefixLen, FormattedVTEPIP]),
-
-    State0.
-
-run_command(Command, Opts) ->
-    Cmd = lists:flatten(io_lib:format(Command, Opts)),
-    run_command(Cmd).
-
--spec(run_command(Command :: string()) ->
-    {ok, Output :: string()} | {error, ErrorCode :: non_neg_integer(), ErrorString :: string()}).
--ifdef(DEV).
-run_command("ip link show dev vtep1024") ->
-    {error, 1, ""};
-run_command(Command) ->
-    io:format("Would run command: ~p~n", [Command]),
-    {ok, ""}.
--else.
-run_command(Command) ->
-    Port = open_port({spawn, Command}, [stream, in, eof, hide, exit_status, stderr_to_stdout]),
-    get_data(Port, []).
-
-get_data(Port, Sofar) ->
-    receive
-        {Port, {data, []}} ->
-            get_data(Port, Sofar);
-        {Port, {data, Bytes}} ->
-            get_data(Port, [Sofar|Bytes]);
-        {Port, eof} ->
-            return_data(Port, Sofar)
-    end.
-return_data(Port, Sofar) ->
-    Port ! {self(), close},
-    receive
-        {Port, closed} ->
-            true
-    end,
-    receive
-        {'EXIT',  Port,  _} ->
-            ok
-    after 1 ->              % force context switch
-        ok
-    end,
-    ExitCode =
-        receive
-            {Port, {exit_status, Code}} ->
-                Code
-        end,
-    case ExitCode of
-        0 ->
-            {ok, lists:flatten(Sofar)};
-        _ ->
-            {error, ExitCode, lists:flatten(Sofar)}
-    end.
-
--endif.
-
 -ifdef(TEST).
 
 deserialize_overlay_test() ->
@@ -491,7 +374,4 @@ deserialize_overlay_test() ->
     Msg = mesos_state_overlay_pb:decode_msg(OverlayData, mesos_state_agentinfo),
     ?assertEqual(<<"10.0.0.160:5051">>, Msg#mesos_state_agentinfo.ip).
 
-run_command_test() ->
-    ?assertEqual({error, 1, ""}, run_command("false")),
-    ?assertEqual({ok, ""}, run_command("true")).
 -endif.
