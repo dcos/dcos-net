@@ -29,11 +29,17 @@ start_link() ->
   supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 
+maybe_ipvs_child() ->
+  case dcos_l4lb_config:networking() of
+    true ->
+       [?CHILD(dcos_l4lb_ipvs, worker)];
+    false ->
+      []
+  end.
+
 init([]) ->
-  Children =
-  [
-      ?CHILD(dcos_l4lb_ipvs, worker),
-      ?CHILD(dcos_l4lb_lashup_vip_listener, worker)
+  Children = maybe_ipvs_child () ++ [
+    ?CHILD(dcos_l4lb_lashup_vip_listener, worker)
   ],
   {ok,
     {
