@@ -6,12 +6,10 @@
 %%% @end
 %%% Created : 27. May 2016 12:58 PM
 %%%-------------------------------------------------------------------
--module(dcos_dns_poll_fsm).
+-module(dcos_dns_poll_server).
 -author("sdhillon").
 
--behaviour(gen_fsm).
-
--compile(export_all).
+-behaviour(gen_server).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -28,38 +26,27 @@
 
 
 %% API
--export([start_link/0, status/0]).
+-export([start_link/0]).
 
-%% gen_fsm callbacks
+%% gen_server callbacks
 -export([init/1,
-    leader/2,
-    leader/3,
-    not_leader/2,
-    not_leader/3,
-    handle_event/3,
-    handle_sync_event/4,
-    handle_info/3,
-    terminate/3,
-    code_change/4]).
+    handle_info/2,
+    terminate/2,
+    code_change/3,
+    handle_call/3,
+    handle_cast/2]).
 
 -define(SERVER, ?MODULE).
 
--define(MAX_CONSECUTIVE_POLLS, 10).
 -define(PROTOCOLS, [<<"_tcp">>, <<"_udp">>]).
 
--record(state, {
-    master_list = [] :: [node()],
-    consecutive_polls = 0 :: non_neg_integer()
-}).
+-record(state, {}).
 
 -type ip_resolver() :: fun((task()) -> ({Prefix :: binary(), IP :: inet:ipv4_address()})).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
-
-status() ->
-    gen_fsm:sync_send_all_state_event(?SERVER, status).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -71,7 +58,7 @@ status() ->
 %%--------------------------------------------------------------------
 -spec(start_link() -> {ok, pid()} | ignore | {error, Reason :: term()}).
 start_link() ->
-    gen_fsm:start_link({local, ?SERVER}, ?MODULE, [], []).
+    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 %%%===================================================================
 %%% gen_fsm callbacks
@@ -80,153 +67,47 @@ start_link() ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Whenever a gen_fsm is started using gen_fsm:start/[3,4] or
-%% gen_fsm:start_link/[3,4], this function is called by the new
-%% process to initialize.
+%% Initializes the server
 %%
+%% @spec init(Args) -> {ok, State} |
+%%                     {ok, State, Timeout} |
+%%                     ignore |
+%%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
 -spec(init(Args :: term()) ->
-    {ok, StateName :: atom(), StateData :: #state{}} |
-    {ok, StateName :: atom(), StateData :: #state{}, timeout() | hibernate} |
+    {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
 init([]) ->
-    gen_fsm:start_timer(master_period(), try_master),
-    gen_fsm:start_timer(poll_period(), poll),
-    {ok, not_leader, #state{}}.
+    timer:send_after(poll_period(), poll),
+    {ok, #state{}}.
 
-
-%% See if I can become master
-not_leader({timeout, _Ref, poll}, State) ->
-    gen_fsm:start_timer(poll_period(), poll),
-    {next_state, not_leader, State};
-not_leader({timeout, _Ref, try_master}, State0) ->
-    {NextStateName, State1} = try_master(State0),
-    gen_fsm:start_timer(master_period(), try_master),
-    {next_state, NextStateName, State1}.
-
-
-not_leader(_Event, _From, State) ->
-    Reply = ok,
-    {reply, Reply, not_leader, State}.
-
-%% Step down from being master, but try to get it back immediately.
-%% There are situations when global can become inconsistent
-leader({timeout, _Ref, try_master}, State0 = #state{consecutive_polls = CP, master_list = ML})
-        when CP > ?MAX_CONSECUTIVE_POLLS ->
-    gen_fsm:start_timer(1, try_master),
-    global:del_lock({?MODULE, self()}, ML),
-    State1 = State0#state{consecutive_polls = 0},
-    {next_state, not_leader, State1};
-leader({timeout, _Ref, try_master}, State0 = #state{master_list = MasterList0}) ->
-    gen_fsm:start_timer(master_period(), try_master),
-    case dcos_dns:masters() of
-        MasterList0 ->
-            {next_state, leader, State0};
-        NewMasterList ->
-            global:del_lock({?MODULE, self()}, MasterList0),
-            State1 = State0#state{master_list = NewMasterList},
-            {next_state, not_leader, State1}
-    end;
-
-leader({timeout, _Ref, poll}, State0 = #state{consecutive_polls = CP, master_list = MasterList0}) ->
-    State1 = State0#state{consecutive_polls = CP + 1},
-    Rep =
-        case poll() of
-            ok ->
-                {next_state, leader, State1};
-            {error, _} ->
-                global:del_lock({?MODULE, self()}, MasterList0),
-                {next_state, not_leader, State1}
-        end,
-    gen_fsm:start_timer(poll_period(), poll),
-    Rep.
-
-
-leader(_Event, _From, State) ->
-    Reply = ok,
-    {reply, Reply, not_leader, State}.
+handle_info(poll, State) ->
+    case is_leader() of
+        true ->
+            poll();
+        false ->
+            ok
+    end,
+    timer:send_after(poll_period(), poll),
+    {noreply, State};
+handle_info(_Info, State) ->
+    {noreply, State}.
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Whenever a gen_fsm receives an event sent using
-%% gen_fsm:send_all_state_event/2, this function is called to handle
-%% the event.
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec(handle_event(Event :: term(), StateName :: atom(),
-    StateData :: #state{}) ->
-    {next_state, NextStateName :: atom(), NewStateData :: #state{}} |
-    {next_state, NextStateName :: atom(), NewStateData :: #state{},
-        timeout() | hibernate} |
-    {stop, Reason :: term(), NewStateData :: #state{}}).
-handle_event(_Event, StateName, State) ->
-    {next_state, StateName, State}.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Whenever a gen_fsm receives an event sent using
-%% gen_fsm:sync_send_all_state_event/[2,3], this function is called
-%% to handle the event.
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec(handle_sync_event(Event :: term(), From :: {pid(), Tag :: term()},
-    StateName :: atom(), StateData :: term()) ->
-    {reply, Reply :: term(), NextStateName :: atom(), NewStateData :: term()} |
-    {reply, Reply :: term(), NextStateName :: atom(), NewStateData :: term(),
-        timeout() | hibernate} |
-    {next_state, NextStateName :: atom(), NewStateData :: term()} |
-    {next_state, NextStateName :: atom(), NewStateData :: term(),
-        timeout() | hibernate} |
-    {stop, Reason :: term(), Reply :: term(), NewStateData :: term()} |
-    {stop, Reason :: term(), NewStateData :: term()}).
-
-handle_sync_event(status, _From, StateName, State = #state{master_list = ML, consecutive_polls = CPs}) ->
-    Status = #{
-        state => StateName,
-        masters => ML,
-        poll_count => CPs
-    },
-    {reply, {ok, Status}, StateName, State};
-handle_sync_event(_Event, _From, StateName, State) ->
-    Reply = ok,
-    {reply, Reply, StateName, State}.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% This function is called by a gen_fsm when it receives any
-%% message other than a synchronous or asynchronous event
-%% (or a system message).
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec(handle_info(Info :: term(), StateName :: atom(),
-    StateData :: term()) ->
-    {next_state, NextStateName :: atom(), NewStateData :: term()} |
-    {next_state, NextStateName :: atom(), NewStateData :: term(),
-        timeout() | hibernate} |
-    {stop, Reason :: normal | term(), NewStateData :: term()}).
-handle_info(_Info, StateName, State) ->
-    {next_state, StateName, State}.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% This function is called by a gen_fsm when it is about to
+%% This function is called by a gen_server when it is about to
 %% terminate. It should be the opposite of Module:init/1 and do any
-%% necessary cleaning up. When it returns, the gen_fsm terminates with
-%% Reason. The return value is ignored.
+%% necessary cleaning up. When it returns, the gen_server terminates
+%% with Reason. The return value is ignored.
 %%
+%% @spec terminate(Reason, State) -> void()
 %% @end
 %%--------------------------------------------------------------------
--spec(terminate(Reason :: normal | shutdown | {shutdown, term()}
-| term(), StateName :: atom(), StateData :: term()) -> term()).
-terminate(_Reason, _StateName, _State) ->
+-spec(terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
+    State :: #state{}) -> term()).
+terminate(_Reason, _State) ->
     ok.
 
 %%--------------------------------------------------------------------
@@ -234,50 +115,67 @@ terminate(_Reason, _StateName, _State) ->
 %% @doc
 %% Convert process state when code is changed
 %%
+%% @spec code_change(OldVsn, State, Extra) -> {ok, NewState}
 %% @end
 %%--------------------------------------------------------------------
--spec(code_change(OldVsn :: term() | {down, term()}, StateName :: atom(),
-    StateData :: #state{}, Extra :: term()) ->
-    {ok, NextStateName :: atom(), NewStateData :: #state{}}).
-code_change(_OldVsn, StateName, State, _Extra) ->
-    {ok, StateName, State}.
+-spec(code_change(OldVsn :: term() | {down, term()}, State :: #state{},
+    Extra :: term()) ->
+    {ok, NewState :: #state{}} | {error, Reason :: term()}).
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Handling call messages
+%%
+%% @end
+%%--------------------------------------------------------------------
+-spec(handle_call(Request :: term(), From :: {pid(), Tag :: term()},
+    State :: #state{}) ->
+    {reply, Reply :: term(), NewState :: #state{}} |
+    {reply, Reply :: term(), NewState :: #state{}, timeout() | hibernate} |
+    {noreply, NewState :: #state{}} |
+    {noreply, NewState :: #state{}, timeout() | hibernate} |
+    {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
+    {stop, Reason :: term(), NewState :: #state{}}).
+handle_call(_Request, _From, State) ->
+    {reply, ok, State}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Handling cast messages
+%%
+%% @end
+%%--------------------------------------------------------------------
+-spec(handle_cast(Request :: term(), State :: #state{}) ->
+    {noreply, NewState :: #state{}} |
+    {noreply, NewState :: #state{}, timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: #state{}}).
+handle_cast(_Request, State) ->
+    {noreply, State}.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
+is_leader() ->
+    {ok, IFAddrs} = inet:getifaddrs(),
+    case inet:getaddr("leader.mesos", inet) of
+        {ok, Addr} ->
+            is_leader(IFAddrs, Addr);
+        _ ->
+            false
+    end.
+
+-spec(is_leader(IFAddrs :: [term()], Addr :: inet:ip4_address()) -> boolean()).
+is_leader(IFAddrs, Addr) ->
+    IfOpts = [IfOpt || {_IfName, IfOpt} <- IFAddrs],
+    lists:any(fun(IfOpt) -> lists:member({addr, Addr}, IfOpt) end, IfOpts).
+
 poll_period() ->
     application:get_env(dcos_dns, poll_period, 30000).
-
-master_period() ->
-    application:get_env(dcos_dns, master_period, 15000).
-
-
-
-%% Should only be called in not_leader
-try_master(State0) ->
-    Masters = dcos_dns:masters(),
-    State1 = State0#state{master_list = Masters},
-    case dcos_dns:is_master() of
-        true ->
-            try_master1(State1);
-        false ->
-            {not_leader, State1}
-    end.
-
-try_master1(State = #state{master_list = Masters}) ->
-    ExemptNodes0 = application:get_env(lashup, exempt_nodes, []),
-    ExemptNodes1 = lists:usort(ExemptNodes0 ++ Masters),
-    application:set_env(lashup, exempt_nodes, ExemptNodes1),
-    %% The reason we don't immediately return is we want to schedule the try_master event
-    %% But, we must wait for it to return from global, otherwise we can get into a tight loop
-    LockResult = global:set_lock({?MODULE, self()}, Masters, 1),
-    case LockResult of
-        true ->
-            {leader, State};
-        false ->
-            {not_leader, State}
-    end.
 
 scheme() ->
     case os:getenv("MESOS_STATE_SSL_ENABLED") of
@@ -726,7 +624,7 @@ zone_records_fake_test() ->
     JSONFilename = filename:join(DataDir, "fake.json"),
     {ok, Data} = file:read_file(JSONFilename),
     {ok, ParsedBody} = mesos_state_client:parse_response(Data),
-    {_Zone, Records} = dcos_dns_poll_fsm:build_zone(ParsedBody),
+    {_Zone, Records} = build_zone(ParsedBody),
     RecordFileName = filename:join(DataDir, "fake_records"),
     {ok, [ExpectedRecords]} = file:consult(RecordFileName),
     ?assertEqual(ExpectedRecords, Records).
@@ -738,7 +636,7 @@ zone_records_single_agentip_test() ->
     {ok, ParsedBody} = mesos_state_client:parse_response(Data),
     Tasks = mesos_state_client:tasks(ParsedBody),
     [A|_T] = Tasks,
-    Result = dcos_dns_poll_fsm:task_ip_by_agent(A),
+    Result = task_ip_by_agent(A),
     ExpectedResult = {<<"agentip">>, {1, 2, 3, 12}},
     ?assertEqual(ExpectedResult, Result).
 
@@ -749,7 +647,7 @@ zone_records_single_autoip_test() ->
     {ok, ParsedBody} = mesos_state_client:parse_response(Data),
     Tasks = mesos_state_client:tasks(ParsedBody),
     [A|_T] = Tasks,
-    Result = dcos_dns_poll_fsm:task_ip_autoip(A),
+    Result = task_ip_autoip(A),
     ExpectedResult = {<<"autoip">>, {1, 2, 3, 12}},
     ?assertEqual(ExpectedResult, Result).
 
@@ -759,7 +657,7 @@ zone_records_agentip_test() ->
     {ok, Data} = file:read_file(Filename),
     {ok, ParsedBody} = mesos_state_client:parse_response(Data),
     Tasks = mesos_state_client:tasks(ParsedBody),
-    AgentIPList = [dcos_dns_poll_fsm:task_ip_by_agent(X) || X <- Tasks],
+    AgentIPList = [task_ip_by_agent(X) || X <- Tasks],
     %% ?debugFmt("Agentip List: ~p", [AgentIPList]).
     ?assertEqual(expected_agentip_list(), AgentIPList).
 
@@ -780,7 +678,7 @@ zone_records_autoip_test() ->
     {ok, Data} = file:read_file(Filename),
     {ok, ParsedBody} = mesos_state_client:parse_response(Data),
     Tasks = mesos_state_client:tasks(ParsedBody),
-    AutoIPList = [dcos_dns_poll_fsm:task_ip_autoip(X) || X <- Tasks],
+    AutoIPList = [task_ip_autoip(X) || X <- Tasks],
     %% ?debugFmt("Autoip List: ~p", [AutoIPList]).
     ?assertEqual(expected_autoip_list(), AutoIPList).
 
@@ -800,7 +698,7 @@ zone_records_state3_test() ->
     JSONFilename = filename:join(DataDir, "state3.json"),
     {ok, Data} = file:read_file(JSONFilename),
     {ok, ParsedBody} = mesos_state_client:parse_response(Data),
-    {_Zone, Records} = dcos_dns_poll_fsm:build_zone(ParsedBody),
+    {_Zone, Records} = build_zone(ParsedBody),
     RecordFileName = filename:join(DataDir, "state3_records"),
     {ok, [ExpectedRecords]} = file:consult(RecordFileName),
     ?assertEqual(ExpectedRecords, Records).
@@ -810,7 +708,7 @@ zone_records_state5_test() ->
     JSONFilename = filename:join(DataDir, "state5.json"),
     {ok, Data} = file:read_file(JSONFilename),
     {ok, ParsedBody} = mesos_state_client:parse_response(Data),
-    {_Zone, Records} = dcos_dns_poll_fsm:build_zone(ParsedBody),
+    {_Zone, Records} = build_zone(ParsedBody),
     RecordFileName = filename:join(DataDir, "state5_records"),
     {ok, [ExpectedRecords]} = file:consult(RecordFileName),
     ?assertEqual(ExpectedRecords, Records).
@@ -820,7 +718,7 @@ zone_records_state6_test() ->
     JSONFilename = filename:join(DataDir, "state6.json"),
     {ok, Data} = file:read_file(JSONFilename),
     {ok, ParsedBody} = mesos_state_client:parse_response(Data),
-    {_Zone, Records} = dcos_dns_poll_fsm:build_zone(ParsedBody),
+    {_Zone, Records} = build_zone(ParsedBody),
     RecordFileName = filename:join(DataDir, "state6_records"),
     {ok, [ExpectedRecords]} = file:consult(RecordFileName),
     ?assertEqual(ExpectedRecords, Records).
@@ -835,4 +733,117 @@ zone_records_mesos_dns_test() ->
     {ok, [ExpectedRecords]} = file:consult(RecordFileName),
     ?assertEqual(ExpectedRecords, Records).
 
+is_not_leader_test() ->
+    FakeIP = {255, 255, 255, 255},
+    FakeIFs = [{"lo0",
+        [{flags, [up, loopback, running, multicast]},
+            {addr, {0, 0, 0, 0, 0, 0, 0, 1}},
+            {netmask, {65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535}},
+            {addr, {127, 0, 0, 1}},
+            {netmask, {255, 0, 0, 0}},
+            {addr, {65152, 0, 0, 0, 0, 0, 0, 1}},
+            {netmask, {65535, 65535, 65535, 65535, 0, 0, 0, 0}},
+            {addr, {127, 94, 0, 2}},
+            {netmask, {255, 0, 0, 0}},
+            {addr, {127, 94, 0, 1}},
+            {netmask, {255, 0, 0, 0}}]},
+        {"gif0", [{flags, [pointtopoint, multicast]}]},
+        {"stf0", [{flags, []}]},
+        {"en0",
+            [{flags, [up, broadcast, running, multicast]},
+                {hwaddr, "x1ÁÔ¾´"},
+                {addr, {65152, 0, 0, 0, 31281, 49663, 65236, 48820}},
+                {netmask, {65535, 65535, 65535, 65535, 0, 0, 0, 0}},
+                {addr, {10, 0, 1, 2}},
+                {netmask, {255, 255, 255, 0}},
+                {broadaddr, {10, 0, 1, 255}},
+                {addr, {9732, 21760, 25, 1277, 31281, 49663, 65236, 48820}},
+                {netmask, {65535, 65535, 65535, 65535, 0, 0, 0, 0}},
+                {addr, {9732, 21760, 25, 1277, 30963, 47689, 2943, 38780}},
+                {netmask, {65535, 65535, 65535, 65535, 0, 0, 0, 0}}]},
+        {"en1",
+            [{flags, [up, broadcast, running]},
+                {hwaddr, [114, 0, 2, 202, 146, 64]}]},
+        {"en2",
+            [{flags, [up, broadcast, running]},
+                {hwaddr, [114, 0, 2, 202, 146, 65]}]},
+        {"p2p0",
+            [{flags, [up, broadcast, running, multicast]},
+                {hwaddr, "\n1ÁÔ¾´"}]},
+        {"awdl0",
+            [{flags, [broadcast, multicast]},
+                {hwaddr, [138, 161, 77, 222, 245, 8]}]},
+        {"bridge0",
+            [{flags, [up, broadcast, running, multicast]},
+                {hwaddr, [122, 49, 193, 77, 95, 0]}]},
+        {"vboxnet0",
+            [{flags, [up, broadcast, running, multicast]},
+                {hwaddr, [10, 0, 39, 0, 0, 0]},
+                {addr, {33, 33, 33, 1}},
+                {netmask, {255, 255, 255, 0}},
+                {broadaddr, {33, 33, 33, 255}}]},
+        {"vboxnet1",
+            [{flags, [broadcast, multicast]}, {hwaddr, [10, 0, 39, 0, 0, 1]}]},
+        {"vboxnet2",
+            [{flags, [broadcast, multicast]}, {hwaddr, [10, 0, 39, 0, 0, 2]}]},
+        {"vboxnet3",
+            [{flags, [broadcast, multicast]}, {hwaddr, [10, 0, 39, 0, 0, 3]}]}],
+    ?assertNot(is_leader(FakeIFs, FakeIP)).
+
+is_leader_test() ->
+    FakeIP = {127, 0, 0, 1},
+    FakeIFs = [{"lo0",
+        [{flags, [up, loopback, running, multicast]},
+            {addr, {0, 0, 0, 0, 0, 0, 0, 1}},
+            {netmask, {65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535}},
+            {addr, {127, 0, 0, 1}},
+            {netmask, {255, 0, 0, 0}},
+            {addr, {65152, 0, 0, 0, 0, 0, 0, 1}},
+            {netmask, {65535, 65535, 65535, 65535, 0, 0, 0, 0}},
+            {addr, {127, 94, 0, 2}},
+            {netmask, {255, 0, 0, 0}},
+            {addr, {127, 94, 0, 1}},
+            {netmask, {255, 0, 0, 0}}]},
+        {"gif0", [{flags, [pointtopoint, multicast]}]},
+        {"stf0", [{flags, []}]},
+        {"en0",
+            [{flags, [up, broadcast, running, multicast]},
+                {hwaddr, "x1ÁÔ¾´"},
+                {addr, {65152, 0, 0, 0, 31281, 49663, 65236, 48820}},
+                {netmask, {65535, 65535, 65535, 65535, 0, 0, 0, 0}},
+                {addr, {10, 0, 1, 2}},
+                {netmask, {255, 255, 255, 0}},
+                {broadaddr, {10, 0, 1, 255}},
+                {addr, {9732, 21760, 25, 1277, 31281, 49663, 65236, 48820}},
+                {netmask, {65535, 65535, 65535, 65535, 0, 0, 0, 0}},
+                {addr, {9732, 21760, 25, 1277, 30963, 47689, 2943, 38780}},
+                {netmask, {65535, 65535, 65535, 65535, 0, 0, 0, 0}}]},
+        {"en1",
+            [{flags, [up, broadcast, running]},
+                {hwaddr, [114, 0, 2, 202, 146, 64]}]},
+        {"en2",
+            [{flags, [up, broadcast, running]},
+                {hwaddr, [114, 0, 2, 202, 146, 65]}]},
+        {"p2p0",
+            [{flags, [up, broadcast, running, multicast]},
+                {hwaddr, "\n1ÁÔ¾´"}]},
+        {"awdl0",
+            [{flags, [broadcast, multicast]},
+                {hwaddr, [138, 161, 77, 222, 245, 8]}]},
+        {"bridge0",
+            [{flags, [up, broadcast, running, multicast]},
+                {hwaddr, [122, 49, 193, 77, 95, 0]}]},
+        {"vboxnet0",
+            [{flags, [up, broadcast, running, multicast]},
+                {hwaddr, [10, 0, 39, 0, 0, 0]},
+                {addr, {33, 33, 33, 1}},
+                {netmask, {255, 255, 255, 0}},
+                {broadaddr, {33, 33, 33, 255}}]},
+        {"vboxnet1",
+            [{flags, [broadcast, multicast]}, {hwaddr, [10, 0, 39, 0, 0, 1]}]},
+        {"vboxnet2",
+            [{flags, [broadcast, multicast]}, {hwaddr, [10, 0, 39, 0, 0, 2]}]},
+        {"vboxnet3",
+            [{flags, [broadcast, multicast]}, {hwaddr, [10, 0, 39, 0, 0, 3]}]}],
+    ?assert(is_leader(FakeIFs, FakeIP)).
 -endif.
