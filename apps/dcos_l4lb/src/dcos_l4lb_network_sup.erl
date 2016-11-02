@@ -32,7 +32,7 @@ start_link() ->
 maybe_ipvs_child() ->
   case dcos_l4lb_config:networking() of
     true ->
-       [?CHILD(dcos_l4lb_ipvs, worker)];
+       [?CHILD(dcos_l4lb_lb_mgr, worker)];
     false ->
       []
   end.
