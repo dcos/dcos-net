@@ -83,4 +83,5 @@ test_route_mgr(_Config) ->
     {ok, Pid} = dcos_l4lb_route_mgr:start_link(),
     dcos_l4lb_route_mgr:update_routes(Pid, [{1, 2, 3, 4}]),
     ["1.2.3.4 dev lo  scope link"] = routes(),
-    [] = dcos_l4lb_route_mgr:update_routes(Pid, []).
+    dcos_l4lb_route_mgr:update_routes(Pid, []),
+    [] = routes().
