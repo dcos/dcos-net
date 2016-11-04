@@ -215,7 +215,7 @@ poll(State0) ->
         end,
 
     URI = lists:flatten(io_lib:format(BaseURI, [IP])),
-    Headers = [{"Accept", "application/x-protobuf"}],
+    Headers = [{"Accept", "application/x-protobuf"}, {"node", atom_to_list(node())}],
     Response = httpc:request(get, {URI, Headers}, Options, [{body_format, binary}]),
     handle_response(State0, Response).
 

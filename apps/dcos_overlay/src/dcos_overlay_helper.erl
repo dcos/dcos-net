@@ -9,6 +9,11 @@
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
+-define(TEST_AND_DEV, true).
+-endif.
+
+-ifdef(DEV).
+-define(TEST_AND_DEV, true).
 -endif.
 
 run_command(Command, Opts) ->
@@ -17,7 +22,7 @@ run_command(Command, Opts) ->
 
 -spec(run_command(Command :: string()) ->
     {ok, Output :: string()} | {error, ErrorCode :: non_neg_integer(), ErrorString :: string()}).
--ifdef(DEV).
+-ifdef(TEST_AND_DEV).
 run_command("ip link show dev vtep1024") ->
     {error, 1, ""};
 run_command(Command) ->
@@ -64,8 +69,3 @@ return_data(Port, Sofar) ->
 
 -endif.
 
--ifdef(TEST).
-run_command_test() ->
-    ?assertEqual({error, 1, ""}, run_command("false")),
-    ?assertEqual({ok, ""}, run_command("true")).
--endif.
