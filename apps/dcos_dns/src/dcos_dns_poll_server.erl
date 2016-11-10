@@ -596,9 +596,10 @@ push_zone_to_lashup(ZoneName, NewRecords) ->
             {_, Value} ->
                 lists:usort(Value)
         end,
+    NoChangeDelta = ops([], []),
     Result =
         case ops(OldRecords, NewRecords) of
-            [] ->
+            NoChangeDelta ->
                 {ok, no_change};
             Ops ->
                 lashup_kv:request_op(Key, VClock, {update, Ops})
