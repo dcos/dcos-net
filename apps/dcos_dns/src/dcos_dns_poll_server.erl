@@ -609,10 +609,6 @@ push_zone_to_lashup(ZoneName, NewRecords) ->
         {ok, _} ->
             ok
     end.
-delete_op(Record, Acc0) ->
-    Op = {update, ?RECORDS_FIELD, {remove, Record}},
-    [Op|Acc0].
-
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
