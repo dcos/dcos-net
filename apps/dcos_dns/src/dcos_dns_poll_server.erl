@@ -386,21 +386,8 @@ add_task_record(IPResolver, Task = #task{discovery = Discovery = #discovery{}}, 
     add_task_records(Name, IPResolver, Task, Acc).
 
 add_task_records(Name, IPResolver, Task, Acc0) when is_binary(Name) ->
-    Acc1 = canonical_task_records(Name, IPResolver, Task, Acc0),
-    Acc2 = slave_task_record(Name, Task, Acc1),
-    basic_task_record(Name, IPResolver, Task, Acc2).
-
-slave_task_record(Name, Task = #task{framework = #framework{name = FrameworkName}}, Acc) ->
-    {_, IP} = task_ip_by_agent(Task),
-    Record =
-        #dns_rr{
-        name = format_name([Name, FrameworkName], <<"slave">>),
-        type = ?DNS_TYPE_A,
-        ttl = ?TTL,
-        data = #dns_rrdata_a{ip = IP}
-
-    },
-    [Record|Acc].
+    Acc = canonical_task_records(Name, IPResolver, Task, Acc0),
+    basic_task_record(Name, IPResolver, Task, Acc).
 
 basic_task_record(Name, IPResolver, Task = #task{framework = #framework{name = FrameworkName}}, Acc) ->
     {Postfix, IP} = IPResolver(Task),
@@ -578,10 +565,9 @@ base_records(ZoneName) ->
 ops(OldRecords, NewRecords) ->
     RecordsToDelete = ordsets:subtract(OldRecords, NewRecords),
     RecordsToAdd = ordsets:subtract(NewRecords, OldRecords),
-    [
-        {update, ?RECORDS_FIELD, {remove_all, RecordsToDelete}},
-        {update, ?RECORDS_FIELD, {add_all, RecordsToAdd}}
-    ].
+    Ops0 = [],
+    Ops1 = lists:foldl(fun delete_op/2, Ops0, RecordsToDelete),
+    lists:foldl(fun add_op/2, Ops1, RecordsToAdd).
 
 push_zone(ZoneName, NewRecords) ->
     push_zone_to_lashup(ZoneName, NewRecords),
@@ -596,10 +582,9 @@ push_zone_to_lashup(ZoneName, NewRecords) ->
             {_, Value} ->
                 lists:usort(Value)
         end,
-    NoChangeDelta = ops([], []),
     Result =
         case ops(OldRecords, NewRecords) of
-            NoChangeDelta ->
+            [] ->
                 {ok, no_change};
             Ops ->
                 lashup_kv:request_op(Key, VClock, {update, Ops})
@@ -610,6 +595,13 @@ push_zone_to_lashup(ZoneName, NewRecords) ->
         {ok, _} ->
             ok
     end.
+delete_op(Record, Acc0) ->
+    Op = {update, ?RECORDS_FIELD, {remove, Record}},
+    [Op|Acc0].
+add_op(Record, Acc0) ->
+    Op = {update, ?RECORDS_FIELD, {add, Record}},
+    [Op|Acc0].
+
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
