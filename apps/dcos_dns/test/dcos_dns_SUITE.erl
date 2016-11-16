@@ -11,6 +11,7 @@
 
 %% tests
 -export([
+         multiple_query_test/1,
          upstream_test/1,
          mesos_test/1,
          zk_test/1
@@ -56,7 +57,8 @@ all() ->
     [
      upstream_test,
      mesos_test,
-     zk_test
+     zk_test,
+     multiple_query_test
     ].
 
 generate_fixture_mesos_zone() ->
@@ -127,6 +129,11 @@ zk_test(_Config) ->
     Data = inet_dns:rr(Answer, data),
     ?assertMatch({127, 0, 0, 1}, Data),
     ok.
+
+multiple_query_test(_Config) ->
+    Expected = "1.1.1.1\n2.2.2.2\n127.0.0.1\n",
+    Command = "dig +keepopen +tcp +short spartan1.testing.express spartan2.testing.express ready.spartan",
+    ?assertCmdOutput(Expected, Command).
 
 %% @private
 %% @doc Use the dcos_dns resolver.
