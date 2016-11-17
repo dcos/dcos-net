@@ -444,7 +444,12 @@ ops(OldRecords, NewRecords) ->
     RecordsToDelete = ordsets:subtract(OldRecords, NewRecords),
     RecordsToAdd = ordsets:subtract(NewRecords, OldRecords),
     Ops0 = lists:foldl(fun delete_op/2, [], RecordsToDelete),
-    [{update, ?RECORDS_FIELD, {add_all, RecordsToAdd}}|Ops0].
+    case RecordsToAdd of
+        [] ->
+            [];
+        _ ->
+            [{update, ?RECORDS_FIELD, {add_all, RecordsToAdd}}|Ops0]
+    end.
 
 push_zone(ZoneName, NewRecords) ->
     push_zone_to_lashup(ZoneName, NewRecords),
