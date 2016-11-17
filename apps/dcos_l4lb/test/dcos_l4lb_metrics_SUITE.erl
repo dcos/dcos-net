@@ -76,8 +76,8 @@ test_named_vip(_Config) ->
     ct:pal("reaped ~p", [R]),
     ok.
 
-proc_file(test_one_conn) -> "../../../../testdata/proc_ip_vs_conn1";
-proc_file(_) -> "../../../../testdata/proc_ip_vs_conn2".
+proc_file(test_one_conn) -> "dcos_l4lb_metrics_SUITE_data/proc_ip_vs_conn1";
+proc_file(_) -> "dcos_l4lb_metrics_SUITE_data/proc_ip_vs_conn2".
 
 set_interval(test_wait_metrics) ->
     application:set_env(dcos_l4lb, metrics_interval_seconds, 1),
