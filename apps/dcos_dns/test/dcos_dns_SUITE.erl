@@ -132,7 +132,7 @@ zk_test(_Config) ->
 
 multiple_query_test(_Config) ->
     Expected = "1.1.1.1\n2.2.2.2\n127.0.0.1\n",
-    Command = "dig +keepopen +tcp +short spartan1.testing.express spartan2.testing.express master.mesos",
+    Command = "dig -p 8053 @127.0.0.1 +keepopen +tcp +short spartan1.testing.express spartan2.testing.express master.mesos",
     ?assertCmdOutput(Expected, Command).
 
 %% @private
