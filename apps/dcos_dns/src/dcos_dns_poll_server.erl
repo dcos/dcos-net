@@ -446,7 +446,7 @@ ops(OldRecords, NewRecords) ->
     Ops0 = lists:foldl(fun delete_op/2, [], RecordsToDelete),
     case RecordsToAdd of
         [] ->
-            [];
+            Ops0;
         _ ->
             [{update, ?RECORDS_FIELD, {add_all, RecordsToAdd}}|Ops0]
     end.
