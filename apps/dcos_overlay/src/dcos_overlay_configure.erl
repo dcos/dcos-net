@@ -90,6 +90,11 @@ configure_overlay_entry(Overlay, _VTEPIPPrefix = {VTEPIP, _PrefixLen}, LashupVal
     FormattedVTEPIP = inet:ntoa(VTEPIP),
     FormattedSubnetIP = inet:ntoa(SubnetIP),
 
+    %% TEST only : writes the parameters to a file
+    maybe_print_parameters([FormattedAgentIP, binary_to_list(VTEPName),
+                            FormattedVTEPIP, FormattedMAC, 
+                            FormattedSubnetIP, SubnetPrefixLen]),
+
     %ip neigh replace 5.5.5.5 lladdr ff:ff:ff:ff:ff:ff dev eth0 nud permanent
     {ok, _} = dcos_overlay_helper:run_command("ip neigh replace ~s lladdr ~s dev ~s nud permanent",
         [FormattedVTEPIP, FormattedMAC, VTEPName]),
@@ -102,3 +107,14 @@ configure_overlay_entry(Overlay, _VTEPIPPrefix = {VTEPIP, _PrefixLen}, LashupVal
 vtep_mac(IntList) ->
     HexList = lists:map(fun(X) -> erlang:integer_to_list(X, 16) end, IntList),
     lists:flatten(string:join(HexList, ":")).
+
+-ifdef(TEST).
+maybe_print_parameters(Parameters) ->
+    {ok, PrivDir} = application:get_env(dcos_overlay, outputdir),
+    File = filename:join(PrivDir, node()),
+    ok = file:write_file(File, io_lib:fwrite("~p.\n",[Parameters]), [append]).
+
+-else.
+maybe_print_parameters(_) ->
+    ok.
+-endif.
