@@ -102,7 +102,7 @@ boot_timeout() ->
     false ->
       30;
     true ->
-      60
+      120
   end.
 
 configure_output_dir(Nodes, Config) ->
