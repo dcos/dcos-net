@@ -386,21 +386,7 @@ add_task_record(IPResolver, Task = #task{discovery = Discovery = #discovery{}}, 
     add_task_records(Name, IPResolver, Task, Acc).
 
 add_task_records(Name, IPResolver, Task, Acc0) when is_binary(Name) ->
-    Acc1 = canonical_task_records(Name, IPResolver, Task, Acc0),
-    Acc2 = slave_task_record(Name, Task, Acc1),
-    basic_task_record(Name, IPResolver, Task, Acc2).
-
-slave_task_record(Name, Task = #task{framework = #framework{name = FrameworkName}}, Acc) ->
-    {_, IP} = task_ip_by_agent(Task),
-    Record =
-        #dns_rr{
-        name = format_name([Name, FrameworkName], <<"slave">>),
-        type = ?DNS_TYPE_A,
-        ttl = ?TTL,
-        data = #dns_rrdata_a{ip = IP}
-
-    },
-    [Record|Acc].
+    basic_task_record(Name, IPResolver, Task, Acc0).
 
 basic_task_record(Name, IPResolver, Task = #task{framework = #framework{name = FrameworkName}}, Acc) ->
     {Postfix, IP} = IPResolver(Task),
@@ -414,119 +400,6 @@ basic_task_record(Name, IPResolver, Task = #task{framework = #framework{name = F
     [Record | Acc].
 
 
-canonical_task_records(Name, IPResolver, Task, Acc0) ->
-    #task{
-        framework = #framework{
-            name = FrameworkName
-        }, id = TaskID0,
-        slave = #slave{
-            slave_id = SlaveID0
-        }
-    } = Task,
-    {Postfix, IP} = IPResolver(Task),
-    SlaveIDParts = binary:split(SlaveID0, <<"-">>, [global]),
-    SlaveID1 = lists:nth(length(SlaveIDParts), SlaveIDParts),
-    TaskID1 = hash_string(TaskID0),
-
-    Canonical = <<Name/binary, <<"-">>/binary, TaskID1/binary, <<"-">>/binary, SlaveID1/binary>>,
-    CanonicalFQDN = format_name([Canonical, FrameworkName], Postfix),
-
-    %_liquor-store._tcp.marathon.mesos.  -> ip + ports
-    %_liquor-store._tcp.marathon.$POSTIFX.mesos.$DOMAIN -> ip + ports
-    % every protocol + port combination
-
-    Record =
-        #dns_rr{
-            name = CanonicalFQDN,
-            type = ?DNS_TYPE_A,
-            ttl = ?TTL,
-            data = #dns_rrdata_a{ip = IP}
-        },
-    Acc1 = [Record|Acc0],
-    Acc2 = maybe_port_records(Name, Postfix, CanonicalFQDN, Task, Acc1),
-    maybe_discover_info_records(Postfix, CanonicalFQDN, Task, Acc2).
-
-
-maybe_discover_info_records(Postfix, CanonicalFQDN, Task = #task{discovery = Discovery = #discovery{}}, Acc0) ->
-    #discovery{ports = DiscoveryPorts, name = DiscoveryName} = Discovery,
-    #task{
-        framework = #framework{
-            name = FrameworkName
-        }
-    } = Task,
-    %_big-dog._tcp.marathon.mesos. -- all the discoveryports for that given name
-    %_https._liquor-store._tcp.marathon.mesos. -- all the discoveryports for that given port + name
-    SafeFrameworkName = list_to_binary(mesos_state:label(FrameworkName)),
-    SafeDiscoveryName = make_srv_like(DiscoveryName),
-    PortlessRecords = [
-        #dns_rr{
-            name = format_name2([SafeDiscoveryName, Protocol, SafeFrameworkName, Postfix]),
-            type = ?DNS_TYPE_SRV,
-            ttl = ?TTL,
-            data = #dns_rrdata_srv{
-                priority = 10,
-                weight = 10,
-                port = PortNumber,
-                target = CanonicalFQDN
-            }
-        }
-        || Protocol <- ?PROTOCOLS, #mesos_port{number = PortNumber} <- DiscoveryPorts],
-    PortedRecords = [
-        #dns_rr{
-            name = format_name2([make_srv_like(PortName), SafeDiscoveryName, make_srv_like(Protocol),
-                SafeFrameworkName, Postfix]),
-            type = ?DNS_TYPE_SRV,
-            ttl = ?TTL,
-            data = #dns_rrdata_srv{
-                priority = 10,
-                weight = 10,
-                port = PortNumber,
-                target = CanonicalFQDN
-            }
-        }
-        || #mesos_port{name = PortName, number = PortNumber, protocol = Protocol} <- DiscoveryPorts],
-    PortlessRecords ++ PortedRecords ++ Acc0;
-maybe_discover_info_records(_Postfix, _CanonicalFQDN, _Task, Acc0) ->
-    Acc0.
-
-
-maybe_port_records(Name, Postfix, CanonicalFQDN,
-    _Task = #task{
-        framework = #framework{
-            name = FrameworkName
-        },
-        resources = #{ports := Ports}
-    }, Acc0) ->
-    SafeName = make_srv_like(Name),
-    SafeFrameworkName = list_to_binary(mesos_state:label(FrameworkName)),
-    Records = [
-        #dns_rr{
-            name = format_name2([SafeName, Protocol, SafeFrameworkName, Postfix]),
-            type = ?DNS_TYPE_SRV,
-            ttl = ?TTL,
-            data = #dns_rrdata_srv{
-                priority = 10,
-                weight = 10,
-                port = Port,
-                target = CanonicalFQDN
-            }
-        }
-        || Protocol <- ?PROTOCOLS, Port <- Ports],
-    Records ++ Acc0;
-
-maybe_port_records(_Name, _Postfix, _CanonicalFQDN, _Task, Acc0) ->
-    Acc0.
-
-hash_string(String) ->
-    SHA1 = crypto:hash(sha, String),
-    <<Ret:5/binary, _/binary>> = zbase32:encode(SHA1),
-    Ret.
-
-make_srv_like(Name0) when is_atom(Name0) ->
-    make_srv_like(atom_to_binary(Name0, utf8));
-make_srv_like(Name0) ->
-    Name1 = list_to_binary(mesos_state:label(Name0)),
-    <<"_", Name1/binary>>.
 
 format_name(ListOfNames0, Postfix) ->
     ListOfNames1 = lists:map(fun mesos_state:label/1, ListOfNames0),
@@ -538,14 +411,6 @@ format_name(ListOfNames0, Postfix) ->
         end,
         Init,
         ListOfNames2
-    ).
-format_name2(ListOfNames) ->
-    lists:foldr(
-        fun(Part, Acc) ->
-            <<Part/binary, ".", Acc/binary>>
-        end,
-        ?DCOS_DOMAIN,
-        ListOfNames
     ).
 
 base_records(ZoneName) ->
@@ -578,9 +443,13 @@ base_records(ZoneName) ->
 ops(OldRecords, NewRecords) ->
     RecordsToDelete = ordsets:subtract(OldRecords, NewRecords),
     RecordsToAdd = ordsets:subtract(NewRecords, OldRecords),
-    Ops0 = [],
-    Ops1 = lists:foldl(fun delete_op/2, Ops0, RecordsToDelete),
-    lists:foldl(fun add_op/2, Ops1, RecordsToAdd).
+    Ops0 = lists:foldl(fun delete_op/2, [], RecordsToDelete),
+    case RecordsToAdd of
+        [] ->
+            Ops0;
+        _ ->
+            [{update, ?RECORDS_FIELD, {add_all, RecordsToAdd}}|Ops0]
+    end.
 
 push_zone(ZoneName, NewRecords) ->
     push_zone_to_lashup(ZoneName, NewRecords),
@@ -611,9 +480,7 @@ push_zone_to_lashup(ZoneName, NewRecords) ->
 delete_op(Record, Acc0) ->
     Op = {update, ?RECORDS_FIELD, {remove, Record}},
     [Op|Acc0].
-add_op(Record, Acc0) ->
-    Op = {update, ?RECORDS_FIELD, {add, Record}},
-    [Op|Acc0].
+
 
 
 -ifdef(TEST).
