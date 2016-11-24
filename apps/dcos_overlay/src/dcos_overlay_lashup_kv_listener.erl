@@ -18,17 +18,18 @@
 -export([init/1, callback_mode/0, terminate/3, code_change/4]).
 
 %% state API
--export([unconfigured/3, applying_first_config/3, batching/3, configuring/3]).
+-export([unconfigured/3, configuring/3, batching/3]).
 
 -define(SERVER, ?MODULE).
--define(LISTEN_TIMEOUT, 10000). %% 10 secs
+-define(LISTEN_TIMEOUT, 1000). %% 1 secs
 -define(NOW, 0).
 
 -include_lib("stdlib/include/ms_transform.hrl").
 
 -record(data, {
     ref :: reference(),
-    pid :: undefined | pid()
+    pid :: undefined | pid(),
+    events = maps:new() :: map()
 }).
 
 
@@ -106,36 +107,37 @@ terminate(_Reason, _State, _Data) ->
 code_change(_OldVsn, OldState, OldData, _Extra) ->
     {ok, OldState, OldData}.
 
-%%-------------------------------------------------------------------------------------------------------------
+%%--------------------------------------------------------------------------------
 %% State transition
-%% 
+%%-------------------------------------------------------------------------------- 
 %%                                                                lashup_event
 %%                                                                  +------+
 %%                                                                  |      |
-%%  +--------------+              +----------------+              +-+--------+                +-------------+
-%%  |              |              |                |              |          |                |             |
-%%  |              | lashup_event |                | lashup event |          |   timeout      |             |
-%%  | unconfigured +------------> |    applying    +------------> | batching +--------------> | configuring |
-%%  |              |              |  first_config  |              |          |                |             |
-%%  |              |              |                |              |          | <--------------+             |
-%%  |              |              |                |              |          |  lashup_event  |             |
-%%  +--------------+              +----------------+              +----------+                +-------------+
+%%  +--------------+              +----------------+              +-+--------+
+%%  |              |              |                |              |          |
+%%  |              | lashup_event |                | lashup event |          |
+%%  | unconfigured +------------> |  configuring   +------------> | batching |
+%%  |              |              |                |              |          |
+%%  |              |              |                | <------------|          |
+%%  |              |              |                |   timeout    |          |
+%%  +--------------+              +----------------+              +----------+
 %%
-%%--------------------------------------------------------------------------------------------------------------
+%%--------------------------------------------------------------------------------
 
 unconfigured(info, EventContent, Data) ->
-    {next_state, applying_first_config, Data, {next_event, internal, EventContent}}.
+    {next_state, configuring, Data, {next_event, internal, EventContent}}.
 
-applying_first_config(internal, 
-            _EventContent = {lashup_kv_events, Event = #{key := [navstar, overlay, Subnet], ref := Ref}},
-            _Data = #data{ref = Ref}) when is_tuple(Subnet), tuple_size(Subnet) == 2 ->
-    lager:info("Applying first config: ~p~n", [Event]),
-    dcos_overlay_configure:start_link(reply, Event),
+configuring(internal, {lashup_kv_events, NewEvent = #{key := [navstar, overlay, Subnet], ref := Ref}},
+            #data{ref = Ref, events = OldEvent}) when is_tuple(Subnet), tuple_size(Subnet) == 2 ->
+    DeltaEvent = get_delta_event(NewEvent, OldEvent),
+    lager:debug("Applying configuration: ~p", [DeltaEvent]),
+    dcos_overlay_configure:start_link(reply, DeltaEvent),
     keep_state_and_data;
-applying_first_config(info, {dcos_overlay_configure, applied_config}, Data) ->
-    lager:info("Done applying first config"),
-    {next_state, batching, Data};
-applying_first_config(info, _EventContent, _Data) ->
+configuring(info, {dcos_overlay_configure, applied_config, DeltaEvent}, Data0) ->
+    lager:debug("Done applying configuration: ~p", [DeltaEvent]),
+    Data1 = update_state_data(DeltaEvent, Data0),
+    {next_state, batching, Data1};
+configuring(info, _EventContent, _Data) ->
     {keep_state_and_data, postpone}.
             
 batching(info, EventContent, _Data) ->
@@ -143,15 +145,23 @@ batching(info, EventContent, _Data) ->
 batching(timeout, {do_configure, EventContent}, Data) ->
     {next_state, configuring, Data, {next_event, internal, EventContent}}.
 
-configuring(internal, {lashup_kv_events, Event = #{key := [navstar, overlay, Subnet], ref := Ref}},
-            Data0 = #data{ref = Ref}) when is_tuple(Subnet), tuple_size(Subnet) == 2 ->
-    Pid = dcos_overlay_configure:start_link(noreply, Event),
-    lager:debug("Starting configurator ~p for config: ~p~n", [Pid, Event]), 
-    Data1 = Data0#data{pid = Pid},
-    {keep_state, Data1};
-configuring(info, _EventContent, Data) ->
-    %% Short circuit the current configurator
-    %% as there is an updated configuration
-    lager:debug("Killing configurator ~p as new config received", [Data#data.pid]), 
-    dcos_overlay_configure:stop(Data#data.pid),
-    {next_state, batching, Data, postpone}.
+%% private API
+
+get_delta_event(NewEvent = #{key := Key, value := NewValue}, OldEvent) ->
+    case maps:get(Key, OldEvent, []) of
+      [] -> 
+          NewEvent;
+      OldValue ->
+          DeltaValue = sets:to_list(sets:subtract(sets:from_list(NewValue), OldValue)),
+          maps:put(Key, DeltaValue, NewEvent)
+    end.
+ 
+update_state_data(#{key := Key, value := DeltaValue}, Data = #data{events = Event0}) ->
+    Event1 = case maps:get(Key, Event0, []) of
+               [] ->
+                   maps:put(Key, DeltaValue, Event0);
+               OldValue ->
+                   NewValue = sets:union(sets:from_list(DeltaValue), OldValue),
+                   maps:put(Key, NewValue, Event0)
+             end,
+    Data#data{events = Event1}.

@@ -30,7 +30,7 @@ reply(Pid, Msg) ->
 
 maybe_configure_and_reply(LashupEvent, MyPid) ->
     maybe_configure(LashupEvent),
-    reply(MyPid, {dcos_overlay_configure, applied_config}).
+    reply(MyPid, {dcos_overlay_configure, applied_config, LashupEvent}).
 
 maybe_configure(LashupEvent) ->
     lager:debug("Started applying config ~p~n", [LashupEvent]),
