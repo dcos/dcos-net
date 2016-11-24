@@ -22,7 +22,6 @@
 
 -define(SERVER, ?MODULE).
 -define(LISTEN_TIMEOUT, 1000). %% 1 secs
--define(NOW, 0).
 
 -include_lib("stdlib/include/ms_transform.hrl").
 
@@ -147,21 +146,23 @@ batching(timeout, {do_configure, EventContent}, Data) ->
 
 %% private API
 
+-spec(get_delta_event(lashup_kv:kv2(), #{[any()] := map()}) -> lashup_kv:kv2()).
 get_delta_event(NewEvent = #{key := Key, value := NewValue}, OldEvent) ->
     case maps:get(Key, OldEvent, []) of
       [] -> 
           NewEvent;
       OldValue ->
-          DeltaValue = sets:to_list(sets:subtract(sets:from_list(NewValue), OldValue)),
-          maps:put(Key, DeltaValue, NewEvent)
+          DeltaValue = ordsets:to_list(ordsets:subtract(ordsets:from_list(NewValue), OldValue)),
+          maps:put(value, DeltaValue, NewEvent)
     end.
- 
+
+-spec(update_state_data(lashup:kv2(), #data{}) -> #data{}).
 update_state_data(#{key := Key, value := DeltaValue}, Data = #data{events = Event0}) ->
     Event1 = case maps:get(Key, Event0, []) of
                [] ->
                    maps:put(Key, DeltaValue, Event0);
                OldValue ->
-                   NewValue = sets:union(sets:from_list(DeltaValue), OldValue),
+                   NewValue = ordsets:union(ordsets:from_list(DeltaValue), OldValue),
                    maps:put(Key, NewValue, Event0)
              end,
     Data#data{events = Event1}.

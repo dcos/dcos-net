@@ -1,4 +1,6 @@
 machine:
+  pre:
+    - echo "127.0.0.1 $(uname -n|cut -f1 -d.) $(uname -n) localhost" | sudo tee /etc/hosts
   environment:
     PATH: ${HOME}/extras/bin:${HOME}/extras/otp/19.1/bin:${PATH}
 dependencies:
