@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, ip/0, overlays/0]).
+-export([start_link/0, ip/0, overlays/0, netlink/0]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -34,13 +34,16 @@
 -include("dcos_overlay.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 -include_lib("mesos_state/include/mesos_state_overlay_pb.hrl").
+-include_lib("gen_netlink/include/netlink.hrl").
+
 -define(MASTERS_KEY, {masters, riak_dt_orswot}).
 
 
 -record(state, {
     known_overlays = ordsets:new(),
     ip = undefined :: undefined | inet:ip4_address(),
-    poll_period = ?MIN_POLL_PERIOD :: integer()
+    poll_period = ?MIN_POLL_PERIOD :: integer(),
+    netlink :: undefined | pid() 
 }).
 
 
@@ -53,6 +56,9 @@ ip() ->
 
 overlays() ->
     gen_server:call(?SERVER, overlays).
+
+netlink() ->
+    gen_server:call(?SERVER, netlink).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -84,8 +90,9 @@ start_link() ->
     {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
 init([]) ->
+    {ok, Pid} = gen_netlink_client:start_link(?NETLINK_ROUTE),
     timer:send_after(0, poll),
-    {ok, #state{}}.
+    {ok, #state{netlink = Pid}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -106,6 +113,8 @@ handle_call(ip, _From, State = #state{ip = IP}) ->
     {reply, IP, State};
 handle_call(overlays, _From, State = #state{known_overlays = KnownOverlays}) ->
     {reply, KnownOverlays, State};
+handle_call(netlink, _From, State = #state{netlink = NETLINK}) ->
+    {reply, NETLINK, State};
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
