@@ -61,6 +61,9 @@ start_link() ->
     {ok, State :: atom(), Data :: #data{}} |
     {stop, Reason :: term()} | ignore).
 init([]) ->
+    MaxHeapSizeInWords = (100 bsl 20) div erlang:system_info(wordsize), %%100 MB
+    process_flag(message_queue_data, on_heap),
+    process_flag(max_heap_size, MaxHeapSizeInWords), 
     {ok, Ref} = lashup_kv_events_helper:start_link(ets:fun2ms(fun({[navstar, overlay, '_']}) -> true end)),
     {ok, unconfigured, #data{ref = Ref}}.
 
