@@ -21,6 +21,8 @@
 -export([unconfigured/3, configuring/3, batching/3]).
 
 -define(SERVER, ?MODULE).
+-define(HEAPSIZE, 100). %% In MB
+-define(KILL_TIMER, 300000). %% 5 min
 -define(LISTEN_TIMEOUT, 1000). %% 1 secs
 
 -include_lib("stdlib/include/ms_transform.hrl").
@@ -28,7 +30,8 @@
 -record(data, {
     ref :: reference(),
     pid :: undefined | pid(),
-    events = maps:new() :: map()
+    events = maps:new() :: map(),
+    kill_timer :: undefined | timer:tref()
 }).
 
 
@@ -61,7 +64,7 @@ start_link() ->
     {ok, State :: atom(), Data :: #data{}} |
     {stop, Reason :: term()} | ignore).
 init([]) ->
-    MaxHeapSizeInWords = (100 bsl 20) div erlang:system_info(wordsize), %%100 MB
+    MaxHeapSizeInWords = (?HEAPSIZE bsl 20) div erlang:system_info(wordsize), %%100 MB
     process_flag(message_queue_data, on_heap),
     process_flag(max_heap_size, MaxHeapSizeInWords), 
     {ok, Ref} = lashup_kv_events_helper:start_link(ets:fun2ms(fun({[navstar, overlay, '_']}) -> true end)),
@@ -130,12 +133,15 @@ unconfigured(info, EventContent, Data) ->
     {next_state, configuring, Data, {next_event, internal, EventContent}}.
 
 configuring(internal, {lashup_kv_events, NewEvent = #{key := [navstar, overlay, Subnet], ref := Ref}},
-            #data{ref = Ref, events = OldEvent}) when is_tuple(Subnet), tuple_size(Subnet) == 2 ->
+            Data0 = #data{ref = Ref, events = OldEvent}) when is_tuple(Subnet), tuple_size(Subnet) == 2 ->
     DeltaEvent = get_delta_event(NewEvent, OldEvent),
     lager:debug("Applying configuration: ~p", [DeltaEvent]),
+    {ok, Timer} = timer:kill_after(?KILL_TIMER),
     dcos_overlay_configure:start_link(reply, DeltaEvent),
-    keep_state_and_data;
-configuring(info, {dcos_overlay_configure, applied_config, DeltaEvent}, Data0) ->
+    Data1 = Data0#data{kill_timer = Timer},
+    {keep_state, Data1};
+configuring(info, {dcos_overlay_configure, applied_config, DeltaEvent}, Data0 = #data{kill_timer = Timer}) ->
+    timer:cancel(Timer),
     lager:debug("Done applying configuration: ~p", [DeltaEvent]),
     Data1 = update_state_data(DeltaEvent, Data0),
     {next_state, batching, Data1};
