@@ -95,14 +95,13 @@ configure_overlay_entry(Overlay, _VTEPIPPrefix = {VTEPIP, _PrefixLen}, LashupVal
                             FormattedVTEPIP, FormattedMAC, 
                             FormattedSubnetIP, SubnetPrefixLen]),
 
-    %ip neigh replace 5.5.5.5 lladdr ff:ff:ff:ff:ff:ff dev eth0 nud permanent
-    {ok, _} = dcos_overlay_helper:run_command("ip neigh replace ~s lladdr ~s dev ~s nud permanent",
-        [FormattedVTEPIP, FormattedMAC, VTEPName]),
-    %bridge fdb add to 00:17:42:8a:b4:05 dst 192.19.0.2 dev vxlan0
-    {ok, _} = dcos_overlay_helper:run_command("bridge fdb replace to ~s dst ~s dev ~s", [FormattedMAC, FormattedAgentIP, VTEPName]),
-
-    {ok, _} = dcos_overlay_helper:run_command("ip route replace ~s/32 via ~s table 42", [FormattedAgentIP, FormattedVTEPIP]),
-    {ok, _} = dcos_overlay_helper:run_command("ip route replace ~s/~B via ~s", [FormattedSubnetIP, SubnetPrefixLen, FormattedVTEPIP]).
+    Pid = dcos_overlay_poller:netlink(),
+    VTEPNameStr = binary_to_list(VTEPName),
+    MACTuple = list_to_tuple(MAC),
+    {ok, _} = dcos_overlay_netlink:ipneigh_replace(Pid, VTEPIP, MACTuple, VTEPNameStr),
+    {ok, _} = dcos_overlay_netlink:bridge_fdb_replace(Pid, AgentIP, MACTuple, VTEPNameStr),
+    {ok, _} = dcos_overlay_netlink:iproute_replace(Pid, AgentIP, 32, VTEPIP, 42),
+    {ok, _} = dcos_overlay_netlink:iproute_replace(Pid, SubnetIP, SubnetPrefixLen, VTEPIP, main).
 
 vtep_mac(IntList) ->
     HexList = lists:map(fun(X) -> erlang:integer_to_list(X, 16) end, IntList),

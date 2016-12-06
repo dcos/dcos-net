@@ -5,17 +5,24 @@
 -module(dcos_overlay_netlink).
 
 %% Application callbacks
--export([replace_ipneigh/4, replace_iproute/5, replace_bridge_fdb/4,
-        show_iplink/2, add_iplink/5, set_iplink/3, show_iprule/1,
-        add_iprule/4, add_ipaddr/4, if_nametoindex/1]).
+-export([ipneigh_replace/4, iproute_replace/5, bridge_fdb_replace/4,
+        iplink_show/2, iplink_add/5, iplink_set/3, iprule_show/1,
+        iprule_add/4, make_iprule/3, match_iprules/2, is_iprule_present/2,
+        ipaddr_replace/4, if_nametoindex/1]).
 
 -include_lib("gen_netlink/include/netlink.hrl").
 
-if_nametoindex(Ifname) ->
-  gen_netlink_client:if_nametoindex(Ifname).
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-define(TEST_AND_DEV, true).
+-endif.
 
-%% eg. replace_ipneigh(Pid, {44,128,0,1}, {16#70,16#b3,16#d5,16#80,16#00,16#03}, "vtep1024").
-replace_ipneigh(Pid, Dst, Lladdr, Ifname) ->
+-ifdef(DEV).
+-define(TEST_AND_DEV, true).
+-endif.
+
+%% eg. ipneigh_replace(Pid, {44,128,0,1}, {16#70,16#b3,16#d5,16#80,16#00,16#03}, "vtep1024").
+ipneigh_replace(Pid, Dst, Lladdr, Ifname) ->
   Attr = [{dst, Dst}, {lladdr, Lladdr}],
   Neigh = {
     _Family = inet,
@@ -24,10 +31,10 @@ replace_ipneigh(Pid, Dst, Lladdr, Ifname) ->
     _Flags = 0, 
     _NdmType = 0,
     Attr},
-  {ok, _} = gen_netlink_client:rtnl_request(Pid, newneigh, [create, replace], Neigh).
- 
-%% eg. replace_iproute(Pid, {192,168,65,91}, 32, {44,128,0,1}, 42).
-replace_iproute(Pid, Dst, DstPrefixLen, Src, Table) ->
+  netlink_request(Pid, newneigh, [create, replace], Neigh).
+
+%% eg. iproute_replace(Pid, {192,168,65,91}, 32, {44,128,0,1}, 42).
+iproute_replace(Pid, Dst, DstPrefixLen, Src, Table) ->
   Attr = [{dst, Dst}, {gateway, Src}],
   Route = {
     _Family = inet,
@@ -40,37 +47,36 @@ replace_iproute(Pid, Dst, DstPrefixLen, Src, Table) ->
     _Type = unicast,
     _Flags = [],
     Attr},
-  {ok, _} = gen_netlink_client:rtnl_request(Pid, newroute, [create, replace], Route).
+  netlink_request(Pid, newroute, [create, replace], Route).
 
-%% eg. replace_bridge_fdb(Pid, {16#70,16#b3,16#d5,16#80,16#00,16#03}, {192,168,65,91}, "vtep1024").
-replace_bridge_fdb(Pid, Lladdr, Dst, Ifname) ->
-  Attr = [{lladdr, Lladdr},{dst, Dst}],
+%% eg. bridge_fdb_replace(Pid, {192,168,65,91}, {16#70,16#b3,16#d5,16#80,16#00,16#03}, "vtep1024").
+bridge_fdb_replace(Pid, Dst, Lladdr, Ifname) ->
+  Attr = [{dst, Dst}, {lladdr, Lladdr}],
   Neigh = {
     _Family = bridge,
     _Ifindex = if_nametoindex(Ifname),
     _State = ?NUD_PERMANENT bor ?NUD_NOARP,
-    _Flags = 16#02,  %% NTF_SELF  
+    _Flags = 2,  %% NTF_SELF  
     _NdmType = 0,
     Attr},
-  {ok, _} = gen_netlink_client:rtnl_request(Pid, newneigh, [create, replace], Neigh).
+  netlink_request(Pid, newneigh, [create, replace], Neigh).
 
-%% eg. show_iplink(Pid, "vtep1024") -> 
+%% eg. iplink_show(Pid, "vtep1024") -> 
 %%        [{rtnetlink,newlink,[],3,31030, 
 %%          {unspec,arphrd_ether,8, [lower_up,multicast,running,broadcast,up],
 %%           [], [{ifname,"vtep1024"}, ...]}}]
-show_iplink(Pid, Ifname) ->
+iplink_show(Pid, Ifname) ->
   Attr = [{ifname, Ifname}, {ext_mask, 1}],
   Link = {packet, arphrd_netrom, 0, [], [], Attr},
-  {ok, Resp} = gen_netlink_client:rtnl_request(Pid, getlink, [], Link), 
-  Resp.
+  netlink_request(Pid, getlink, [], Link). 
 
-%% add_iplink(Pid, "vtep1024", "vxlan", 1024, 64000)
-add_iplink(Pid, Ifname, Type, Id, DstPort) ->
+%% iplink_add(Pid, "vtep1024", "vxlan", 1024, 64000)
+iplink_add(Pid, Ifname, Kind, Id, DstPort) ->
   Vxlan = [{id, Id}, {ttl, 0}, {tos, 0}, {learning, 1}, {proxy, 0}, 
            {rsc, 0}, {l2miss, 0}, {l3miss, 0}, {udp_csum, 0},
            {udp_zero_csum6_tx, 0}, {udp_zero_csum6_rx, 0},
            {remcsum_tx, 0}, {remcsum_rx, 0}, {port, DstPort}],
-  LinkInfo = [{kind, Type}, {data, Vxlan}],
+  LinkInfo = [{kind, Kind}, {data, Vxlan}],
   Attr = [{ifname, Ifname}, {linkinfo, LinkInfo}],
   Link = {
     _Family = inet,
@@ -79,10 +85,10 @@ add_iplink(Pid, Ifname, Type, Id, DstPort) ->
     _Flags = [],
     _Change = [],
     Attr},
-  {ok, _} = gen_netlink_client:rtnl_request(Pid, newlink, [create, excl], Link).
+  netlink_request(Pid, newlink, [create, excl], Link).
 
-%% set_iplink(Pid, {16#70,16#b3,16#d5,16#80,16#00,16#01}, "vtep1024").
-set_iplink(Pid, Lladdr, Ifname) ->
+%% iplink_set(Pid, {16#70,16#b3,16#d5,16#80,16#00,16#01}, "vtep1024").
+iplink_set(Pid, Lladdr, Ifname) ->
  Attr = [{address, Lladdr}],
  Link = {
    _Family = inet,
@@ -91,20 +97,19 @@ set_iplink(Pid, Lladdr, Ifname) ->
    _Flags = [1],
    _Change = [1],
    Attr},
- {ok, _} = gen_netlink_client:rtnl_request(Pid, newlink, [], Link).
+ netlink_request(Pid, newlink, [], Link).
 
-%% show_iprule(Pid) ->
+%% iprule_show(Pid) ->
 %%   [...., {rtnetlink,newrule,[multi],6,31030,
 %%       {inet,0,8,0,42,unspec,universe,unicast,[],
 %%          [{table,42},{priority,32765},{src,{9,0,0,0}}]}}, ....]
-show_iprule(Pid) ->
+iprule_show(Pid) ->
  Attr = [{29, <<1:32/native-integer>>}], %% [{ext_mask, 1}] 
  Rule = {inet, 0, 0, 0, 0, 0, 0, 0, [], Attr},
- {ok, Resp} = gen_netlink_client:rtnl_request(Pid, getrule, [root, match], Rule),
- Resp.
+ netlink_request(Pid, getrule, [root, match], Rule).
 
-%% add_iprule(Pid, {9,0,0,0}, 8, 42).
-add_iprule(Pid, Src, SrcPrefixLen, Table) ->
+%% iprule_add(Pid, {9,0,0,0}, 8, 42).
+iprule_add(Pid, Src, SrcPrefixLen, Table) ->
  Attr = [{src, Src}],
  Rule = {
    _Family = inet,
@@ -117,10 +122,27 @@ add_iprule(Pid, Src, SrcPrefixLen, Table) ->
    _Type = unicast,
    _Flags = [],
    Attr},
- {ok, _} = gen_netlink_client:rtnl_request(Pid, newrule, [create, excl], Rule).
+ netlink_request(Pid, newrule, [create, excl], Rule).
 
-%% add_ipaddr(Pid, {44,128,0,1}, 32, "vtep1024"). 
-add_ipaddr(Pid, IP, PrefixLen, Ifname) ->
+make_iprule(Src, SrcPrefixLen, Table) ->
+    {inet,0,SrcPrefixLen,0,Table,unspec,universe,unicast,[], [{src, Src}]}.
+
+is_iprule_present([], _) ->
+  false;
+is_iprule_present([{rtnetlink, newrule, _, _, _, ParsedRule}|Rules], Rule) ->
+  case match_iprules(Rule, ParsedRule) of
+      matched -> true;
+      not_matched -> is_iprule_present(Rules, Rule)
+  end.
+
+match_iprules({inet, 0, SrcPrefixLen, 0, Table, unspec,universe,unicast,[], [{src, Src}]},
+  {inet, 0, SrcPrefixLen, 0, Table, unspec,universe,unicast,[], [{src, Src}|_]}) ->
+  matched;
+match_iprules(_,_) ->
+  not_matched.
+
+%% ipaddr_add(Pid, {44,128,0,1}, 32, "vtep1024"). 
+ipaddr_replace(Pid, IP, PrefixLen, Ifname) ->
  Attr = [{local, IP},{address, IP}],
  Msg = {
    _Family = inet, 
@@ -129,4 +151,20 @@ add_ipaddr(Pid, IP, PrefixLen, Ifname) ->
    _Scope = 0, 
    _Ifindex = if_nametoindex(Ifname), 
    Attr},
- {ok, _} = gen_netlink_client:rtnl_request(Pid, newaddr, [create, excl], Msg). 
+ netlink_request(Pid, newaddr, [create, replace], Msg). 
+
+-ifdef(TEST_AND_DEV).
+netlink_request(_Pid, getlink, _Flags, _Msg) ->
+    {error, 1, ""};
+netlink_request(_Pid, Type, Flags, Msg) ->
+    io:format("Would run fun ~p with flags ~p and argument ~p~n", [Type, Flags, Msg]),
+    {ok, []}.
+
+if_nametoindex("vtep1024") -> 8.
+-else.
+netlink_request(Pid, Type, Flags, Msg) ->
+    gen_netlink_client:rtnl_request(Pid, Type, Flags, Msg).
+
+if_nametoindex(Ifname) ->
+  gen_netlink_client:if_nametoindex(Ifname).
+-endif.
