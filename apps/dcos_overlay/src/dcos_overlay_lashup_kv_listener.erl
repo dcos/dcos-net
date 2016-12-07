@@ -27,13 +27,15 @@
 
 -include_lib("stdlib/include/ms_transform.hrl").
 
+-type config() :: #{OverlayKey :: term() := Value :: term()}.
+-type config2() :: #{key := term(), value := term()}.
+
 -record(data, {
     ref :: reference(),
     pid :: undefined | pid(),
-    events = maps:new() :: map(),
+    config = maps:new() :: config(),
     kill_timer :: undefined | timer:tref()
 }).
-
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -132,18 +134,21 @@ code_change(_OldVsn, OldState, OldData, _Extra) ->
 unconfigured(info, EventContent, Data) ->
     {next_state, configuring, Data, {next_event, internal, EventContent}}.
 
-configuring(internal, {lashup_kv_events, NewEvent = #{key := [navstar, overlay, Subnet], ref := Ref}},
-            Data0 = #data{ref = Ref, events = OldEvent}) when is_tuple(Subnet), tuple_size(Subnet) == 2 ->
-    DeltaEvent = get_delta_event(NewEvent, OldEvent),
-    lager:debug("Applying configuration: ~p", [DeltaEvent]),
+configuring(internal, {lashup_kv_events, #{key := [navstar, overlay, Subnet] = OverlayKey, value := Value, ref := Ref}},
+            Data0 = #data{ref = Ref, config = OldConfig}) when is_tuple(Subnet), tuple_size(Subnet) == 2 ->
+    NewConfig = #{key => OverlayKey, value => Value},
+    DeltaConfig = delta_config(NewConfig, OldConfig),
+    lager:debug("Applying configuration: ~p", [DeltaConfig]),
     {ok, Timer} = timer:kill_after(?KILL_TIMER),
-    dcos_overlay_configure:start_link(reply, DeltaEvent),
+    dcos_overlay_configure:start_link(DeltaConfig),
     Data1 = Data0#data{kill_timer = Timer},
     {keep_state, Data1};
-configuring(info, {dcos_overlay_configure, applied_config, DeltaEvent}, Data0 = #data{kill_timer = Timer}) ->
+configuring(info, {dcos_overlay_configure, applied_config, DeltaConfig},
+            Data0 = #data{kill_timer = Timer, config = OldConfig}) ->
     timer:cancel(Timer),
-    lager:debug("Done applying configuration: ~p", [DeltaEvent]),
-    Data1 = update_state_data(DeltaEvent, Data0),
+    lager:debug("Done applying configuration: ~p", [DeltaConfig]),
+    NewConfig = update_config(DeltaConfig, OldConfig),
+    Data1 = Data0#data{config = NewConfig},
     {next_state, batching, Data1};
 configuring(info, _EventContent, _Data) ->
     {keep_state_and_data, postpone}.
@@ -155,23 +160,22 @@ batching(timeout, {do_configure, EventContent}, Data) ->
 
 %% private API
 
--spec(get_delta_event(lashup_kv:kv2(), #{[any()] := map()}) -> lashup_kv:kv2()).
-get_delta_event(NewEvent = #{key := Key, value := NewValue}, OldEvent) ->
-    case maps:get(Key, OldEvent, []) of
-      [] -> 
-          NewEvent;
-      OldValue ->
-          DeltaValue = ordsets:to_list(ordsets:subtract(ordsets:from_list(NewValue), OldValue)),
-          maps:put(value, DeltaValue, NewEvent)
+-spec(delta_config(NewConfig :: config2(), OldConfig :: config()) -> config2()).
+delta_config(NewConfig = #{key := OverlayKey, value := NewValue}, OldConfig) ->
+    case maps:get(OverlayKey, OldConfig, []) of
+        [] ->
+            NewConfig;
+        OldValue ->
+            DeltaValue = ordsets:to_list(ordsets:subtract(ordsets:from_list(NewValue), OldValue)),
+            #{key => OverlayKey, value => DeltaValue}
     end.
 
--spec(update_state_data(lashup:kv2(), #data{}) -> #data{}).
-update_state_data(#{key := Key, value := DeltaValue}, Data = #data{events = Event0}) ->
-    Event1 = case maps:get(Key, Event0, []) of
-               [] ->
-                   maps:put(Key, DeltaValue, Event0);
-               OldValue ->
-                   NewValue = ordsets:union(ordsets:from_list(DeltaValue), OldValue),
-                   maps:put(Key, NewValue, Event0)
-             end,
-    Data#data{events = Event1}.
+-spec(update_config(config2(), OldConfig :: config()) -> config()).
+update_config(#{key := OverlayKey, value := DeltaValue}, OldConfig) ->
+    NewValue = case maps:get(OverlayKey, OldConfig, []) of
+                   [] ->
+                      ordsets:from_list(DeltaValue);
+                   OldValue ->
+                      ordsets:union(ordsets:from_list(DeltaValue), OldValue)
+               end,
+    maps:put(OverlayKey, NewValue, OldConfig).
