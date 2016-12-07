@@ -270,9 +270,8 @@ parse_node(Agent) ->
   binary_to_integer(Num).
 
 get_node_data(NodeNumber) ->
-  HexNodeNumber = integer_to_list(NodeNumber, 16),
-  AgentIP = lists:flatten(io_lib:format("10.0.0.~p",[NodeNumber])),
-  Vtep_ip = lists:flatten(io_lib:format("44.128.0.~p", [NodeNumber])),
-  Vtep_mac = lists:flatten(io_lib:format("70:B3:D5:80:0:~s", [HexNodeNumber])),
-  Subnet = lists:flatten(io_lib:format("9.0.~p.0", [NodeNumber])),
+  AgentIP = {10,0,0,NodeNumber},
+  Vtep_ip = {44,128,0,NodeNumber},
+  Vtep_mac = [16#70, 16#B3, 16#D5, 16#80, 0, NodeNumber],
+  Subnet = {9,0,NodeNumber,0},
   [AgentIP, "vtep1024", Vtep_ip, Vtep_mac, Subnet, 24].

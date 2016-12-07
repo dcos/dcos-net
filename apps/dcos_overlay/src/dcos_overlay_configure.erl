@@ -85,15 +85,10 @@ configure_overlay_entry(Overlay, _VTEPIPPrefix = {VTEPIP, _PrefixLen}, LashupVal
     {_, MAC} = lists:keyfind({mac, riak_dt_lwwreg}, 1, LashupValue),
     {_, AgentIP} = lists:keyfind({agent_ip, riak_dt_lwwreg}, 1, LashupValue),
     {_, {SubnetIP, SubnetPrefixLen}} = lists:keyfind({subnet, riak_dt_lwwreg}, 1, LashupValue),
-    FormattedMAC = vtep_mac(MAC),
-    FormattedAgentIP = inet:ntoa(AgentIP),
-    FormattedVTEPIP = inet:ntoa(VTEPIP),
-    FormattedSubnetIP = inet:ntoa(SubnetIP),
 
     %% TEST only : writes the parameters to a file
-    maybe_print_parameters([FormattedAgentIP, binary_to_list(VTEPName),
-                            FormattedVTEPIP, FormattedMAC, 
-                            FormattedSubnetIP, SubnetPrefixLen]),
+    maybe_print_parameters([AgentIP, binary_to_list(VTEPName),
+                            VTEPIP, MAC, SubnetIP, SubnetPrefixLen]),
 
     Pid = dcos_overlay_poller:netlink(),
     VTEPNameStr = binary_to_list(VTEPName),
@@ -102,10 +97,6 @@ configure_overlay_entry(Overlay, _VTEPIPPrefix = {VTEPIP, _PrefixLen}, LashupVal
     {ok, _} = dcos_overlay_netlink:bridge_fdb_replace(Pid, AgentIP, MACTuple, VTEPNameStr),
     {ok, _} = dcos_overlay_netlink:iproute_replace(Pid, AgentIP, 32, VTEPIP, 42),
     {ok, _} = dcos_overlay_netlink:iproute_replace(Pid, SubnetIP, SubnetPrefixLen, VTEPIP, main).
-
-vtep_mac(IntList) ->
-    HexList = lists:map(fun(X) -> erlang:integer_to_list(X, 16) end, IntList),
-    lists:flatten(string:join(HexList, ":")).
 
 -ifdef(TEST).
 maybe_print_parameters(Parameters) ->
