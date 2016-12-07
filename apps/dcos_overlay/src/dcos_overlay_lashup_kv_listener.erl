@@ -23,7 +23,7 @@
 -define(SERVER, ?MODULE).
 -define(HEAPSIZE, 100). %% In MB
 -define(KILL_TIMER, 300000). %% 5 min
--define(LISTEN_TIMEOUT, 1000). %% 1 secs
+-define(LISTEN_TIMEOUT, 5000). %% 5 secs
 
 -include_lib("stdlib/include/ms_transform.hrl").
 
