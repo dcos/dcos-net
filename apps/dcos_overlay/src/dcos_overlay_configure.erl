@@ -11,15 +11,16 @@
 -author("dgoel").
 
 %% API
--export([start_link/2, stop/1, maybe_configure/1, maybe_configure_and_reply/2]).
+-export([start_link/1, stop/1, maybe_configure/2]).
 
 -include_lib("mesos_state/include/mesos_state_overlay_pb.hrl").
 
-start_link(reply, LashupEvent) ->
+-type config() :: #{key := term(), value := term()}.
+
+-spec(start_link(config()) -> pid()).
+start_link(Config) ->
    MyPid = self(),
-   spawn_link(?MODULE, maybe_configure_and_reply, [LashupEvent, MyPid]);
-start_link(noreply, LashupEvent) ->
-   spawn_link(?MODULE, maybe_configure, [LashupEvent]).
+   spawn_link(?MODULE, maybe_configure, [Config, MyPid]).
 
 stop(Pid) ->
     unlink(Pid),
@@ -28,23 +29,22 @@ stop(Pid) ->
 reply(Pid, Msg) ->
     Pid ! Msg.
 
-maybe_configure_and_reply(LashupEvent, MyPid) ->
-    maybe_configure(LashupEvent),
-    reply(MyPid, {dcos_overlay_configure, applied_config}).
-
-maybe_configure(LashupEvent) ->
-    lager:debug("Started applying config ~p~n", [LashupEvent]),
+-spec(maybe_configure(config(), pid()) -> term()).
+maybe_configure(Config, MyPid) ->
+    lager:debug("Started applying config ~p~n", [Config]),
     KnownOverlays = dcos_overlay_poller:overlays(),
     lists:map(
-        fun(Overlay) -> try_configure_overlay(LashupEvent, Overlay) end,
+        fun(Overlay) -> try_configure_overlay(Config, Overlay) end,
         KnownOverlays
     ),
-    lager:debug("Done applying config ~p for overlays ~p~n", [LashupEvent, KnownOverlays]).
+    lager:debug("Done applying config ~p for overlays ~p~n", [Config, KnownOverlays]),
+    reply(MyPid, {dcos_overlay_configure, applied_config, Config}).
 
-try_configure_overlay(LashupEvent, Overlay) ->
+-spec(try_configure_overlay(config(), #mesos_state_agentoverlayinfo{}) -> term()).
+try_configure_overlay(Config, Overlay) ->
     #mesos_state_agentoverlayinfo{info = #mesos_state_overlayinfo{subnet = Subnet}} = Overlay,
     ParsedSubnet = parse_subnet(Subnet),
-    try_configure_overlay2(LashupEvent, Overlay, ParsedSubnet).
+    try_configure_overlay2(Config, Overlay, ParsedSubnet).
 
 -type prefix_len() :: 0..32.
 -spec(parse_subnet(Subnet :: binary()) -> {inet:ipv4_address(), prefix_len()}).
@@ -56,13 +56,13 @@ parse_subnet(Subnet) ->
     true = 0 =< PrefixLen andalso PrefixLen =< 32,
     {IP, PrefixLen}.
 
-try_configure_overlay2(_LashupEvent = #{key := [navstar, overlay, Subnet], value := LashupValue},
+try_configure_overlay2(_Config = #{key := [navstar, overlay, Subnet], value := LashupValue},
     Overlay, ParsedSubnet) when Subnet == ParsedSubnet ->
     lists:map(
         fun(Value) -> maybe_configure_overlay_entry(Overlay, Value) end,
         LashupValue
     );
-try_configure_overlay2(_Event, _Overlay, _ParsedSubnet) ->
+try_configure_overlay2(_Config, _Overlay, _ParsedSubnet) ->
     ok.
 
 maybe_configure_overlay_entry(Overlay, {{VTEPIPPrefix, riak_dt_map}, Value}) ->
