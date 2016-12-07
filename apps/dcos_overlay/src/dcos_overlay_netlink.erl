@@ -14,19 +14,20 @@
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
--define(TEST_AND_DEV, true).
+-define(TEST_OR_DEV, true).
 -endif.
 
 -ifdef(DEV).
--define(TEST_AND_DEV, true).
+-define(TEST_OR_DEV, true).
 -endif.
 
 %% eg. ipneigh_replace(Pid, {44,128,0,1}, {16#70,16#b3,16#d5,16#80,16#00,16#03}, "vtep1024").
 ipneigh_replace(Pid, Dst, Lladdr, Ifname) ->
   Attr = [{dst, Dst}, {lladdr, Lladdr}],
+  Ifindex = if_nametoindex(Ifname),
   Neigh = {
     _Family = inet,
-    _Ifindex = if_nametoindex(Ifname),
+    _Ifindex = Ifindex,
     _State = ?NUD_PERMANENT, 
     _Flags = 0, 
     _NdmType = 0,
@@ -52,10 +53,12 @@ iproute_replace(Pid, Dst, DstPrefixLen, Src, Table) ->
 %% eg. bridge_fdb_replace(Pid, {192,168,65,91}, {16#70,16#b3,16#d5,16#80,16#00,16#03}, "vtep1024").
 bridge_fdb_replace(Pid, Dst, Lladdr, Ifname) ->
   Attr = [{dst, Dst}, {lladdr, Lladdr}],
+  State = ?NUD_PERMANENT bor ?NUD_NOARP,
+  Ifindex = if_nametoindex(Ifname),
   Neigh = {
     _Family = bridge,
-    _Ifindex = if_nametoindex(Ifname),
-    _State = ?NUD_PERMANENT bor ?NUD_NOARP,
+    _Ifindex = Ifindex,
+    _State = State,
     _Flags = 2,  %% NTF_SELF  
     _NdmType = 0,
     Attr},
@@ -90,10 +93,11 @@ iplink_add(Pid, Ifname, Kind, Id, DstPort) ->
 %% iplink_set(Pid, {16#70,16#b3,16#d5,16#80,16#00,16#01}, "vtep1024").
 iplink_set(Pid, Lladdr, Ifname) ->
  Attr = [{address, Lladdr}],
+ Ifindex = if_nametoindex(Ifname),
  Link = {
    _Family = inet,
    _Type = arphrd_netrom,
-   _Ifindex = if_nametoindex(Ifname),
+   _Ifindex = Ifindex,
    _Flags = [1],
    _Change = [1],
    Attr},
@@ -144,16 +148,17 @@ match_iprules(_,_) ->
 %% ipaddr_add(Pid, {44,128,0,1}, 32, "vtep1024"). 
 ipaddr_replace(Pid, IP, PrefixLen, Ifname) ->
  Attr = [{local, IP},{address, IP}],
+ Ifindex = if_nametoindex(Ifname),
  Msg = {
    _Family = inet, 
    _PrefixLen = PrefixLen, 
    _Flags = 0, 
    _Scope = 0, 
-   _Ifindex = if_nametoindex(Ifname), 
+   _Ifindex = Ifindex, 
    Attr},
  netlink_request(Pid, newaddr, [create, replace], Msg). 
 
--ifdef(TEST_AND_DEV).
+-ifdef(TEST_OR_DEV).
 netlink_request(_Pid, getlink, _Flags, _Msg) ->
     {error, 1, ""};
 netlink_request(_Pid, Type, Flags, Msg) ->
