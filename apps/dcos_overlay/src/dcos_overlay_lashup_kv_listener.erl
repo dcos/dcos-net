@@ -18,12 +18,13 @@
 -export([init/1, callback_mode/0, terminate/3, code_change/4]).
 
 %% state API
--export([unconfigured/3, configuring/3, batching/3]).
+-export([unconfigured/3, configuring/3, batching/3, reapplying/3]).
 
 -define(SERVER, ?MODULE).
 -define(HEAPSIZE, 100). %% In MB
 -define(KILL_TIMER, 300000). %% 5 min
 -define(LISTEN_TIMEOUT, 5000). %% 5 secs
+-define(REAPPLY_TIMEOUT, 300000). %% 5 min
 
 -include_lib("stdlib/include/ms_transform.hrl").
 
@@ -34,6 +35,7 @@
     ref :: reference(),
     pid :: undefined | pid(),
     config = maps:new() :: config(),
+    overlaykeys = [] :: [term()],
     kill_timer :: undefined | timer:tref()
 }).
 
@@ -114,22 +116,22 @@ terminate(_Reason, _State, _Data) ->
 code_change(_OldVsn, OldState, OldData, _Extra) ->
     {ok, OldState, OldData}.
 
-%%--------------------------------------------------------------------------------
+%%-----------------------------------------------------------------------------------------------------
 %% State transition
-%%-------------------------------------------------------------------------------- 
-%%                                                                lashup_event
-%%                                                                  +------+
-%%                                                                  |      |
-%%  +--------------+              +----------------+              +-+--------+
-%%  |              |              |                |              |          |
-%%  |              | lashup_event |                | lashup event |          |
-%%  | unconfigured +------------> |  configuring   +------------> | batching |
-%%  |              |              |                |              |          |
-%%  |              |              |                | <------------|          |
-%%  |              |              |                |   timeout    |          |
-%%  +--------------+              +----------------+              +----------+
+%%----------------------------------------------------------------------------------------------------- 
+%%                                                              lashup_event
+%%                                                               +------+
+%%                                                               |      |
+%%  +--------------+              +-------------+ lashup event +-+------+-+               +------------+
+%%  |              |              |             +      or      |          |               |            |
+%%  |              | lashup_event |             |    timeout1  |          |    reapply    |            |
+%%  | unconfigured +------------> | configuring +------------> | batching +-------------> | reapplying |
+%%  |              |              |             | <------------+          | <-------------+            |
+%%  |              |              |             |    timeout2  |          |  lashup event |            |
+%%  |              |              |             |              |          |      or       |            |
+%%  +--------------+              +-------------+              +----------+    timeout1   +------------+
 %%
-%%--------------------------------------------------------------------------------
+%%------------------------------------------------------------------------------------------------------
 
 unconfigured(info, EventContent, Data) ->
     {next_state, configuring, Data, {next_event, internal, EventContent}}.
@@ -149,14 +151,44 @@ configuring(info, {dcos_overlay_configure, applied_config, DeltaConfig},
     lager:debug("Done applying configuration: ~p", [DeltaConfig]),
     NewConfig = update_config(DeltaConfig, OldConfig),
     Data1 = Data0#data{config = NewConfig},
-    {next_state, batching, Data1};
+    ReapplyTimeout = application:get_env(dcos_overlay, reapply_timeout, ?REAPPLY_TIMEOUT),
+    {next_state, batching, Data1, {timeout, ReapplyTimeout, reapply}};
 configuring(info, _EventContent, _Data) ->
     {keep_state_and_data, postpone}.
             
 batching(info, EventContent, _Data) ->
     {keep_state_and_data, {timeout, ?LISTEN_TIMEOUT, {do_configure, EventContent}}};
 batching(timeout, {do_configure, EventContent}, Data) ->
-    {next_state, configuring, Data, {next_event, internal, EventContent}}.
+    {next_state, configuring, Data, {next_event, internal, EventContent}};
+batching(timeout, reapply, Data) ->
+    {next_state , reapplying, Data, {next_event, internal, reapply}}.
+
+reapplying(internal, reapply, Data0 = #data{config = Config, overlaykeys = OverlayKeys}) ->
+    AllKeys = maps:keys(Config),
+    RemainingKeys = ordsets:to_list(ordsets:subtract(ordsets:from_list(AllKeys), ordsets:from_list(OverlayKeys))),
+    case RemainingKeys of
+        [] ->
+            Data1 = Data0#data{overlaykeys = []},
+            ReapplyTimeout = application:get_env(dcos_overlay, reapply_timeout, ?REAPPLY_TIMEOUT), 
+            {next_state, batching, Data1, {timeout, ReapplyTimeout, reapply}};
+        [Key|_] ->
+            Value = maps:get(Key, Config),
+            DeltaConfig = #{key => Key, value => Value},
+            lager:debug("Reapplying config ~p~n", [DeltaConfig]),
+            {ok, Timer} = timer:kill_after(?KILL_TIMER),
+            dcos_overlay_configure:start_link(DeltaConfig),
+            Data1 = Data0#data{kill_timer = Timer},
+            {keep_state, Data1}
+    end;
+reapplying(info, {dcos_overlay_configure, applied_config, DeltaConfig = #{key := Key}},
+           Data0 = #data{kill_timer = Timer, overlaykeys = OverlayKeys0}) ->
+    timer:cancel(Timer),
+    lager:debug("Done reapplying config ~p~n", [DeltaConfig]),
+    OverlayKeys1 = [Key|OverlayKeys0],
+    Data1 = Data0#data{overlaykeys = OverlayKeys1},
+    {next_state, reapplying, Data1, {next_event, internal, reapply}};
+reapplying(info, _EventContent, _Data) ->
+    {keep_state_and_data, postpone}.
 
 %% private API
 
