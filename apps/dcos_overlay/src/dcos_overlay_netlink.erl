@@ -159,14 +159,25 @@ ipaddr_replace(Pid, IP, PrefixLen, Ifname) ->
  netlink_request(Pid, newaddr, [create, replace], Msg). 
 
 -ifdef(TEST_OR_DEV).
-netlink_request(_Pid, getlink, _Flags, _Msg) ->
-    {error, 1, ""};
-netlink_request(_Pid, Type, Flags, Msg) ->
-    io:format("Would run fun ~p with flags ~p and argument ~p~n", [Type, Flags, Msg]),
-    {ok, []}.
+netlink_request(Pid, Type, Flags, Msg) ->
+  Uid = list_to_integer(string:strip(os:cmd("id -u"), right, $\n)),
+  case Uid of
+    0 -> %% root 
+      gen_netlink_client:rtnl_request(Pid, Type, Flags, Msg);
+    _ ->  
+      io:format("Would run fun ~p with flags ~p and argument ~p~n", [Type, Flags, Msg])
+  end,
+  {ok, []}.
 
-if_nametoindex("vtep1024") -> 8.
+if_nametoindex(Ifname) ->
+  Uid = list_to_integer(string:strip(os:cmd("id -u"), right, $\n)),
+  case Uid of
+     0 -> gen_netlink_client:if_nametoindex(Ifname);
+     Uid -> Uid
+  end.
+
 -else.
+
 netlink_request(Pid, Type, Flags, Msg) ->
     gen_netlink_client:rtnl_request(Pid, Type, Flags, Msg).
 
