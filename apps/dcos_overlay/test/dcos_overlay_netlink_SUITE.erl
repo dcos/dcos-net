@@ -48,7 +48,7 @@ iplink_add() ->
     case string:str(Data, Entry) of
         0 -> 
           CMD1 = lists:flatten(io_lib:format("ip link add dev ~s type vxlan id 1024", [?IFNAME])),
-          [] = os:cmd(CMD1), 
+          os:cmd(CMD1), 
           ok;
         _ ->
           ok            
