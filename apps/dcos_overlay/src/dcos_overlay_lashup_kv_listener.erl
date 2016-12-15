@@ -34,7 +34,6 @@
     ref :: reference(),
     pid :: undefined | pid(),
     config = orddict:new() :: config(),
-    overlaykeys = ordsets:new() :: term(),
     kill_timer :: undefined | timer:tref()
 }).
 
@@ -69,8 +68,9 @@ start_link() ->
 init([]) ->
     MaxHeapSizeInWords = (?HEAPSIZE bsl 20) div erlang:system_info(wordsize), %%100 MB
     process_flag(message_queue_data, on_heap),
-    process_flag(max_heap_size, MaxHeapSizeInWords), 
-    {ok, Ref} = lashup_kv_events_helper:start_link(ets:fun2ms(fun({[navstar, overlay, '_']}) -> true end)),
+    process_flag(max_heap_size, MaxHeapSizeInWords),
+    MatchSpec = mk_key_matchspec(),
+    {ok, Ref} = lashup_kv_events_helper:start_link(MatchSpec),
     {ok, unconfigured, #data{ref = Ref}}.
 
 %%--------------------------------------------------------------------
@@ -159,12 +159,15 @@ batching(timeout, do_configure, StateData0 = #data{config = Config}) ->
 batching(timeout, do_reapply, StateData) ->
     {next_state , reapplying, StateData, {next_event, internal, reapply}}.
 
-reapplying(internal, reapply, StateData0 = #data{overlaykeys = OverlayKeys}) ->
-    Config = fetch_lashup_config(OverlayKeys),
+reapplying(internal, reapply, StateData0) ->
+    Config = fetch_lashup_config(),
     {StateData1, Actions} = next_state_and_actions(Config, StateData0),
     {next_state, configuring, StateData1, Actions}.
 
 %% private API
+
+mk_key_matchspec() ->
+    ets:fun2ms(fun({[navstar, overlay, '_']}) -> true end).
 
 -spec(handle_lashup_event(LashupEvent :: tuple(), #data{}) -> #data{}).
 handle_lashup_event({lashup_kv_events, #{type := ingest_new, key := OverlayKey, value := NewOverlayConfig, ref := Ref}},
@@ -176,13 +179,10 @@ handle_lashup_event({lashup_kv_events, #{type := ingest_update, key := OverlayKe
 
 -spec(handle_lashup_event2(Key :: list(), NewOverlayConfig :: list(), OldOverlayConfig :: list(), #data{}) -> #data{}).
 handle_lashup_event2(OverlayKey = [navstar, overlay, Subnet], NewOverlayConfig, OldOverlayConfig,
-              StateData = #data{overlaykeys = OverlayKeys0, config = OldConfig}) 
-              when is_tuple(Subnet), tuple_size(Subnet) == 2 ->
+             StateData = #data{config = OldConfig}) when is_tuple(Subnet), tuple_size(Subnet) == 2 ->
     DeltaOverlayConfig = determine_delta_config(NewOverlayConfig, OldOverlayConfig), 
     NewConfig = orddict:store(OverlayKey, DeltaOverlayConfig, OldConfig), 
-    NewOverlayKeys = orddict:fetch_keys(NewConfig),
-    OverlayKeys1 = ordsets:union(ordsets:from_list(NewOverlayKeys), OverlayKeys0),
-    StateData#data{overlaykeys = OverlayKeys1, config = NewConfig}.
+    StateData#data{config = NewConfig}.
 
 determine_delta_config(NewOverlayConfig, OldOverlayConfig) ->
     Nc = ordsets:from_list(NewOverlayConfig),
@@ -202,15 +202,16 @@ next_state_transition(StateData = #data{config = []}) ->
 next_state_transition(_StateData) ->
     keep_state_and_data.
 
--spec(fetch_lashup_config(Keys :: list()) -> config()).
-fetch_lashup_config(OverlayKeys0) ->
-    OverlayKeys1 = ordsets:to_list(OverlayKeys0),
+-spec(fetch_lashup_config() -> config()).
+fetch_lashup_config() ->
+    MatchSpec = mk_key_matchspec(),
+    OverlayKeys = lashup_kv:keys(MatchSpec),
     lists:foldl(
         fun(OverlayKey, Acc) ->
             KeyValue = lashup_kv:value(OverlayKey),
             orddict:store(OverlayKey, KeyValue, Acc)
         end,
-        orddict:new(), OverlayKeys1).
+        orddict:new(), OverlayKeys).
 
 next_state_and_actions(Config, StateData0) ->
     Actions = create_actions(Config),
