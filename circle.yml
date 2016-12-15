@@ -28,6 +28,7 @@ dependencies:
 
 test:
   override:
+    - make check
     - sudo -E PATH=${PATH} make check
   post:
     - ./rebar3 covertool generate
