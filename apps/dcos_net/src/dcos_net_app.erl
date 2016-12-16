@@ -23,6 +23,7 @@
 start(_StartType, _StartArgs) ->
     load_config(),
     maybe_add_master(),
+    maybe_start_minuteman(),
     'dcos_net_sup':start_link().
 
 %%--------------------------------------------------------------------
@@ -32,6 +33,14 @@ stop(_State) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
+
+maybe_start_minuteman() ->
+    case application:get_env(navstar, enable_lb, false) of
+        false ->
+            ok;
+        true ->
+            {ok, _} = application:ensure_all_started(minuteman)
+    end.
 
 maybe_add_master() ->
     case application:get_env(navstar, is_master, false) of
