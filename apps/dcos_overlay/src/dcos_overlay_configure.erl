@@ -85,28 +85,18 @@ configure_overlay_entry(Overlay, _VTEPIPPrefix = {VTEPIP, _PrefixLen}, LashupVal
     {_, MAC} = lists:keyfind({mac, riak_dt_lwwreg}, 1, LashupValue),
     {_, AgentIP} = lists:keyfind({agent_ip, riak_dt_lwwreg}, 1, LashupValue),
     {_, {SubnetIP, SubnetPrefixLen}} = lists:keyfind({subnet, riak_dt_lwwreg}, 1, LashupValue),
-    FormattedMAC = vtep_mac(MAC),
-    FormattedAgentIP = inet:ntoa(AgentIP),
-    FormattedVTEPIP = inet:ntoa(VTEPIP),
-    FormattedSubnetIP = inet:ntoa(SubnetIP),
 
     %% TEST only : writes the parameters to a file
-    maybe_print_parameters([FormattedAgentIP, binary_to_list(VTEPName),
-                            FormattedVTEPIP, FormattedMAC, 
-                            FormattedSubnetIP, SubnetPrefixLen]),
+    maybe_print_parameters([AgentIP, binary_to_list(VTEPName),
+                            VTEPIP, MAC, SubnetIP, SubnetPrefixLen]),
 
-    %ip neigh replace 5.5.5.5 lladdr ff:ff:ff:ff:ff:ff dev eth0 nud permanent
-    {ok, _} = dcos_overlay_helper:run_command("ip neigh replace ~s lladdr ~s dev ~s nud permanent",
-        [FormattedVTEPIP, FormattedMAC, VTEPName]),
-    %bridge fdb add to 00:17:42:8a:b4:05 dst 192.19.0.2 dev vxlan0
-    {ok, _} = dcos_overlay_helper:run_command("bridge fdb replace to ~s dst ~s dev ~s", [FormattedMAC, FormattedAgentIP, VTEPName]),
-
-    {ok, _} = dcos_overlay_helper:run_command("ip route replace ~s/32 via ~s table 42", [FormattedAgentIP, FormattedVTEPIP]),
-    {ok, _} = dcos_overlay_helper:run_command("ip route replace ~s/~B via ~s", [FormattedSubnetIP, SubnetPrefixLen, FormattedVTEPIP]).
-
-vtep_mac(IntList) ->
-    HexList = lists:map(fun(X) -> erlang:integer_to_list(X, 16) end, IntList),
-    lists:flatten(string:join(HexList, ":")).
+    Pid = dcos_overlay_poller:netlink(),
+    VTEPNameStr = binary_to_list(VTEPName),
+    MACTuple = list_to_tuple(MAC),
+    {ok, _} = dcos_overlay_netlink:ipneigh_replace(Pid, VTEPIP, MACTuple, VTEPNameStr),
+    {ok, _} = dcos_overlay_netlink:bridge_fdb_replace(Pid, AgentIP, MACTuple, VTEPNameStr),
+    {ok, _} = dcos_overlay_netlink:iproute_replace(Pid, AgentIP, 32, VTEPIP, 42),
+    {ok, _} = dcos_overlay_netlink:iproute_replace(Pid, SubnetIP, SubnetPrefixLen, VTEPIP, main).
 
 -ifdef(TEST).
 maybe_print_parameters(Parameters) ->

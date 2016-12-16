@@ -18,22 +18,22 @@
 -export([init/1, callback_mode/0, terminate/3, code_change/4]).
 
 %% state API
--export([unconfigured/3, configuring/3, batching/3]).
+-export([unconfigured/3, configuring/3, batching/3, reapplying/3]).
 
 -define(SERVER, ?MODULE).
 -define(HEAPSIZE, 100). %% In MB
 -define(KILL_TIMER, 300000). %% 5 min
--define(LISTEN_TIMEOUT, 5000). %% 5 secs
+-define(BATCH_TIMEOUT, 5000). %% 5 secs
+-define(REAPPLY_TIMEOUT, 300000). %% 5 min
 
 -include_lib("stdlib/include/ms_transform.hrl").
 
--type config() :: #{OverlayKey :: term() := Value :: term()}.
--type config2() :: #{key := term(), value := term()}.
+-type config() :: orddict:orddict(term(), term()).
 
 -record(data, {
     ref :: reference(),
     pid :: undefined | pid(),
-    config = maps:new() :: config(),
+    config = orddict:new() :: config(),
     kill_timer :: undefined | timer:tref()
 }).
 
@@ -68,8 +68,9 @@ start_link() ->
 init([]) ->
     MaxHeapSizeInWords = (?HEAPSIZE bsl 20) div erlang:system_info(wordsize), %%100 MB
     process_flag(message_queue_data, on_heap),
-    process_flag(max_heap_size, MaxHeapSizeInWords), 
-    {ok, Ref} = lashup_kv_events_helper:start_link(ets:fun2ms(fun({[navstar, overlay, '_']}) -> true end)),
+    process_flag(max_heap_size, MaxHeapSizeInWords),
+    MatchSpec = mk_key_matchspec(),
+    {ok, Ref} = lashup_kv_events_helper:start_link(MatchSpec),
     {ok, unconfigured, #data{ref = Ref}}.
 
 %%--------------------------------------------------------------------
@@ -114,68 +115,122 @@ terminate(_Reason, _State, _Data) ->
 code_change(_OldVsn, OldState, OldData, _Extra) ->
     {ok, OldState, OldData}.
 
-%%--------------------------------------------------------------------------------
+%%-----------------------------------------------------------------------------------------------------
 %% State transition
-%%-------------------------------------------------------------------------------- 
-%%                                                                lashup_event
-%%                                                                  +------+
-%%                                                                  |      |
-%%  +--------------+              +----------------+              +-+--------+
-%%  |              |              |                |              |          |
-%%  |              | lashup_event |                | lashup event |          |
-%%  | unconfigured +------------> |  configuring   +------------> | batching |
-%%  |              |              |                |              |          |
-%%  |              |              |                | <------------|          |
-%%  |              |              |                |   timeout    |          |
-%%  +--------------+              +----------------+              +----------+
-%%
-%%--------------------------------------------------------------------------------
+%%----------------------------------------------------------------------------------------------------- 
+%%                                                              lashup_event
+%%                                                               +------+
+%%                                                               |      |
+%%  +--------------+              +-------------+ lashup event +-+------+-+               +------------+
+%%  |              |              |             +      or      |          |               |            |
+%%  |              | lashup_event |             |    timeout1  |          |    reapply    |            |
+%%  | unconfigured +------------> | configuring +------------> | batching +-------------> | reapplying |
+%%  |              |              |             | <------------+          |               |            |
+%%  |              |              |             |    timeout2  |          |               |            |
+%%  |              |              |             |              |          |               |            |
+%%  +--------------+              +-------------+              +----------+               +------------+
+%%                                       |<------------------------------------------------------|
+%%------------------------------------------------------------------------------------------------------
 
-unconfigured(info, EventContent, Data) ->
-    {next_state, configuring, Data, {next_event, internal, EventContent}}.
-
-configuring(internal, {lashup_kv_events, #{key := [navstar, overlay, Subnet] = OverlayKey, value := Value, ref := Ref}},
-            Data0 = #data{ref = Ref, config = OldConfig}) when is_tuple(Subnet), tuple_size(Subnet) == 2 ->
-    NewConfig = #{key => OverlayKey, value => Value},
-    DeltaConfig = delta_config(NewConfig, OldConfig),
-    lager:debug("Applying configuration: ~p", [DeltaConfig]),
+unconfigured(info, LashupEvent = {lashup_kv_events, #{key := OverlayKey, value := Value}}, StateData0) ->
+    StateData1 = handle_lashup_event(LashupEvent, StateData0),
     {ok, Timer} = timer:kill_after(?KILL_TIMER),
-    dcos_overlay_configure:start_link(DeltaConfig),
-    Data1 = Data0#data{kill_timer = Timer},
-    {keep_state, Data1};
-configuring(info, {dcos_overlay_configure, applied_config, DeltaConfig},
-            Data0 = #data{kill_timer = Timer, config = OldConfig}) ->
-    timer:cancel(Timer),
-    lager:debug("Done applying configuration: ~p", [DeltaConfig]),
-    NewConfig = update_config(DeltaConfig, OldConfig),
-    Data1 = Data0#data{config = NewConfig},
-    {next_state, batching, Data1};
-configuring(info, _EventContent, _Data) ->
+    StateData2 = StateData1#data{kill_timer = Timer},
+    EventContent = #{key => OverlayKey, value => Value},
+    {next_state, configuring, StateData2, {next_event, internal, EventContent}}.
+
+configuring(internal, Config, _StateData) ->
+    lager:debug("Applying configuration: ~p", [Config]),
+    dcos_overlay_configure:start_link(Config),
+    keep_state_and_data;
+configuring(info, {dcos_overlay_configure, applied_config, AppliedConfig}, StateData0) ->
+    lager:debug("Done applying configuration: ~p", [AppliedConfig]),
+    StateData1 = maybe_update_state(AppliedConfig, StateData0),
+    next_state_transition(StateData1);
+configuring(info, _EventContent, _StateData) ->
     {keep_state_and_data, postpone}.
             
-batching(info, EventContent, _Data) ->
-    {keep_state_and_data, {timeout, ?LISTEN_TIMEOUT, {do_configure, EventContent}}};
-batching(timeout, {do_configure, EventContent}, Data) ->
-    {next_state, configuring, Data, {next_event, internal, EventContent}}.
+batching(info, LashupEvent, StateData0) ->
+    StateData1 = handle_lashup_event(LashupEvent, StateData0),
+    {keep_state, StateData1, {timeout, ?BATCH_TIMEOUT, do_configure}};
+batching(timeout, do_configure, StateData0 = #data{config = Config}) ->
+    {StateData1, Actions} = next_state_and_actions(Config, StateData0),
+    {next_state, configuring, StateData1, Actions};
+batching(timeout, do_reapply, StateData) ->
+    {next_state , reapplying, StateData, {next_event, internal, reapply}}.
+
+reapplying(internal, reapply, StateData0) ->
+    Config = fetch_lashup_config(),
+    {StateData1, Actions} = next_state_and_actions(Config, StateData0),
+    {next_state, configuring, StateData1, Actions}.
 
 %% private API
 
--spec(delta_config(NewConfig :: config2(), OldConfig :: config()) -> config2()).
-delta_config(NewConfig = #{key := OverlayKey, value := NewValue}, OldConfig) ->
-    case maps:get(OverlayKey, OldConfig, []) of
-        [] ->
-            NewConfig;
-        OldValue ->
-            DeltaValue = ordsets:to_list(ordsets:subtract(ordsets:from_list(NewValue), OldValue)),
-            #{key => OverlayKey, value => DeltaValue}
-    end.
+mk_key_matchspec() ->
+    ets:fun2ms(fun({[navstar, overlay, '_']}) -> true end).
 
--spec(update_config(config2(), OldConfig :: config()) -> config()).
-update_config(#{key := OverlayKey, value := DeltaValue}, OldConfig) ->
-    NewValue = case maps:get(OverlayKey, OldConfig, []) of
-                   [] ->
-                      ordsets:from_list(DeltaValue);
-                   OldValue ->
-                      ordsets:union(ordsets:from_list(DeltaValue), OldValue)
-               end,
-    maps:put(OverlayKey, NewValue, OldConfig).
+-spec(handle_lashup_event(LashupEvent :: tuple(), #data{}) -> #data{}).
+handle_lashup_event({lashup_kv_events, #{type := ingest_new, key := OverlayKey, value := NewOverlayConfig, ref := Ref}},
+             StateData = #data{ref = Ref}) ->
+    handle_lashup_event2(OverlayKey, NewOverlayConfig, [], StateData);
+handle_lashup_event({lashup_kv_events, #{type := ingest_update, key := OverlayKey, value := NewOverlayConfig,
+             old_value := OldOverlayConfig, ref := Ref}}, StateData = #data{ref = Ref}) ->
+    handle_lashup_event2(OverlayKey, NewOverlayConfig, OldOverlayConfig, StateData).
+
+-spec(handle_lashup_event2(Key :: list(), NewOverlayConfig :: list(), OldOverlayConfig :: list(), #data{}) -> #data{}).
+handle_lashup_event2(OverlayKey = [navstar, overlay, Subnet], NewOverlayConfig, OldOverlayConfig,
+             StateData = #data{config = OldConfig}) when is_tuple(Subnet), tuple_size(Subnet) == 2 ->
+    DeltaOverlayConfig = determine_delta_config(NewOverlayConfig, OldOverlayConfig), 
+    NewConfig = orddict:store(OverlayKey, DeltaOverlayConfig, OldConfig), 
+    StateData#data{config = NewConfig}.
+
+determine_delta_config(NewOverlayConfig, OldOverlayConfig) ->
+    Nc = ordsets:from_list(NewOverlayConfig),
+    Oc = ordsets:from_list(OldOverlayConfig),
+    Dc = ordsets:subtract(Nc, Oc),
+    ordsets:to_list(Dc).
+
+maybe_update_state(#{last := false}, StateData) ->
+    StateData;
+maybe_update_state(_, StateData = #data{kill_timer = Timer}) ->
+    timer:cancel(Timer),
+    StateData#data{config = []}. %% clean cached config
+
+next_state_transition(StateData = #data{config = []}) ->
+    ReapplyTimeout = application:get_env(dcos_overlay, reapply_timeout, ?REAPPLY_TIMEOUT),
+    {next_state, batching, StateData, {timeout, ReapplyTimeout, do_reapply}};
+next_state_transition(_StateData) ->
+    keep_state_and_data.
+
+-spec(fetch_lashup_config() -> config()).
+fetch_lashup_config() ->
+    MatchSpec = mk_key_matchspec(),
+    OverlayKeys = lashup_kv:keys(MatchSpec),
+    lists:foldl(
+        fun(OverlayKey, Acc) ->
+            KeyValue = lashup_kv:value(OverlayKey),
+            orddict:store(OverlayKey, KeyValue, Acc)
+        end,
+        orddict:new(), OverlayKeys).
+
+next_state_and_actions(Config, StateData0) ->
+    Actions = create_actions(Config),
+    {ok, Timer} = timer:kill_after(?KILL_TIMER),
+    StateData1 = StateData0#data{kill_timer = Timer},
+    {StateData1, Actions}.
+
+create_actions(Config) ->
+    create_actions(Config, []).
+
+create_actions([], Acc) ->
+    lists:reverse(Acc);
+create_actions([Config], Acc) ->
+    Action = create_action(true, Config), %% last config
+    create_actions([], [Action|Acc]);
+create_actions([Config|Configs], Acc) ->
+    Action = create_action(false, Config),
+    create_actions(Configs, [Action|Acc]).
+
+create_action(Last, {OverlayKey, KeyValue}) ->
+    EventContent = #{key => OverlayKey, value => KeyValue, last => Last},
+    {next_event, internal, EventContent}.

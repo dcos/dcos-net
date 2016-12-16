@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, ip/0, overlays/0]).
+-export([start_link/0, ip/0, overlays/0, netlink/0]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -34,13 +34,17 @@
 -include("dcos_overlay.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 -include_lib("mesos_state/include/mesos_state_overlay_pb.hrl").
+-include_lib("gen_netlink/include/netlink.hrl").
+
+-define(TABLE, 42).
 -define(MASTERS_KEY, {masters, riak_dt_orswot}).
 
 
 -record(state, {
     known_overlays = ordsets:new(),
     ip = undefined :: undefined | inet:ip4_address(),
-    poll_period = ?MIN_POLL_PERIOD :: integer()
+    poll_period = ?MIN_POLL_PERIOD :: integer(),
+    netlink :: undefined | pid() 
 }).
 
 
@@ -53,6 +57,9 @@ ip() ->
 
 overlays() ->
     gen_server:call(?SERVER, overlays).
+
+netlink() ->
+    gen_server:call(?SERVER, netlink).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -84,8 +91,9 @@ start_link() ->
     {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
 init([]) ->
+    {ok, Pid} = gen_netlink_client:start_link(?NETLINK_ROUTE),
     timer:send_after(0, poll),
-    {ok, #state{}}.
+    {ok, #state{netlink = Pid}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -106,6 +114,8 @@ handle_call(ip, _From, State = #state{ip = IP}) ->
     {reply, IP, State};
 handle_call(overlays, _From, State = #state{known_overlays = KnownOverlays}) ->
     {reply, KnownOverlays, State};
+handle_call(netlink, _From, State = #state{netlink = NETLINK}) ->
+    {reply, NETLINK, State};
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
@@ -248,18 +258,18 @@ add_overlay(
     State0 = #state{known_overlays = KnownOverlays0}) ->
     KnownOverlays1 = ordsets:add_element(Overlay, KnownOverlays0),
     State1 = State0#state{known_overlays = KnownOverlays1},
-    config_overlay(Overlay),
+    config_overlay(Overlay, State1),
     maybe_add_overlay_to_lashup(Overlay, State1),
     State1;
 add_overlay(Overlay, State) ->
     lager:warning("Overlay not okay: ~p", [Overlay]),
     State.
 
-config_overlay(Overlay) ->
-    maybe_create_vtep(Overlay),
-    maybe_add_ip_rule(Overlay).
+config_overlay(Overlay, State) ->
+    maybe_create_vtep(Overlay, State),
+    maybe_add_ip_rule(Overlay, State).
 
-maybe_create_vtep(_Overlay = #mesos_state_agentoverlayinfo{backend = Backend}) ->
+maybe_create_vtep(_Overlay = #mesos_state_agentoverlayinfo{backend = Backend}, #state{netlink = Pid}) ->
     #mesos_state_backendinfo{vxlan = VXLan} = Backend,
     #mesos_state_vxlaninfo{
         vni = VNI,
@@ -267,27 +277,21 @@ maybe_create_vtep(_Overlay = #mesos_state_agentoverlayinfo{backend = Backend}) -
         vtep_mac = VTEPMAC,
         vtep_name = VTEPName
     } = VXLan,
-    case dcos_overlay_helper:run_command("ip link show dev ~s", [VTEPName]) of
-        {ok, _Output} ->
-            ok;
-        {error, 1, _} ->
-            {ok, _} = dcos_overlay_helper:run_command("ip link add dev ~s type vxlan id ~B dstport 64000", [VTEPName, VNI])
-    end,
-    {ok, _} = dcos_overlay_helper:run_command("ip link set ~s address ~s", [VTEPName, VTEPMAC]),
-    {ok, _} = dcos_overlay_helper:run_command("ip link set ~s up", [VTEPName]),
-    case dcos_overlay_helper:run_command("ip addr add ~s dev ~s", [VTEPIP, VTEPName]) of
-        {ok, _} ->
-            ok;
-        {error, 2, "RTNETLINK answers: File exists\n"} ->
-            ok
-    end.
+    VTEPNameStr = binary_to_list(VTEPName),
+    ParsedVTEPMAC = list_to_tuple(parse_vtep_mac(VTEPMAC)),
+    {ParsedVTEPIP, PrefixLen} = parse_subnet(VTEPIP),
+    dcos_overlay_netlink:iplink_add(Pid, VTEPNameStr, "vxlan", VNI, 64000),
+    {ok, _} = dcos_overlay_netlink:iplink_set(Pid, ParsedVTEPMAC, VTEPNameStr),
+    {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, ParsedVTEPIP, PrefixLen, VTEPNameStr).
 
-maybe_add_ip_rule(_Overlay = #mesos_state_agentoverlayinfo{info = #mesos_state_overlayinfo{subnet = Subnet}}) ->
-    RuleStr = lists:flatten(io_lib:format("from ~s lookup 42", [Subnet])),
-    {ok, Rules} = dcos_overlay_helper:run_command("ip rule show"),
-    case string:str(Rules, RuleStr) of
-        0 ->
-            {ok, _} = dcos_overlay_helper:run_command("ip rule add from ~s lookup 42", [Subnet]);
+maybe_add_ip_rule(_Overlay = #mesos_state_agentoverlayinfo{info = #mesos_state_overlayinfo{subnet = Subnet}},
+ #state{netlink = Pid}) ->
+    {ParsedSubnetIP, PrefixLen} = parse_subnet(Subnet),
+    {ok, Rules} = dcos_overlay_netlink:iprule_show(Pid),
+    Rule = dcos_overlay_netlink:make_iprule(ParsedSubnetIP, PrefixLen, ?TABLE),
+    case dcos_overlay_netlink:is_iprule_present(Rules, Rule) of
+        false ->
+            {ok, _} = dcos_overlay_netlink:iprule_add(Pid, ParsedSubnetIP, PrefixLen, ?TABLE);
         _ ->
             ok
     end.
