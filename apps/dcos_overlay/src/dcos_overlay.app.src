@@ -9,7 +9,8 @@
                 stdlib,
                 mesos_state,
                 lashup,
-                inets
+                inets,
+                gen_netlink
             ]},
         {env,[]},
         {modules, []},
