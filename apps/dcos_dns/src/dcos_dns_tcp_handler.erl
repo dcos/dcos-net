@@ -27,6 +27,7 @@
 
 -include("dcos_dns.hrl").
 -define(TIMEOUT, 10000).
+-define(SHUTDOWN(Reason), {shutdown, Reason}).
 
 do_reply(Pid, Data) ->
     gen_statem:cast(Pid, {do_reply, Data}).
@@ -50,9 +51,9 @@ uninitialized(internal, {do_init, _Opts = []}, State0 = #state{ref = Ref, socket
 
 wait_for_query(timeout, idle_timeout, #state{transport = Transport, socket = Socket}) ->
     Transport:close(Socket),
-    {stop, idle_timeout};
-wait_for_query(info, {tcp_closed, Socket}, #state{socket = Socket}) ->
-    {stop, tcp_closed};
+    {stop, ?SHUTDOWN(idle_timeout)};
+wait_for_query(info, {tcp_closed, ClosedSocket}, #state{socket = Socket}) when ClosedSocket == Socket ->
+    {stop, ?SHUTDOWN(tcp_closed)};
 wait_for_query(info, {tcp, Socket, Data}, State0 = #state{socket = Socket}) ->
     case dcos_dns_handler_sup:start_child([{?MODULE, self()}, Data]) of
         {ok, Pid} when is_pid(Pid) ->
@@ -67,10 +68,10 @@ wait_for_query(info, {tcp, Socket, Data}, State0 = #state{socket = Socket}) ->
 
 waiting_for_reply(timeout, query_timeout, #state{transport = Transport, socket = Socket}) ->
     Transport:close(Socket),
-    {stop, query_timeout};
+    {stop, ?SHUTDOWN(query_timeout)};
 waiting_for_reply(info, {tcp_closed, Socket}, #state{socket = Socket, query_pid = Pid}) ->
     exit(Pid, normal),
-    {stop, tcp_closed};
+    {stop, ?SHUTDOWN(tcp_closed)};
 waiting_for_reply(cast, {do_reply, ReplyData}, State0 = #state{transport = Transport, socket = Socket}) ->
     Transport:send(Socket, ReplyData),
     inet:setopts(Socket, [{active, once}]),
