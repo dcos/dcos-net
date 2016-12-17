@@ -33,4 +33,9 @@
 # Scheduler modifications.
 -stbt nnts
 
+## Dirty schedulers and CPU
+-smp enable
+## Dirty Scheduler count is 100% of CPUs, with only 50% online
++SDPcpu 100:100
+
 # This file MUST have extra new lines at the end
