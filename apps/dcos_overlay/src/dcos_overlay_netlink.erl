@@ -158,6 +158,11 @@ ipaddr_replace(Pid, IP, PrefixLen, Ifname) ->
    Attr},
  netlink_request(Pid, newaddr, [create, replace], Msg). 
 
+
+real_if_nametoindex(IfName) ->
+  {ok, Idx} = gen_netlink_client:if_nametoindex(IfName),
+  Idx.
+
 -ifdef(TEST_OR_DEV).
 netlink_request(Pid, Type, Flags, Msg) ->
   Uid = list_to_integer(string:strip(os:cmd("id -u"), right, $\n)),
@@ -172,15 +177,15 @@ netlink_request(Pid, Type, Flags, Msg) ->
 if_nametoindex(Ifname) ->
   Uid = list_to_integer(string:strip(os:cmd("id -u"), right, $\n)),
   case Uid of
-     0 -> gen_netlink_client:if_nametoindex(Ifname);
+     0 -> real_if_nametoindex(Ifname);
      Uid -> Uid
   end.
 
 -else.
 
 netlink_request(Pid, Type, Flags, Msg) ->
-    gen_netlink_client:rtnl_request(Pid, Type, Flags, Msg).
+  gen_netlink_client:rtnl_request(Pid, Type, Flags, Msg).
 
 if_nametoindex(Ifname) ->
-  gen_netlink_client:if_nametoindex(Ifname).
+  real_if_nametoindex(Ifname).
 -endif.
