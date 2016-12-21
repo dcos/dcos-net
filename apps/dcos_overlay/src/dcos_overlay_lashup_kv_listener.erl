@@ -181,7 +181,7 @@ handle_lashup_event({lashup_kv_events, #{type := ingest_update, key := OverlayKe
 handle_lashup_event2(OverlayKey = [navstar, overlay, Subnet], NewOverlayConfig, OldOverlayConfig,
              StateData = #data{config = OldConfig}) when is_tuple(Subnet), tuple_size(Subnet) == 2 ->
     DeltaOverlayConfig = determine_delta_config(NewOverlayConfig, OldOverlayConfig), 
-    NewConfig = orddict:store(OverlayKey, DeltaOverlayConfig, OldConfig), 
+    NewConfig = orddict:append_list(OverlayKey, DeltaOverlayConfig, OldConfig), 
     StateData#data{config = NewConfig}.
 
 determine_delta_config(NewOverlayConfig, OldOverlayConfig) ->
@@ -209,7 +209,7 @@ fetch_lashup_config() ->
     lists:foldl(
         fun(OverlayKey, Acc) ->
             KeyValue = lashup_kv:value(OverlayKey),
-            orddict:store(OverlayKey, KeyValue, Acc)
+            orddict:append_list(OverlayKey, KeyValue, Acc)
         end,
         orddict:new(), OverlayKeys).
 
