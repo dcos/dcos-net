@@ -1,0 +1,11 @@
+[{dns_rr,<<"dcos.thisdcos.directory">>,1,2,3600,
+         {dns_rrdata_ns,<<"ns.spartan">>}},
+ {dns_rr,<<"dcos.thisdcos.directory">>,1,6,3600,
+         {dns_rrdata_soa,<<"ns.spartan">>,<<"support.mesosphere.com">>,1,60,
+                         180,86400,1}},
+ {dns_rr,<<"dockertest.marathon.agentip.dcos.thisdcos.directory">>,1,1,5,
+         {dns_rrdata_a,{10,0,0,182}}},
+ {dns_rr,<<"dockertest.marathon.autoip.dcos.thisdcos.directory">>,1,1,5,
+         {dns_rrdata_a,{9,0,2,130}}},
+ {dns_rr,<<"dockertest.marathon.containerip.dcos.thisdcos.directory">>,1,1,5,
+         {dns_rrdata_a,{9,0,2,130}}}].
