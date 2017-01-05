@@ -84,7 +84,7 @@
   1},
  {<<"mesos_state">>,
   {git,"https://github.com/dcos/mesos_state.git",
-       {ref,"04ab32ebdcdab63c2763735345aa9d1d3e6e7f99"}},
+       {ref,"7fa7e6edb4d2eecc0ee12a1f109accddf1978953"}},
   0},
  {<<"minuteman">>,
   {git,"https://github.com/dcos/minuteman.git",
