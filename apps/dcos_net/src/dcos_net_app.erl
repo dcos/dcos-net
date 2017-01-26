@@ -39,7 +39,7 @@ maybe_start_minuteman() ->
         false ->
             ok;
         true ->
-            {ok, _} = application:ensure_all_started(minuteman)
+            {ok, _} = application:ensure_all_started(dcos_l4lb, permanent)
     end.
 
 maybe_add_master() ->
