@@ -73,6 +73,7 @@ start_link() ->
     {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
 init([]) ->
+    setup_retry(),
     {ok, Ref} = lashup_kv_events_helper:start_link(ets:fun2ms(fun({[navstar, dns, zones, '_']}) -> true end)),
     {ok, #state{ref = Ref}}.
 
@@ -125,8 +126,9 @@ handle_cast(_Request, State) ->
 handle_info({lashup_kv_events, Event = #{ref := Reference}}, State = #state{ref = Ref}) when Ref == Reference ->
     handle_event(Event),
     {noreply, State};
-handle_info({retry_spartan, Key}, State) ->
-    retry_spartan(Key),
+handle_info({retry_spartan, Keys}, State) ->
+    lists:foreach(fun retry_spartan/1, Keys),
+    setup_retry(),
     {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -184,27 +186,29 @@ retry_spartan(Key = [navstar, dns, zones, ZoneName]) ->
     Zone = zone2spartan(ZoneName, Value),
     spartan_push(Zone).
 
-spartan_push(Zone = {ZoneName, _, _}) ->
+spartan_push(Zone) ->
     case rpc:call(spartan_name(), erldns_zone_cache, put_zone, [Zone], ?RPC_TIMEOUT) of
         Reason = {badrpc, _} ->
             lager:warning("Unable to push records to spartan: ~p", [Reason]),
-            setup_retry(ZoneName),
             ok;
         ok ->
             maybe_push_signed_zone(Zone),
             ok
     end.
 
-setup_retry(ZoneName) ->
-    {ok, _} = timer:send_after(?SPARTAN_RETRY, {retry_spartan, [navstar, dns, zones, ZoneName]}).
+setup_retry() ->
+    MatchSpec = mk_key_matchspec(),
+    ZoneKeys = lashup_kv:keys(MatchSpec),
+    {ok, _} = timer:send_after(?SPARTAN_RETRY, {retry_spartan, ZoneKeys}).
 
+mk_key_matchspec() ->
+    ets:fun2ms(fun({[navstar, dns, zones, '_']}) -> true end).
 
 maybe_push_signed_zone(Zone) ->
     case dcos_dns:key() of
         false ->
             ok;
         #{public_key := PublicKey} ->
-
             push_signed_zone(PublicKey, Zone)
     end.
 
@@ -215,7 +219,6 @@ push_signed_zone(PublicKey, _Zone0 = {ZoneName0, _ZoneSha, Records0}) ->
     case rpc:call(spartan_name(), erldns_zone_cache, put_zone, [Zone1], ?RPC_TIMEOUT) of
         Reason = {badrpc, _} ->
             lager:warning("Unable to push signed records to spartan: ~p", [Reason]),
-            setup_retry(ZoneName0),
             ok;
         ok ->
             ok
