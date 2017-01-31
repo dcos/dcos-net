@@ -79,7 +79,7 @@
        {ref,"a210adafdfbb904d156d8f22abd5fb58fc17de1e"}},
   1},
  {<<"parse_xfrm_utils">>,
-  {git,"git://github.com/sargun/parse_xfrm_utils.git",
+  {git,"git://github.com/dcos/parse_xfrm_utils.git",
        {ref,"409f727d81683dd397aafc3afd583d403e271baf"}},
   1},
  {<<"poolboy">>,
