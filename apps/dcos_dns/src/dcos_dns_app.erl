@@ -123,6 +123,9 @@ load_json_config(FileBin) ->
 process_config_tuple({<<"upstream_resolvers">>, UpstreamResolvers}) ->
     UpstreamIPsAndPorts = lists:map(fun (Resolver) -> parse_ipv4_address_with_port(Resolver, 53) end, UpstreamResolvers),
     application:set_env(?APP, upstream_resolvers, UpstreamIPsAndPorts);
+process_config_tuple({<<"bind_ips">>, IPs0}) ->
+    IPs1 = lists:map(fun parse_ipv4_address/1, IPs0),
+    application:set_env(?APP, bind_ips, IPs1);
 process_config_tuple({Key, Value}) when is_binary(Value) ->
     application:set_env(?APP, binary_to_atom(Key, utf8), binary_to_list(Value));
 process_config_tuple({Key, Value}) ->
@@ -140,5 +143,9 @@ parse_ipv4_addres_with_port_test() ->
     ?assert({{127, 0, 0, 1}, 9000} == parse_ipv4_address_with_port("127.0.0.1:9000", 42)),
     %% Fallback to default
     ?assert({{8, 8, 8, 8}, 12345} == parse_ipv4_address_with_port("8.8.8.8", 12345)).
+
+parse_ipv4_address_test() ->
+    ?assert({127, 0, 0, 1} == parse_ipv4_address(<<"127.0.0.1">>)),
+    ?assert([{127, 0, 0, 1}, {2, 2, 2, 2}] == lists:map(fun parse_ipv4_address/1, [<<"127.0.0.1">>, <<"2.2.2.2">>])).
 
 -endif.
