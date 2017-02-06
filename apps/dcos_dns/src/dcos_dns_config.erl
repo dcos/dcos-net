@@ -34,9 +34,10 @@ bind_interface() ->
 bind_ips() ->
     case application:get_env(?APP, bind_ips, []) of
         [] ->
-            IPs = bind_ips2(),
-            application:set_env(?APP, bind_ips, IPs),
-            IPs;
+            IPs0 = bind_ips2(),
+            IPs1 = lists:usort(IPs0),
+            application:set_env(?APP, bind_ips, IPs1),
+            IPs1;
         IPs ->
             IPs
     end.
