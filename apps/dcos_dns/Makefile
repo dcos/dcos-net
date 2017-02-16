@@ -37,7 +37,7 @@ eunit:
 	${REBAR} as test eunit
 
 ct:
-	${REBAR} as test ct
+	${REBAR} as test ct -v
 
 ##
 ## Release targets
