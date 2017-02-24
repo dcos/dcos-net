@@ -252,16 +252,20 @@ add_mesos_dns_a_recs(RecordName0, Values, MesosDNSDomain, Acc) ->
 add_mesos_dns_a_rec(IPBin, RecordName0, Acc) ->
     RecordName1 = <<RecordName0/binary, ?MESOS_DOMAIN/binary>>,
     IPStr = binary_to_list(IPBin),
-    {ok, IP} = inet:parse_ipv4_address(IPStr),
-    Record =
-        #dns_rr{
-            name = RecordName1,
-            type = ?DNS_TYPE_A,
-            ttl = ?TTL,
-            data = #dns_rrdata_a{ip = IP}
-        },
-    [Record|Acc].
-
+    case inet:parse_ipv4_address(IPStr) of
+        {ok, IP} ->
+            Record =
+                #dns_rr{
+                    name = RecordName1,
+                    type = ?DNS_TYPE_A,
+                    ttl = ?TTL,
+                    data = #dns_rrdata_a{ip = IP}
+                },
+            [Record|Acc];
+        {error, Reason} ->
+            lager:warning("Couldn't create DNS A record: ~p:~p Error:~p", [RecordName1, IPStr, Reason]),
+            Acc
+    end.
 
 add_mesos_dns_srv_recs(RecordName0, Values, MesosDNSDomain, Acc) ->
     RecordName1 = chop_name(RecordName0, MesosDNSDomain),
@@ -621,6 +625,16 @@ zone_records_state8_test() ->
 zone_records_mesos_dns_test() ->
     DataDir = code:priv_dir(dcos_dns),
     JSONFilename = filename:join(DataDir, "axfr.json"),
+    {ok, Data} = file:read_file(JSONFilename),
+    DecodedData = jsx:decode(Data, [return_maps]),
+    {ok, ?MESOS_DOMAIN, Records} =  handle_mesos_dns_body(DecodedData),
+    RecordFileName = filename:join(DataDir, "axfr_records"),
+    {ok, [ExpectedRecords]} = file:consult(RecordFileName),
+    ?assertEqual(ExpectedRecords, Records).
+
+invalid_records_mesos_dns_test() ->
+    DataDir = code:priv_dir(dcos_dns),
+    JSONFilename = filename:join(DataDir, "axfr2.json"),
     {ok, Data} = file:read_file(JSONFilename),
     DecodedData = jsx:decode(Data, [return_maps]),
     {ok, ?MESOS_DOMAIN, Records} =  handle_mesos_dns_body(DecodedData),
