@@ -51,8 +51,6 @@ lookup_vip(_Config) ->
   ok.
 init_per_testcase(test_uninitalized_table, Config) -> Config;
 init_per_testcase(_, Config) ->
-  PrivateDir = ?config(priv_dir, Config),
-  application:set_env(dcos_l4lb, agent_dets_basedir, PrivateDir),
   application:set_env(dcos_l4lb, enable_networking, false),
   {ok, _} = application:ensure_all_started(minuteman),
   Config.
