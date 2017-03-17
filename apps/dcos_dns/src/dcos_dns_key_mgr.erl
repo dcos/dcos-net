@@ -11,6 +11,10 @@
 
 -behaviour(gen_server).
 
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
+
 %% API
 -export([start_link/0]).
 
@@ -210,16 +214,16 @@ create_zk_key() ->
 
 create_zk_key(Pid) ->
     case erlzk:get_data(Pid, ?ZOOKEEPER_PATH) of
-        {ok, {Data0, _State}} ->
-            Data1 = #{public := _, secret := _} = jsx:decode(Data0, [return_maps, {labels, atom}]),
-            push_data_to_lashup(Data1);
+        {ok, {Data, _Stat}} ->
+            KeyPair = decode(Data),
+            push_data_to_lashup(KeyPair);
         {error, no_node} ->
             do_create_zk_key(Pid)
     end.
 
 do_create_zk_key(Pid) ->
     KeyPair = #{public := _, secret := _} = enacl:sign_keypair(),
-    Data = jsx:encode(KeyPair),
+    Data = encode(KeyPair),
     case erlzk:create(Pid, ?ZOOKEEPER_PATH, Data) of
         {ok, _} ->
             push_data_to_lashup(KeyPair);
@@ -229,6 +233,23 @@ do_create_zk_key(Pid) ->
             lager:warning("Unable to create zknode: ~p", [Else]),
             false
     end.
+
+encode(#{public := Pk, secret := Sk}) ->
+    {Encoding, 0} = unicode:bom_to_encoding(Pk),
+    PkUtf8 = change_encoding(Pk, Encoding, utf8),
+    SkUtf8 = change_encoding(Sk, Encoding, utf8),
+    jsx:encode(#{public => PkUtf8, secret => SkUtf8, encoding => Encoding}).
+
+decode(Data) ->
+    #{public := PkUtf8, secret := SkUtf8, encoding := EncodingUtf8} =
+        jsx:decode(Data, [return_maps, {labels, atom}]),
+    Encoding = binary_to_atom(EncodingUtf8, utf8),
+    Pk = change_encoding(PkUtf8, utf8, Encoding),
+    Sk = change_encoding(SkUtf8, utf8, Encoding),
+    #{public => Pk, secret => Sk}.
+
+change_encoding(Key, From, To) ->
+    unicode:characters_to_binary(Key, From, To).
 
 push_data_to_lashup(#{public := Pk, secret := Sk}) ->
     PkZBase32 = zbase32:encode(Pk),
@@ -242,3 +263,17 @@ push_data_to_lashup(#{public := Pk, secret := Sk}) ->
             ]}),
     true.
 
+
+-ifdef(TEST).
+
+key_encode_decode_test() ->
+    Pk = <<58, 115, 64, 205, 205, 51, 217, 239, 36, 69, 93, 229, 152, 194, 108,
+           61, 86, 255, 28, 129, 123, 240, 134, 128, 147, 202, 192, 9>>,
+    Sk = <<12, 9, 70, 206, 126, 233, 39, 196, 40, 230, 232, 203, 108, 13, 13,
+             193, 210, 119, 243, 195, 63, 26, 6, 160, 56, 226, 47>>,
+    KeyPair = #{public => Pk, secret => Sk},
+    Encoded = encode(KeyPair),
+    Result = decode(Encoded),
+    ?assertEqual(KeyPair, Result).
+
+-endif.
