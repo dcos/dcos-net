@@ -235,21 +235,17 @@ do_create_zk_key(Pid) ->
     end.
 
 encode(#{public := Pk, secret := Sk}) ->
-    {Encoding, 0} = unicode:bom_to_encoding(Pk),
-    PkUtf8 = change_encoding(Pk, Encoding, utf8),
-    SkUtf8 = change_encoding(Sk, Encoding, utf8),
-    jsx:encode(#{public => PkUtf8, secret => SkUtf8, encoding => Encoding}).
+    {latin1, 0} = unicode:bom_to_encoding(Pk),
+    PkUtf8 = unicode:characters_to_binary(Pk, latin1, utf8),
+    SkUtf8 = unicode:characters_to_binary(Sk, latin1, utf8),
+    jsx:encode(#{public => PkUtf8, secret => SkUtf8}).
 
 decode(Data) ->
-    #{public := PkUtf8, secret := SkUtf8, encoding := EncodingUtf8} =
+    #{public := PkUtf8, secret := SkUtf8} =
         jsx:decode(Data, [return_maps, {labels, atom}]),
-    Encoding = binary_to_atom(EncodingUtf8, utf8),
-    Pk = change_encoding(PkUtf8, utf8, Encoding),
-    Sk = change_encoding(SkUtf8, utf8, Encoding),
+    Pk = unicode:characters_to_binary(PkUtf8, utf8, latin1),
+    Sk = unicode:characters_to_binary(SkUtf8, utf8, latin1),
     #{public => Pk, secret => Sk}.
-
-change_encoding(Key, From, To) ->
-    unicode:characters_to_binary(Key, From, To).
 
 push_data_to_lashup(#{public := Pk, secret := Sk}) ->
     PkZBase32 = zbase32:encode(Pk),
