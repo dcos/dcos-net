@@ -240,11 +240,11 @@ resolve(Parent, Upstream, State) ->
             ok
     catch
         exit:Exception ->
-            lager:warning("Resolver (~p) Process exited: ~p", [Upstream, erlang:get_stacktrace()]),
+            lager:warning("Resolver (~p) Process exited: ~p stacktrace ~p", [Upstream, Exception, erlang:get_stacktrace()]),
             %% Reraise the exception
             exit(Exception);
-        _:_ ->
-            lager:warning("Resolver (~p) Process exited: ~p", [Upstream, erlang:get_stacktrace()]),
+        Reason ->
+            lager:warning("Resolver (~p) Process exited: ~p stacktrace ~p", [Upstream, Reason, erlang:get_stacktrace()]),
             exit(unknown_error)
     end.
 
