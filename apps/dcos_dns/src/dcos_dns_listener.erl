@@ -29,10 +29,13 @@
 -endif.
 
 -record(state, {
-    ref = erlang:error() :: reference()
+    ref = erlang:error() :: reference(),
+    retry_timer :: undefined | timer:tref(),
+    monitorRef :: reference()
 }).
 -define(RPC_TIMEOUT, 5000).
--define(SPARTAN_RETRY, 30000).
+-define(MON_CALLBACK_TIME, 5000).
+-define(RPC_RETRY_TIME, 15000).
 
 -include("dcos_dns.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
@@ -73,9 +76,9 @@ start_link() ->
     {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
 init([]) ->
-    setup_retry(),
+    MonitorRef = setup_monitor(),
     {ok, Ref} = lashup_kv_events_helper:start_link(ets:fun2ms(fun({[navstar, dns, zones, '_']}) -> true end)),
-    {ok, #state{ref = Ref}}.
+    {ok, #state{ref = Ref, monitorRef = MonitorRef}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -123,13 +126,23 @@ handle_cast(_Request, State) ->
     {noreply, NewState :: #state{}} |
     {noreply, NewState :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: #state{}}).
-handle_info({lashup_kv_events, Event = #{ref := Reference}}, State = #state{ref = Ref}) when Ref == Reference ->
-    handle_event(Event),
+handle_info({lashup_kv_events, Event = #{ref := Reference}}, State0 = #state{ref = Ref}) when Ref == Reference ->
+    State1 = handle_event(Event, State0),
+    {noreply, State1};
+handle_info({'DOWN', MonitorRef, process, _, _}, State = #state{monitorRef = MonitorRef}) ->
+    lager:debug("Spartan monitor went off, maybe it got restarted"),
+    timer:send_after(?MON_CALLBACK_TIME, retry_monitor),
     {noreply, State};
-handle_info({retry_spartan, Keys}, State) ->
-    lists:foreach(fun retry_spartan/1, Keys),
-    setup_retry(),
-    {noreply, State};
+handle_info(retry_monitor, State = #state{retry_timer = Timer}) ->
+    lager:debug("Setting retry timer as monitor went off"),
+    timer:cancel(Timer),
+    MonitorRef = setup_monitor(),
+    {ok, NewTimer} = setup_retry(),
+    {noreply, State#state{monitorRef = MonitorRef, retry_timer = NewTimer}};
+handle_info({retry_spartan, Keys}, State0) ->
+    lager:debug("Retry to push DNS config"),
+    State1 = retry_spartan(Keys, State0),
+    {noreply, State1};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -167,6 +180,9 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
+setup_monitor() ->
+    monitor(process, {erldns_zone_cache, spartan_name()}).
+
 spartan_name() ->
     [_Node, Host] = binary:split(atom_to_binary(node(), utf8), <<"@">>),
     SpartanBinName = <<"spartan@", Host/binary>>,
@@ -177,20 +193,45 @@ zone2spartan(ZoneName, LashupValue) ->
     Sha = crypto:hash(sha, term_to_binary(Records)),
     {ZoneName, Sha, Records}.
 
-handle_event(_Event = #{key := [navstar, dns, zones, ZoneName], value := Value}) ->
+handle_event(_Event = #{key := [navstar, dns, zones, ZoneName] = Key, value := Value},
+              State = #state{retry_timer = Timer}) ->
+    timer:cancel(Timer),
     Zone = zone2spartan(ZoneName, Value),
-    spartan_push(Zone).
+    case spartan_push(Zone) of
+        {error, _} ->
+            {ok, NewTimer} = timer:send_after(?RPC_RETRY_TIME, {retry_spartan, [Key]}),
+            State#state{retry_timer = NewTimer};
+        ok ->
+            State
+    end.
 
-retry_spartan(Key = [navstar, dns, zones, ZoneName]) ->
+retry_spartan(Keys, State) ->
+    case push_zones(Keys) of
+        error ->
+            {ok, Timer} = timer:send_after(?RPC_RETRY_TIME, {retry_spartan, Keys}),
+            State#state{retry_timer = Timer};
+        ok ->
+            State
+    end.
+
+push_zones([]) ->
+    ok;
+push_zones([Key = [navstar, dns, zones, ZoneName]|Keys]) ->
     Value = lashup_kv:value(Key),
     Zone = zone2spartan(ZoneName, Value),
-    spartan_push(Zone).
+    case spartan_push(Zone) of
+        ok ->
+            push_zones(Keys);
+        {error, Reason} ->
+            lager:warning("Aborting pushing zones to Spartan: ~p", [Reason]),
+            error
+    end.
 
 spartan_push(Zone) ->
     case rpc:call(spartan_name(), erldns_zone_cache, put_zone, [Zone], ?RPC_TIMEOUT) of
         Reason = {badrpc, _} ->
             lager:warning("Unable to push records to spartan: ~p", [Reason]),
-            ok;
+            {error, Reason};
         ok ->
             maybe_push_signed_zone(Zone),
             ok
@@ -199,7 +240,7 @@ spartan_push(Zone) ->
 setup_retry() ->
     MatchSpec = mk_key_matchspec(),
     ZoneKeys = lashup_kv:keys(MatchSpec),
-    {ok, _} = timer:send_after(?SPARTAN_RETRY, {retry_spartan, ZoneKeys}).
+    timer:send_after(?RPC_RETRY_TIME, {retry_spartan, ZoneKeys}).
 
 mk_key_matchspec() ->
     ets:fun2ms(fun({[navstar, dns, zones, '_']}) -> true end).
@@ -219,7 +260,7 @@ push_signed_zone(PublicKey, _Zone0 = {ZoneName0, _ZoneSha, Records0}) ->
     case rpc:call(spartan_name(), erldns_zone_cache, put_zone, [Zone1], ?RPC_TIMEOUT) of
         Reason = {badrpc, _} ->
             lager:warning("Unable to push signed records to spartan: ~p", [Reason]),
-            ok;
+            {error, Reason};
         ok ->
             ok
     end.
