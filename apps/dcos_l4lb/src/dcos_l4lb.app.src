@@ -1,7 +1,7 @@
 {application, dcos_l4lb,
  [
   {description, "A Distributed Load Balancer"},
-  {vsn, "1"},
+  {vsn, "0.1.0"},
   {maintainers, ["Deepak Goel <dgoel@mesosphere.com>"]},
   {licenses, ["Apache"]},
   {registered, []},
