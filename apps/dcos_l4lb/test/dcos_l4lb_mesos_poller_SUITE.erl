@@ -51,6 +51,6 @@ test_handle_poll_state(Config) ->
     {ok, MesosState} = mesos_state_client:parse_response(Data),
     State = {state, AgentIP, 0},
     dcos_l4lb_mesos_poller:handle_poll_state(MesosState, State),
-    LashupValue2 = lashup_kv:value([minuteman, vips2]),
+    LashupValue2 = lashup_kv:value(?VIPS_KEY2),
     [{_, [{{10, 0, 0, 243}, {{10, 0, 0, 243}, 12049}}]}] = LashupValue2.
 

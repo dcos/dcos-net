@@ -517,7 +517,7 @@ fake_state() ->
     #state{agent_ip = {0, 0, 0, 0}}.
 
 overlay_vips_test() ->
-    {ok, Data} = file:read_file("testdata/overlay.json"),
+    {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/overlay.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
     VIPBes = collect_vips(MesosState, fake_state()),
     Expected = [
@@ -531,7 +531,7 @@ overlay_vips_test() ->
     ?assertEqual(Expected, VIPBes).
 
 two_healthcheck_free_vips_test() ->
-    {ok, Data} = file:read_file("testdata/two-healthcheck-free-vips-state.json"),
+    {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/two-healthcheck-free-vips-state.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
     VIPBes = collect_vips(MesosState, fake_state()),
     Expected = [
@@ -553,7 +553,7 @@ two_healthcheck_free_vips_test() ->
     ?assertEqual(Expected, VIPBes).
 
 state2_test() ->
-    {ok, Data} = file:read_file("testdata/state2.json"),
+    {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/state2.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
     VIPBes = collect_vips(MesosState, fake_state()),
     Expected = [
@@ -567,7 +567,7 @@ state2_test() ->
     ?assertEqual(Expected, VIPBes).
 
 state3_test() ->
-    {ok, Data} = file:read_file("testdata/state3.json"),
+    {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/state3.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
     VIPBes = collect_vips(MesosState, fake_state()),
     Expected = [
@@ -581,7 +581,7 @@ state3_test() ->
     ?assertEqual(Expected, VIPBes).
 
 state4_test() ->
-    {ok, Data} = file:read_file("testdata/state4.json"),
+    {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/state4.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
     VIPBes = collect_vips(MesosState, fake_state()),
     Expected = [
@@ -595,7 +595,7 @@ state4_test() ->
     ?assertEqual(Expected, VIPBes).
 
 state5_test() ->
-    {ok, Data} = file:read_file("testdata/state5.json"),
+    {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/state5.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
     VIPBes = collect_vips(MesosState, fake_state()),
     Expected = [
@@ -615,7 +615,7 @@ state5_test() ->
     ?assertEqual(Expected, VIPBes).
 
 di_state_test() ->
-    {ok, Data} = file:read_file("testdata/state_di.json"),
+    {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/state_di.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
     VIPBes = collect_vips(MesosState, fake_state()),
     Expected = [
@@ -630,7 +630,7 @@ di_state_test() ->
 
 
 named_vips_test() ->
-    {ok, Data} = file:read_file("testdata/named-base-vips.json"),
+    {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/named-base-vips.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
     VIPBes = collect_vips(MesosState, fake_state()),
     Expected = [
@@ -644,7 +644,7 @@ named_vips_test() ->
     ?assertEqual(Expected, VIPBes).
 
 missing_port_test() ->
-    {ok, Data} = file:read_file("testdata/missing-port.json"),
+    {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/missing-port.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
     VIPBes = collect_vips(MesosState, fake_state()),
     Expected = [],

@@ -5,7 +5,7 @@
 %% Application callbacks
 -export([start/2, stop/1]).
 
--define(DEFAULT_CONFIG_DIR, "/opt/mesosphere/etc/minuteman.config.d").
+-define(DEFAULT_CONFIG_DIR, "/opt/mesosphere/etc/navstar.config.d").
 %% ===================================================================
 %% Application callbacks
 %% ===================================================================

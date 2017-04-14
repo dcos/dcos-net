@@ -33,8 +33,8 @@ all(_, _) -> [].
 
 init_per_testcase(_, Config) ->
     "" = os:cmd("ipvsadm -C"),
-    os:cmd("ip link del dcos_l4lb"),
-    os:cmd("ip link add dcos_l4lb type dummy"),
+    os:cmd("ip link del minuteman"),
+    os:cmd("ip link add minuteman type dummy"),
     os:cmd("ip link del webserver"),
     os:cmd("ip link add webserver type dummy"),
     os:cmd("ip link set webserver up"),
