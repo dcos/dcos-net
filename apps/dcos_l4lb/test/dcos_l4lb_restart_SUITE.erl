@@ -28,11 +28,11 @@ test_restart(Config) ->
     _ ->
       application:set_env(dcos_l4lb, enable_networking, false)
   end,
-  {ok, _} = application:ensure_all_started(minuteman),
-  ok = application:stop(minuteman),
-  {ok, _} = application:ensure_all_started(minuteman),
-  ok = application:stop(minuteman),
-  {ok, _} = application:ensure_all_started(minuteman),
-  ok = application:stop(minuteman),
+  {ok, _} = application:ensure_all_started(dcos_l4lb),
+  ok = application:stop(dcos_l4lb),
+  {ok, _} = application:ensure_all_started(dcos_l4lb),
+  ok = application:stop(dcos_l4lb),
+  {ok, _} = application:ensure_all_started(dcos_l4lb),
+  ok = application:stop(dcos_l4lb),
   ok = application:stop(lashup),
   ok = application:stop(mnesia).

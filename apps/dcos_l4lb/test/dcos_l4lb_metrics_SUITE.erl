@@ -2,7 +2,7 @@
 -compile(export_all).
 
 -include_lib("common_test/include/ct.hrl").
--include("minuteman.hrl").
+-include("dcos_l4lb.hrl").
 
 all() -> [test_init,
           test_reorder,
@@ -36,11 +36,11 @@ init_per_testcase(Test, Config) ->
             application:set_env(dcos_l4lb, enable_networking, false)
     end,
     set_interval(Test),
-    {ok, _} = application:ensure_all_started(minuteman),
+    {ok, _} = application:ensure_all_started(dcos_l4lb),
     Config.
 
 end_per_testcase(_, _Config) ->
-  ok = application:stop(minuteman),
+  ok = application:stop(dcos_l4lb),
   ok = application:stop(lashup),
   ok = application:stop(mnesia).
 
@@ -96,9 +96,8 @@ test_one_conn(_Config) ->
 
 test_named_vip(_Config) ->
     {ok, _} = lashup_kv:request_op(?VIPS_KEY2, {update, [{update,
-                                                       {{tcp, {name, {<<"de8b9dc86">>, <<"marathon">>}}, 8080},
-                                                        riak_dt_orswot},
-                                                       {add, {{10, 0, 79, 182}, {{10, 0, 79, 182}, 8080}}}}]}),
+                  {{tcp, {name, {<<"de8b9dc86">>, <<"marathon">>}}, 8080}, riak_dt_orswot},
+                   {add, {{10, 0, 79, 182}, {{10, 0, 79, 182}, 8080}}}}]}),
     [{ip, IP}] = dcos_l4lb_lashup_vip_listener:lookup_vips([{name, <<"de8b9dc86.marathon">>}]),
     ct:pal("change the testdata if it doesn't match ip: ~p", [IP]),
     push_metrics = erlang:send(dcos_l4lb_metrics, push_metrics),

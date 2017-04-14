@@ -32,7 +32,7 @@
 -export([handle_poll_state/2]).
 -endif.
 
--include("minuteman.hrl").
+-include("dcos_l4lb.hrl").
 -include_lib("mesos_state/include/mesos_state.hrl").
 -define(SERVER, ?MODULE).
 -define(VIP_PORT, "VIP_PORT").

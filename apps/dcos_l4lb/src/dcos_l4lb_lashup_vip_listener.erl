@@ -38,7 +38,7 @@
 ]).
 
 -include_lib("stdlib/include/ms_transform.hrl").
--include("minuteman.hrl").
+-include("dcos_l4lb.hrl").
 -include_lib("mesos_state/include/mesos_state.hrl").
 -include_lib("dns/include/dns.hrl").
 
@@ -239,7 +239,7 @@ handle_value(VIPs0, State0 = #state{retry_timer = Timer}) ->
     VIPs1 = process_vips(VIPs0, State0),
     State1 = State0#state{vips = VIPs1},
     State2 = push_state_to_spartan(State1),
-    dcos_l4lb_lb_mgr:push_vips(VIPs1),
+    dcos_l4lb_mgr:push_vips(VIPs1),
     State2.
 
 cancel_retry_timer(Timer) when is_reference(Timer) ->

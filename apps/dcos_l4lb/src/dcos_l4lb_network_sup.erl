@@ -12,7 +12,7 @@
 
 -behaviour(supervisor).
 
--include("minuteman.hrl").
+-include("dcos_l4lb.hrl").
 %% API
 -export([start_link/0]).
 
@@ -32,7 +32,7 @@ start_link() ->
 maybe_ipvs_child() ->
   case dcos_l4lb_config:networking() of
     true ->
-       [?CHILD(dcos_l4lb_lb_mgr, worker)];
+       [?CHILD(dcos_l4lb_mgr, worker)];
     false ->
       []
   end.

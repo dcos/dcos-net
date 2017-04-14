@@ -2,7 +2,7 @@
 -compile(export_all).
 
 -include_lib("common_test/include/ct.hrl").
--include("minuteman.hrl").
+-include("dcos_l4lb.hrl").
 
 
 %% root tests
@@ -30,12 +30,12 @@ end_per_suite(Config) ->
 init_per_testcase(test_uninitalized_table, Config) -> Config;
 init_per_testcase(_, Config) ->
   application:set_env(dcos_l4lb, enable_networking, false),
-  {ok, _} = application:ensure_all_started(minuteman),
+  {ok, _} = application:ensure_all_started(dcos_l4lb),
   Config.
 
 end_per_testcase(test_uninitalized_table, _Config) -> ok;
 end_per_testcase(_, _Config) ->
-  ok = application:stop(minuteman),
+  ok = application:stop(dcos_l4lb),
   ok = application:stop(lashup),
   ok = application:stop(mnesia).
 

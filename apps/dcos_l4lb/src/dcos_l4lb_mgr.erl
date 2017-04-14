@@ -6,7 +6,7 @@
 %%% @end
 %%% Created : 18. Oct 2016 12:48 AM
 %%%-------------------------------------------------------------------
--module(dcos_l4lb_lb_mgr).
+-module(dcos_l4lb_mgr).
 -author("sdhillon").
 
 -behaviour(gen_statem).
@@ -131,7 +131,7 @@ do_reconcile_routes(VIPs, #state{route_mgr = RouteMgr}) ->
     ExpectedIPs = ordsets:from_list([VIP || {{_Proto, VIP, _Port}, _Backends} <- VIPs]),
     dcos_l4lb_route_mgr:update_routes(RouteMgr, ExpectedIPs).
 
-%% Converts IPVS service / dests into our normal minuteman ones
+%% Converts IPVS service / dests into our normal dcos_l4lb ones
 normalize_services_and_dests({Service0, Destinations0}) ->
     Service1 = dcos_l4lb_ipvs_mgr:service_address(Service0),
     Destinations1 = lists:map(fun dcos_l4lb_ipvs_mgr:destination_address/1, Destinations0),

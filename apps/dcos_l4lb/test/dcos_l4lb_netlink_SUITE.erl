@@ -11,7 +11,7 @@
 
 
 -include_lib("gen_netlink/include/netlink.hrl").
--include("minuteman.hrl").
+-include("dcos_l4lb.hrl").
 
 -include_lib("common_test/include/ct.hrl").
 
@@ -41,7 +41,7 @@ init_per_testcase(_, _, _) ->
     {skip, "Not running as root"}.
 
 end_per_testcase(_, _Config) ->
-    os:cmd("ip link del minuteman").
+    os:cmd("ip link del dcos_l4lb").
 
 enc_generic(_Config) ->
     Pid = 0,
@@ -87,15 +87,15 @@ routes() ->
 
 get_routes() ->
     {ok, Pid} = gen_netlink_client:start_link(?NETLINK_ROUTE),
-    {ok, Iface} = gen_netlink_client:if_nametoindex("minuteman"),
+    {ok, Iface} = gen_netlink_client:if_nametoindex("dcos_l4lb"),
     ordsets:to_list(dcos_l4lb_route_mgr:get_routes(Pid, Iface)).
 
 test_route_mgr(_Config) ->
-    os:cmd("ip link add minuteman type dummy"),
+    os:cmd("ip link add dcos_l4lb type dummy"),
     {ok, Pid} = dcos_l4lb_route_mgr:start_link(),
     [] = get_routes(),
     dcos_l4lb_route_mgr:update_routes(Pid, [{1, 2, 3, 4}]),
-    R = "local 1.2.3.4 dev minuteman  scope host",
+    R = "local 1.2.3.4 dev dcos_l4lb  scope host",
     true = lists:member(R,  routes()),
     [{1, 2, 3, 4}] = get_routes(),
     dcos_l4lb_route_mgr:update_routes(Pid, []),

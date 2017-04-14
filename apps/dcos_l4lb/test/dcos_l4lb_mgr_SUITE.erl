@@ -1,4 +1,4 @@
--module(dcos_l4lb_lb_mgr_SUITE).
+-module(dcos_l4lb_mgr_SUITE).
 -compile(export_all).
 
 -include_lib("common_test/include/ct.hrl").
@@ -28,8 +28,8 @@ test_normalize(Config) ->
         _ ->
           application:set_env(dcos_l4lb, enable_networking, false)
       end,
-      {ok, _} = application:ensure_all_started(minuteman),
-    Normalized = dcos_l4lb_lb_mgr:normalize_services_and_dests({[{address_family, 2},
+      {ok, _} = application:ensure_all_started(dcos_l4lb),
+    Normalized = dcos_l4lb_mgr:normalize_services_and_dests({[{address_family, 2},
       {protocol, 6},
       {address, <<11, 197, 245, 133, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>>},
       {port, 9042},
@@ -108,6 +108,6 @@ test_normalize(Config) ->
                   [{{10, 10, 0, 83}, 9042},
                    {{10, 10, 0, 248}, 9042},
                    {{10, 10, 0, 253}, 9042}]},
-    ok = application:stop(minuteman),
+    ok = application:stop(dcos_l4lb),
     ok = application:stop(lashup),
     ok = application:stop(mnesia).

@@ -1,8 +1,8 @@
 {application, dcos_l4lb,
  [
-  {description, "Minuteman Distributed Load Balancer"},
+  {description, "A Distributed Load Balancer"},
   {vsn, "1"},
-  {maintainers, ["Sargun Dhillon <sargun@mesosphere.com", "Tyler Neely <tyler@mesosphere.com>"]},
+  {maintainers, ["Deepak Goel <dgoel@mesosphere.com>"]},
   {licenses, ["Apache"]},
   {registered, []},
   {applications, [
