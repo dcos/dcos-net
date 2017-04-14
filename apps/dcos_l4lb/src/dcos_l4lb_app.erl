@@ -12,18 +12,10 @@
 
 start(_StartType, _StartArgs) ->
     load_config_files(),
-    maybe_start_l4lb().
+    dcos_l4lb_sup:start_link([application:get_env(dcos_l4lb, enable, true)]).
 
 stop(_State) ->
     ok.
-
-maybe_start_l4lb() ->
-    case application:get_env(navstar, enable_lb, true) of
-        false ->
-            ok;
-        true ->
-            dcos_l4lb:start_link()
-    end.
 
 load_config_files() ->
     case file:list_dir(?DEFAULT_CONFIG_DIR) of

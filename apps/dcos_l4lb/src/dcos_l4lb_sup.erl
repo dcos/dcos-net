@@ -1,9 +1,9 @@
--module(dcos_l4lb).
+-module(dcos_l4lb_sup).
 
 -behaviour(supervisor).
 
 %% API
--export([start_link/0]).
+-export([start_link/1]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -15,14 +15,15 @@
 %% API functions
 %% ===================================================================
 
-start_link() ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+start_link([Enabled]) ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, [Enabled]).
 
 %% ===================================================================
 %% Supervisor callbacks
 %% ===================================================================
-
-get_children() ->
+get_children(false) ->
+    [];
+get_children(true) ->
     [
         ?CHILD(dcos_l4lb_network_sup, supervisor),
         ?CHILD(dcos_l4lb_mesos_poller, worker),
@@ -30,6 +31,6 @@ get_children() ->
         ?CHILD(dcos_l4lb_lashup_publish, worker)
     ].
 
-init([]) ->
-    {ok, { {one_for_one, 5, 10}, get_children()} }.
+init([Enabled]) ->
+    {ok, { {one_for_one, 5, 10}, get_children(Enabled)} }.
 
