@@ -6,8 +6,8 @@
 -module(dcos_net_app).
 
 -behaviour(application).
--define(DEFAULT_CONFIG_LOCATION, "/opt/mesosphere/etc/navstar.app.config").
 
+-define(DEFAULT_CONFIG_DIR, "/opt/mesosphere/etc/navstar.config.d").
 -define(MASTERS_KEY, {masters, riak_dt_orswot}).
 
 %% Application callbacks
@@ -21,9 +21,8 @@
 %%====================================================================
 
 start(_StartType, _StartArgs) ->
-    load_config(),
+    load_config_files(),
     maybe_add_master(),
-    maybe_start_minuteman(),
     'dcos_net_sup':start_link().
 
 %%--------------------------------------------------------------------
@@ -33,14 +32,6 @@ stop(_State) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
-
-maybe_start_minuteman() ->
-    case application:get_env(navstar, enable_lb, false) of
-        false ->
-            ok;
-        true ->
-            {ok, _} = application:ensure_all_started(dcos_l4lb, permanent)
-    end.
 
 maybe_add_master() ->
     case application:get_env(navstar, is_master, false) of
@@ -71,16 +62,32 @@ add_master2() ->
             {update, ?MASTERS_KEY, {add, node()}}
         ]}).
 
-load_config() ->
-    case file:consult(?DEFAULT_CONFIG_LOCATION) of
-        {ok, Result} ->
-            load_config(Result),
-            lager:info("Loaded config: ~p", [?DEFAULT_CONFIG_LOCATION]);
-        {error, enoent} ->
-            lager:info("Did not load config: ~p", [?DEFAULT_CONFIG_LOCATION])
+load_config_files() ->
+    case file:list_dir(?DEFAULT_CONFIG_DIR) of
+      {ok, []} ->
+        lager:info("Found an empty config directory: ~p", [?DEFAULT_CONFIG_DIR]);
+      {error, enoent} ->
+        lager:info("Couldn't find config directory: ~p", [?DEFAULT_CONFIG_DIR]);
+      {ok, Filenames} ->
+        AbsFilenames = lists:map(fun abs_filename/1, Filenames),
+        lists:foreach(fun load_config_file/1, AbsFilenames)
     end.
 
-load_config([Result = [_]]) ->
+abs_filename(Filename) ->
+    filename:absname(Filename, ?DEFAULT_CONFIG_DIR).
+
+load_config_file(Filename) ->
+    case file:consult(Filename) of
+        {ok, []} ->
+            lager:info("Found an empty config file: ~p~n", [Filename]);
+        {error, eacces} ->
+            lager:info("Couldn't load config: ~p", [Filename]);
+        {ok, Result} ->
+            load_config(Result),
+            lager:info("Loaded config: ~p", [Filename])
+    end.
+
+load_config([Result]) ->
     lists:foreach(fun load_app_config/1, Result).
 
 load_app_config({App, Options}) ->

@@ -1,0 +1,25 @@
+{application, dcos_l4lb,
+ [
+  {description, "A Distributed Load Balancer"},
+  {vsn, "0.1.0"},
+  {maintainers, ["Deepak Goel <dgoel@mesosphere.com>"]},
+  {licenses, ["Apache"]},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib,
+                  lager,
+                  inets,
+                  jsx,
+                  lashup,
+                  telemetry,
+                  dns,
+                  mesos_state,
+                  ip_vs_conn,
+                  tcp_metrics,
+                  gen_netlink,
+                  mesos_state
+                 ]},
+  {mod, { dcos_l4lb_app, []}},
+  {env, []}
+ ]}.
