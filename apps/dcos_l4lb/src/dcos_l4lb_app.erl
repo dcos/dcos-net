@@ -10,7 +10,7 @@
 %% ===================================================================
 
 start(_StartType, _StartArgs) ->
-    dcos_l4lb_sup:start_link([application:get_env(dcos_l4lb, enable, true)]).
+    dcos_l4lb_sup:start_link([application:get_env(dcos_l4lb, enable_lb, true)]).
 
 stop(_State) ->
     ok.
