@@ -31,26 +31,40 @@ udp_port() ->
 bind_interface() ->
     application:get_env(?APP, bind_interface, undefined).
 
-bind_ips() ->
-    case application:get_env(?APP, bind_ips, []) of
-        [] ->
-            IPs0 = bind_ips2(),
-            IPs1 = lists:usort(IPs0),
-            application:set_env(?APP, bind_ips, IPs1),
-            IPs1;
-        IPs ->
-            IPs
-    end.
+-spec(bind_ip_blacklist() -> [inet:ipv4_address()]).
+bind_ip_blacklist() ->
+    IpStrs = application:get_env(?APP, bind_ip_blacklist, []),
+    lists:map(fun dcos_dns_app:parse_ipv4_address/1, IpStrs).
 
-bind_ips2() ->
+-spec(bind_ips() -> [inet:ipv4_address()]).
+bind_ips() ->
+    IPs0 = case application:get_env(?APP, bind_ips, []) of
+        [] ->
+            DefaultIps = get_ips(),
+            application:set_env(?APP, bind_ips, DefaultIps),
+            DefaultIps;
+        V ->
+            V
+    end,
+    lager:debug("found ips: ~p", [IPs0]),
+    BlacklistedIPs = bind_ip_blacklist(),
+    lager:debug("blacklist ips: ~p", [BlacklistedIPs]),
+    IPs1 = [ IP || IP <- IPs0, not lists:member(IP, BlacklistedIPs) ],
+    IPs2 = lists:usort(IPs1),
+    lager:debug("final ips: ~p", [IPs2]),
+    IPs2.
+
+-spec(get_ips() -> [inet:ipv4_address()]).
+get_ips() ->
     IFs0 = get_ip_interfaces(),
-    case bind_interface() of
+    IPs = case bind_interface() of
         undefined ->
             [Addr || {_IfName, Addr} <- IFs0];
         ConfigInterfaceName ->
             IFs1 = lists:filter(fun({IfName, _Addr}) -> string:equal(IfName, ConfigInterfaceName) end, IFs0),
             [Addr || {_IfName, Addr} <- IFs1]
-    end.
+    end,
+    lists:usort(IPs).
 
 %% @doc Gets all the IPs for the machine
 -spec(get_ip_interfaces() -> [{InterfaceName :: string(), inet:ipv4_address()}]).

@@ -81,6 +81,7 @@ parse_port(Port) when is_binary(Port) ->
 parse_port(Port) when is_list(Port) ->
     list_to_integer(Port).
 
+-spec(maybe_start_tcp_listener() -> ok).
 maybe_start_tcp_listener() ->
     case dcos_dns_config:tcp_enabled() of
         true ->
@@ -90,6 +91,7 @@ maybe_start_tcp_listener() ->
             ok
     end.
 
+-spec(start_tcp_listener(inet:ipv4_address()) -> supervisor:startchild_ret()).
 start_tcp_listener(IP) ->
     Port = dcos_dns_config:tcp_port(),
     Acceptors = 100,
