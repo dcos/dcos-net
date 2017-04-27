@@ -12,10 +12,8 @@
 %% @doc Resolvers based on a set of "questions"
 -spec(upstreams_from_questions(dns:questions()) -> ordsets:ordset(upstream())).
 upstreams_from_questions([#dns_query{name=Name}]) ->
-    LowerName = dns:dname_to_lower(Name),
-    Labels = dns:dname_to_labels(LowerName),
-    ReversedLabels = lists:reverse(Labels),
-    lists:map(fun normalize_ip/1, find_upstream(Name, ReversedLabels));
+    Labels = dcos_dns_app:parse_upstream_name(Name),
+    lists:map(fun normalize_ip/1, find_upstream(Name, Labels));
 
 %% There is more than one question. This is beyond our capabilities at the moment
 upstreams_from_questions([Question|Others]) ->
@@ -75,7 +73,35 @@ find_upstream(_Name, [<<"zk">>|_]) ->
     erldns_resolvers();
 find_upstream(_Name, [<<"spartan">>|_]) ->
     erldns_resolvers();
-find_upstream(Name, _Labels) ->
+find_upstream(Name, Labels) ->
+    case find_custom_upstream(Labels) of
+        [] ->
+            find_default_upstream(Name);
+        Resolvers ->
+            lager:debug("resolving ~p with custom upstream: ~p", [Labels, Resolvers]),
+            Resolvers
+    end.
+
+-spec(find_custom_upstream(Labels :: [binary()]) -> [{string(), inet:port_number()}]).
+find_custom_upstream(QueryLabels) ->
+    ForwardZones = dcos_dns_config:forward_zones(),
+    UpstreamFilter = upstream_filter_fun(QueryLabels),
+    maps:fold(UpstreamFilter, [], ForwardZones).
+
+-spec(upstream_filter_fun([dns:labels()]) ->
+    fun(([dns:labels()], raw_upstream(), [raw_upstream()]) -> [raw_upstream()])).
+upstream_filter_fun(QueryLabels) ->
+    fun(Labels, Upstream, Acc) ->
+        case lists:prefix(Labels, QueryLabels) of
+            true ->
+                Upstream;
+            false ->
+                Acc
+        end
+    end.
+
+-spec(find_default_upstream(Name :: binary()) -> [{string(), inet:port_number()}]).
+find_default_upstream(Name) ->
     case erldns_zone_cache:get_authority(Name) of
         {ok, _} ->
             erldns_resolvers();

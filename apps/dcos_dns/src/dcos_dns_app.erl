@@ -8,7 +8,8 @@
 -export([
     wait_for_reqid/2,
     parse_ipv4_address/1,
-    parse_ipv4_address_with_port/2
+    parse_ipv4_address_with_port/2,
+    parse_upstream_name/1
 ]).
 
 -include("dcos_dns.hrl").
@@ -71,6 +72,12 @@ parse_ipv4_address_with_port(Value, DefaultPort) ->
         [IP] -> {parse_ipv4_address(IP), DefaultPort}
     end.
 
+-spec(parse_upstream_name(dns:dname()) -> [dns:label()]).
+parse_upstream_name(Name) when is_binary(Name) ->
+    LowerName = dns:dname_to_lower(Name),
+    Labels = dns:dname_to_labels(LowerName),
+    lists:reverse(Labels).
+
 %%====================================================================
 %% Internal functions
 %%====================================================================
@@ -103,11 +110,15 @@ start_tcp_listener(IP) ->
         dcos_dns_tcp_handler,
         []).
 
-% A normal configuration would look something like:
+% Sample configuration:
 %  {
 %    "upstream_resolvers": ["169.254.169.253"],
 %    "udp_port": 53,
-%    "tcp_port": 53
+%    "tcp_port": 53,
+%    "forward_zones": [["a.contoso.com", [["1.1.1.1", 53]
+%                                         ["2.2.2.2", 53]]],
+%                      ["b.contoso.com", [["3.3.3.3", 53],
+%                                         ["4.4.4.4", 53]]]]
 %  }
 maybe_load_json_config() ->
     case file:read_file("/opt/mesosphere/etc/spartan.json") of
@@ -125,6 +136,9 @@ load_json_config(FileBin) ->
 process_config_tuple({<<"upstream_resolvers">>, UpstreamResolvers}) ->
     UpstreamIPsAndPorts = lists:map(fun (Resolver) -> parse_ipv4_address_with_port(Resolver, 53) end, UpstreamResolvers),
     application:set_env(?APP, upstream_resolvers, UpstreamIPsAndPorts);
+process_config_tuple({<<"forward_zones">>, Upstreams0}) ->
+    Upstreams1 = lists:foldl(fun parse_upstream/2, maps:new(), Upstreams0),
+    application:set_env(?APP, forward_zones, Upstreams1);
 process_config_tuple({<<"bind_ips">>, IPs0}) ->
     IPs1 = lists:map(fun parse_ipv4_address/1, IPs0),
     application:set_env(?APP, bind_ips, IPs1);
@@ -135,6 +149,21 @@ process_config_tuple({Key, Value}) when is_binary(Value) ->
     application:set_env(?APP, binary_to_atom(Key, utf8), binary_to_list(Value));
 process_config_tuple({Key, Value}) ->
     application:set_env(?APP, binary_to_atom(Key, utf8), Value).
+
+-spec(parse_upstream(ZoneDef :: [binary() | list([binary() | integer(), ...]), ...],
+                     Acc :: #{[dns:label()] => [raw_upstream()]}) -> #{[dns:label()] => [raw_upstream()]}).
+parse_upstream([Zone, Upstreams0], Acc) when is_binary(Zone), is_list(Upstreams0) ->
+    Labels = parse_upstream_name(Zone),
+    Upstreams1 = lists:map(fun mk_upstream/1, Upstreams0),
+    maps:put(Labels, Upstreams1, Acc).
+
+-spec(mk_upstream(Upstream :: [binary() | integer()]) -> raw_upstream()).
+mk_upstream([Server0, Port]) when is_binary(Server0), is_integer(Port) ->
+    % Ensure that it's a valid ip address
+    parse_ipv4_address(Server0),
+
+    Server1 = binary_to_list(Server0),
+    {Server1, Port}.
 
 %%====================================================================
 %% Unit Tests
