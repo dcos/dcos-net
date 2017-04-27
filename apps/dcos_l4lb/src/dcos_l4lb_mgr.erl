@@ -17,6 +17,7 @@
 -include_lib("stdlib/include/ms_transform.hrl").
 -include_lib("gen_netlink/include/netlink.hrl").
 -include("dcos_l4lb_lashup.hrl").
+-include("dcos_l4lb.hrl").
 -define(SERVER, ?MODULE).
 
 -record(state, {
@@ -26,6 +27,7 @@
     ipvs_mgr,
     route_events_ref,
     kv_ref,
+    netns_event_ref,
     ip_mapping = #{}:: map(),
     tree            :: lashup_gm_route:tree() | undefined
 }).
@@ -37,7 +39,8 @@
 
 %% API
 -export([start_link/0]).
--export([push_vips/1]).
+-export([push_vips/1,
+         push_netns/2]).
 
 
 %% gen_statem behaviour
@@ -54,6 +57,9 @@ push_vips(VIPs0) ->
     VIPs1 = ordsets:from_list(VIPs0),
     gen_statem:cast(?SERVER, {vips, VIPs1}).
 
+push_netns(EventType, EventContent) ->
+    gen_statem:cast(?SERVER, {netns_event, self(), EventType, EventContent}).
+
 start_link() ->
     gen_statem:start_link({local, ?SERVER}, ?MODULE, [], []).
 
@@ -63,7 +69,9 @@ init([]) ->
     {ok, Ref} = lashup_gm_route_events:subscribe(),
     {ok, IPVSMgr} = dcos_l4lb_ipvs_mgr:start_link(),
     {ok, RouteMgr} = dcos_l4lb_route_mgr:start_link(),
-    State = #state{route_mgr = RouteMgr, ipvs_mgr = IPVSMgr, route_events_ref = Ref, kv_ref = KVRef},
+    {ok, NetnsRef} = dcos_l4lb_netns_watcher:start_link(),
+    State = #state{route_mgr = RouteMgr, ipvs_mgr = IPVSMgr, route_events_ref = Ref,
+                   kv_ref = KVRef, netns_event_ref = NetnsRef},
     {ok, notree, State}.
 
 terminate(Reason, State, Data) ->
@@ -89,15 +97,20 @@ callback_mode() ->
 notree(info, {lashup_gm_route_events, #{ref := Ref, tree := Tree}}, State0 = #state{route_events_ref = Ref}) ->
     State1 = State0#state{tree = Tree},
     {next_state, reconcile, State1};
+notree(cast, {netns_event, Ref, EventType, EventContent}, State = #state{netns_event_ref = Ref}) ->
+    update_netns(EventType, EventContent, State),
+    keep_state_and_data;
 notree(_, _, _) ->
     {keep_state_and_data, postpone}.
 
 no_ips(info, {lashup_kv_events, Event = #{ref := Ref}}, State0 = #state{kv_ref = Ref}) ->
     State1 = handle_ip_event(Event, State0),
     {next_state, reconcile, State1};
+no_ips(cast, {netns_event, Ref, EventType, EventContent}, State = #state{netns_event_ref = Ref}) ->
+    update_netns(EventType, EventContent, State),
+    keep_state_and_data;
 no_ips(_, _, _) ->
     {keep_state_and_data, postpone}.
-
 
 reconcile(cast, {vips, VIPs}, State0) ->
     State1 = do_reconcile(VIPs, State0),
@@ -107,7 +120,10 @@ reconcile(info, {lashup_gm_route_events, #{ref := Ref, tree := Tree}}, State0 = 
     {keep_state, State1};
 reconcile(info, {lashup_kv_events, Event = #{ref := Ref}}, State0 = #state{kv_ref = Ref}) ->
     State1 = handle_ip_event(Event, State0),
-    {keep_state, State1}.
+    {keep_state, State1};
+reconcile(cast, {netns_event, Ref, EventType, EventContent}, State = #state{netns_event_ref = Ref}) ->
+    update_netns(EventType, EventContent, State),
+    keep_state_and_data.
 
 maintain(cast, {vips, VIPs}, State0) ->
     State1 = maintain(VIPs, State0),
@@ -120,7 +136,10 @@ maintain(info, {lashup_gm_route_events, #{ref := Ref, tree := Tree}}, State0 = #
     {keep_state, State1, {next_event, internal, maintain}};
 maintain(info, {lashup_kv_events, Event = #{ref := Ref}}, State0 = #state{kv_ref = Ref}) ->
     State1 = handle_ip_event(Event, State0),
-    {keep_state, State1}.
+    {keep_state, State1};
+maintain(cast, {netns_event, Ref, EventType, EventContent}, State = #state{netns_event_ref = Ref}) ->
+    update_netns(EventType, EventContent, State),
+    keep_state_and_data.
 
 do_reconcile(VIPs, State0) ->
     do_reconcile_routes(VIPs, State0),
@@ -249,6 +268,20 @@ reachable_backends([BE = {IP, {_BEIP, _BEPort}}|Rest], OB, CB, State = #state{ip
         _ ->
             reachable_backends(Rest, OB, [BE|CB], State)
     end.
+
+update_netns(UpdateType, UpdateValue, #state{last_configured_vips = VIPs, ipvs_mgr = IPVSMgr, route_mgr = RouteMgr}) ->
+    lager:warning("Recevied netns event ~p, content ~p", [UpdateType, UpdateValue]),
+    handle_netns_route(RouteMgr, UpdateType, UpdateValue, VIPs),
+    handle_netns_ipvs(IPVSMgr, UpdateType, UpdateValue, VIPs).
+   
+handle_netns_route(RouteMgr, UpdateType, UpdateValue, _VIPs) ->
+    Resp = dcos_l4lb_route_mgr:update_netns(RouteMgr, UpdateType, UpdateValue),
+    lager:warning("Response from route manager ~p", [Resp]).
+
+handle_netns_ipvs(IPVSMgr, UpdateType, UpdateValue, _VIPs) ->
+    Resp = dcos_l4lb_ipvs_mgr:update_netns(IPVSMgr, UpdateType, UpdateValue),  
+    lager:warning("Response from ipvs manager ~p", [Resp]).
+
 
 -ifdef(TEST).
 

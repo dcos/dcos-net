@@ -28,8 +28,7 @@ get_children(true) ->
         ?CHILD(dcos_l4lb_network_sup, supervisor),
         ?CHILD(dcos_l4lb_mesos_poller, worker),
         ?CHILD(dcos_l4lb_metrics, worker),
-        ?CHILD(dcos_l4lb_lashup_publish, worker),
-        ?CHILD(dcos_l4lb_file_watcher, worker)
+        ?CHILD(dcos_l4lb_lashup_publish, worker)
     ].
 
 init([Enabled]) ->

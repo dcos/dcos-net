@@ -20,7 +20,8 @@
   max_named_ip/0,
   dcos_l4lb_iface/0,
   metrics_interval_seconds/0,
-  metrics_splay_seconds/0
+  metrics_splay_seconds/0,
+  cni_dir/0
   ]).
 
 metrics_interval_seconds() ->
@@ -43,6 +44,9 @@ agent_polling_enabled() ->
 
 agent_port() ->
   application:get_env(dcos_l4lb, agent_port, 5051).
+
+cni_dir() ->
+  application:get_env(dcos_l4lb, cni_dir, "/var/run/dcos/cni/l4lb").
 
 -spec(min_named_ip() -> inet:ip4_address()).
 min_named_ip() ->

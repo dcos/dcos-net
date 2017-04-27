@@ -12,7 +12,9 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, update_routes/2]).
+-export([start_link/0, 
+         update_routes/2,
+         update_netns/3]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -30,12 +32,14 @@
 
 -record(state, {
     netlink :: pid(),
+    netns_netlink = #{} :: map(),
     routes :: ordsets:ordset(),
     iface :: non_neg_integer()
 }).
 
 -type state() :: state().
 -include_lib("gen_netlink/include/netlink.hrl").
+-include("dcos_l4lb.hrl").
 -define(LOCAL_TABLE, 255). %% local table
 -define(MINUTEMAN_IFACE, "minuteman").
 
@@ -46,6 +50,9 @@
 
 update_routes(Pid, Routes) ->
     gen_server:call(Pid, {update_routes, Routes}).
+
+update_netns(Pid, UpdateType, UpdateValue) ->
+    gen_server:call(Pid, {update_netns, {UpdateType, UpdateValue}}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -100,6 +107,9 @@ init([]) ->
 handle_call({update_routes, Routes}, _From, State0) ->
     State1 = handle_update_routes(Routes, State0),
     {reply, ok, State1};
+handle_call({update_netns, {UpdateType, UpdateValue}}, _From, State0) ->
+    {Reply, State1} = handle_update_netns(UpdateType, UpdateValue, State0),
+    {reply, Reply, State1};
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
@@ -215,3 +225,42 @@ remove_route(Dst, #state{netlink = Pid, iface = Iface}) ->
         _Flags = [],
         Msg},
     {ok, _} = gen_netlink_client:rtnl_request(Pid, delroute, [], Route).
+
+handle_update_netns(add_netns, Netnslist, State = #state{netns_netlink = NetnsMap0}) ->
+    NetnsMap1 = lists:foldl(fun maybe_add_netns/2, maps:new(), Netnslist),
+    NetnsMap2 = maps:merge(NetnsMap0, NetnsMap1),
+    Reply = maps:keys(NetnsMap1),
+    {Reply, State#state{netns_netlink = NetnsMap2}};
+handle_update_netns(remove_netns, Netnslist, State = #state{netns_netlink = NetnsMap0}) ->
+    NetnsMap1 = lists:foldl(fun maybe_remove_netns/2, NetnsMap0, Netnslist),
+    {[], State#state{netns_netlink = NetnsMap1}};
+handle_update_netns(reconcile_netns, Netnslist, State0 = #state{netns_netlink = NetnsMap0}) ->
+    AddNetns = [Netns || Netns = #netns{id = Id} <- Netnslist, not maps:is_key(Id, NetnsMap0)],
+    RemoveNetns = [#netns{id = Id} || Id <- maps:keys(NetnsMap0), not lists:keymember(Id, 2, Netnslist)],
+    {_, State1} = handle_update_netns(remove_netns, RemoveNetns, State0),
+    handle_update_netns(add_netns, AddNetns, State1).
+   
+maybe_add_netns(Netns = #netns{id = Id}, NetnsMap) ->
+    maybe_add_netns(maps:is_key(Id, NetnsMap), Netns, NetnsMap).
+
+maybe_add_netns(true, _, NetnsMap) ->
+    NetnsMap;
+maybe_add_netns(false, #netns{id = Id, file = File}, NetnsMap) ->
+    case gen_netlink_client:start_link(netns, ?NETLINK_ROUTE, binary_to_list(File)) of
+        {ok, Pid} ->
+            maps:put(Id, Pid, NetnsMap);
+        {error, Reason} ->
+            lager:error("Couldn't create route netlink client for ~p due to ~p", [Id, Reason]),
+            NetnsMap
+    end.
+
+maybe_remove_netns(Netns = #netns{id = Id}, NetnsMap) ->
+    maybe_remove_netns(maps:is_key(Id, NetnsMap), Netns, NetnsMap).
+
+maybe_remove_netns(true, #netns{id = Id}, NetnsMap) ->
+    Pid = maps:get(Id, NetnsMap),
+    erlang:unlink(Pid),
+    gen_netlink_client:stop(Pid),
+    maps:remove(Id, NetnsMap);
+maybe_remove_netns(false, _, NetnsMap) ->
+    NetnsMap.
