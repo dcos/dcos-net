@@ -14,6 +14,7 @@
 %% API
 -export([start_link/0, 
          update_routes/2,
+         push_routes/2,
          update_netns/3]).
 
 %% gen_server callbacks
@@ -29,6 +30,7 @@
 -endif.
 
 -define(SERVER, ?MODULE).
+-define(IFIDX_LO, 1).
 
 -record(state, {
     netlink :: pid(),
@@ -50,6 +52,9 @@
 
 update_routes(Pid, Routes) ->
     gen_server:call(Pid, {update_routes, Routes}).
+
+push_routes(Pid, Namespaces) ->
+    gen_server:call(Pid, {push_routes, Namespaces}).
 
 update_netns(Pid, UpdateType, UpdateValue) ->
     gen_server:call(Pid, {update_netns, {UpdateType, UpdateValue}}).
@@ -107,6 +112,9 @@ init([]) ->
 handle_call({update_routes, Routes}, _From, State0) ->
     State1 = handle_update_routes(Routes, State0),
     {reply, ok, State1};
+handle_call({push_routes, Namespaces}, _From, State) ->
+    handle_push_routes(Namespaces, State),
+    {reply, ok, State};
 handle_call({update_netns, {UpdateType, UpdateValue}}, _From, State0) ->
     {Reply, State1} = handle_update_netns(UpdateType, UpdateValue, State0),
     {reply, Reply, State1};
@@ -196,8 +204,21 @@ handle_update_routes(NewRoutes, State0 = #state{routes = OldRoutes}) ->
     lists:foreach(fun(Route) -> remove_route(Route, State0) end, RoutesToDelete),
     State0#state{routes = NewRoutes}.
 
+handle_push_routes(Namespaces, State = #state{routes = Routes}) ->
+    lists:foreach(fun(Namespace) -> add_routes(Namespace, Routes, State) end, Namespaces).
+
+add_routes(Namespace, Routes, #state{netns_netlink = NetnsMap}) ->
+    Pid = maps:get(Namespace, NetnsMap),
+    lists:foreach(fun(Route) -> add_route(Route, Pid) end, Routes). 
+
 add_route(Dst, #state{netlink = Pid, iface = Iface}) ->
     Msg = [{table, ?LOCAL_TABLE}, {dst, Dst}, {oif, Iface}],
+    add_route2(Pid, Msg);
+add_route(Dst, Pid) ->
+    Msg = [{table, ?LOCAL_TABLE}, {dst, Dst}, {oif, ?IFIDX_LO}],
+    add_route2(Pid, Msg).
+
+add_route2(Pid, Msg) ->
     Route = {
         inet,
         _PrefixLen = 32,
@@ -228,12 +249,12 @@ remove_route(Dst, #state{netlink = Pid, iface = Iface}) ->
 
 handle_update_netns(add_netns, Netnslist, State = #state{netns_netlink = NetnsMap0}) ->
     NetnsMap1 = lists:foldl(fun maybe_add_netns/2, maps:new(), Netnslist),
-    NetnsMap2 = maps:merge(NetnsMap0, NetnsMap1),
-    Reply = maps:keys(NetnsMap1),
-    {Reply, State#state{netns_netlink = NetnsMap2}};
+    NetnsMap2 = maps:merge(NetnsMap1, NetnsMap0),
+    {maps:keys(NetnsMap1), State#state{netns_netlink = NetnsMap2}};
 handle_update_netns(remove_netns, Netnslist, State = #state{netns_netlink = NetnsMap0}) ->
     NetnsMap1 = lists:foldl(fun maybe_remove_netns/2, NetnsMap0, Netnslist),
-    {[], State#state{netns_netlink = NetnsMap1}};
+    RemovedNs = lists:subtract(maps:keys(NetnsMap0), maps:keys(NetnsMap1)),
+    {RemovedNs, State#state{netns_netlink = NetnsMap1}};
 handle_update_netns(reconcile_netns, Netnslist, State0 = #state{netns_netlink = NetnsMap0}) ->
     AddNetns = [Netns || Netns = #netns{id = Id} <- Netnslist, not maps:is_key(Id, NetnsMap0)],
     RemoveNetns = [#netns{id = Id} || Id <- maps:keys(NetnsMap0), not lists:keymember(Id, 2, Netnslist)],
@@ -245,8 +266,8 @@ maybe_add_netns(Netns = #netns{id = Id}, NetnsMap) ->
 
 maybe_add_netns(true, _, NetnsMap) ->
     NetnsMap;
-maybe_add_netns(false, #netns{id = Id, file = File}, NetnsMap) ->
-    case gen_netlink_client:start_link(netns, ?NETLINK_ROUTE, binary_to_list(File)) of
+maybe_add_netns(false, #netns{id = Id, ns = Namespace}, NetnsMap) ->
+    case gen_netlink_client:start_link(netns, ?NETLINK_ROUTE, binary_to_list(Namespace)) of
         {ok, Pid} ->
             maps:put(Id, Pid, NetnsMap);
         {error, Reason} ->

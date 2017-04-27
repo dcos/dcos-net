@@ -163,8 +163,8 @@ read_files(CniDir) ->
 read_file(FileName, CniDir) ->
     AbsFileName = filename:join(CniDir, FileName),
     case file:read_file(AbsFileName) of
-        {ok, Binary} -> 
-            {true, #netns{id = FileName, file = Binary}};
+        {ok, Namespace} -> 
+            {true, #netns{id = FileName, ns = Namespace}};
         {error, Reason} -> 
             lager:warning("Couldn't read ~p, due to ~p", [AbsFileName, Reason]),
             false
