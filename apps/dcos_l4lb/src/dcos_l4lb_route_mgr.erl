@@ -13,9 +13,11 @@
 
 %% API
 -export([start_link/0, 
-         update_routes/2,
-         push_routes/2,
-         update_netns/3]).
+         get_routes/2,
+         add_routes/3,
+         remove_routes/3,
+         add_netns/2,
+         remove_netns/2]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -25,39 +27,46 @@
     terminate/2,
     code_change/3]).
 
--ifdef(TEST).
--export([get_routes/2]).
--endif.
 
 -define(SERVER, ?MODULE).
--define(IFIDX_LO, 1).
 
 -record(state, {
-    netlink :: pid(),
-    netns_netlink = #{} :: map(),
-    routes :: ordsets:ordset(),
-    iface :: non_neg_integer()
+    netns :: map()
 }).
+
+-record(params, {
+    pid :: pid(),
+    iface :: non_neg_integer(),
+    table :: non_neg_integer()
+}).
+    
 
 -type state() :: state().
 -include_lib("gen_netlink/include/netlink.hrl").
 -include("dcos_l4lb.hrl").
 -define(LOCAL_TABLE, 255). %% local table
+-define(IFIDX_LO, 1).
+-define(MINUTEMAN_TABLE, 52).
 -define(MINUTEMAN_IFACE, "minuteman").
 
 
 %%%===================================================================
 %%% API
 %%%===================================================================
+get_routes(Pid, Namespace) ->
+    gen_server:call(Pid, {get_routes, Namespace}).
 
-update_routes(Pid, Routes) ->
-    gen_server:call(Pid, {update_routes, Routes}).
+add_routes(Pid, Routes, Namespace) ->
+    gen_server:call(Pid, {add_routes, Routes, Namespace}).
 
-push_routes(Pid, Namespaces) ->
-    gen_server:call(Pid, {push_routes, Namespaces}).
+remove_routes(Pid, Routes, Namespace) ->
+    gen_server:call(Pid, {remove_routes, Routes, Namespace}).
 
-update_netns(Pid, UpdateType, UpdateValue) ->
-    gen_server:call(Pid, {update_netns, {UpdateType, UpdateValue}}).
+add_netns(Pid, UpdateValue) ->
+    gen_server:call(Pid, {add_netns, UpdateValue}).
+
+remove_netns(Pid, UpdateValue) ->
+    gen_server:call(Pid, {remove_netns, UpdateValue}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -91,8 +100,8 @@ start_link() ->
 init([]) ->
     {ok, Pid} = gen_netlink_client:start_link(?NETLINK_ROUTE),
     {ok, Iface} = gen_netlink_client:if_nametoindex(?MINUTEMAN_IFACE),
-    Routes = get_routes(Pid, Iface),
-    {ok, #state{netlink = Pid, routes = Routes, iface = Iface}}.
+    Params = #params{pid = Pid, iface = Iface, table = ?LOCAL_TABLE},
+    {ok, #state{netns = #{host => Params}}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -109,14 +118,20 @@ init([]) ->
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
     {stop, Reason :: term(), NewState :: state()}).
-handle_call({update_routes, Routes}, _From, State0) ->
-    State1 = handle_update_routes(Routes, State0),
-    {reply, ok, State1};
-handle_call({push_routes, Namespaces}, _From, State) ->
-    handle_push_routes(Namespaces, State),
+handle_call({get_routes, Namespace}, _From, State) ->
+    Routes = handle_get_routes(Namespace, State),
+    {reply, Routes, State};
+handle_call({add_routes, Routes, Namespace}, _From, State) ->
+    handle_add_routes(Routes, Namespace, State),
     {reply, ok, State};
-handle_call({update_netns, {UpdateType, UpdateValue}}, _From, State0) ->
-    {Reply, State1} = handle_update_netns(UpdateType, UpdateValue, State0),
+handle_call({remove_routes, Routes, Namespace}, _From, State) ->
+    handle_remove_routes(Routes, Namespace, State),
+    {reply, ok, State};
+handle_call({add_netns, UpdateValue}, _From, State0) ->
+    {Reply, State1} = handle_add_netns(UpdateValue, State0),
+    {reply, Reply, State1};
+handle_call({remove_netns, UpdateValue}, _From, State0) ->
+    {Reply, State1} = handle_remove_netns(UpdateValue, State0),
     {reply, Reply, State1};
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
@@ -185,46 +200,43 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-get_routes(Pid, Iface) ->
-    Req = [{table, ?LOCAL_TABLE}, {oif, Iface}],
+handle_get_routes(Namespace, #state{netns = NetnsMap}) ->
+    handle_get_route2(maps:get(Namespace, NetnsMap)).
+
+handle_get_route2(#params{pid = Pid, iface = Iface, table = Table}) ->
+    Req = [{table, Table}, {oif, Iface}],
     {ok, Raw} = gen_netlink_client:rtnl_request(Pid, getroute, [match, root],
                                                 {inet, 0, 0, 0, 0, 0, 0, 0, [], Req}),
     Routes0 = [route_msg_dst(Msg) || #rtnetlink{msg = Msg} <- Raw,
-                                     Iface == route_msg_oif(Msg)],
+                                     Iface == route_msg_oif(Msg), 
+                                     Table == route_msg_table(Msg)],
+    lager:info("Get routes ~p ~p ~p", [Iface, Table, Routes0]),
     ordsets:from_list(Routes0).
 
 %% see netlink.hrl for the element position
+route_msg_table(Msg) -> proplists:get_value(table, element(10, Msg)).
 route_msg_oif(Msg) -> proplists:get_value(oif, element(10, Msg)).
 route_msg_dst(Msg) -> proplists:get_value(dst, element(10, Msg)).
 
-handle_update_routes(NewRoutes, State0 = #state{routes = OldRoutes}) ->
-    RoutesToDelete = ordsets:subtract(OldRoutes, NewRoutes),
-    RoutesToAdd = ordsets:subtract(NewRoutes, OldRoutes),
-    lists:foreach(fun(Route) -> add_route(Route, State0) end, RoutesToAdd),
-    lists:foreach(fun(Route) -> remove_route(Route, State0) end, RoutesToDelete),
-    State0#state{routes = NewRoutes}.
+handle_add_routes(RoutesToAdd, Namespace, State) ->
+    lager:info("Adding routes to Namespace ~p ~p", [Namespace, RoutesToAdd]),
+    lists:foreach(fun(Route) -> add_route(Route, Namespace, State) end, RoutesToAdd).
 
-handle_push_routes(Namespaces, State = #state{routes = Routes}) ->
-    lists:foreach(fun(Namespace) -> add_routes(Namespace, Routes, State) end, Namespaces).
+handle_remove_routes(RoutesToDelete, Namespace, State) ->
+    lager:info("Removing routes from Namespace ~p ~p", [Namespace, RoutesToDelete]),
+    lists:foreach(fun(Route) -> remove_route(Route, Namespace, State) end, RoutesToDelete).
+ 
+add_route(Dst, Namespace, #state{netns = NetnsMap}) ->
+    add_route2(Dst, maps:get(Namespace, NetnsMap)).
 
-add_routes(Namespace, Routes, #state{netns_netlink = NetnsMap}) ->
-    Pid = maps:get(Namespace, NetnsMap),
-    lists:foreach(fun(Route) -> add_route(Route, Pid) end, Routes). 
-
-add_route(Dst, #state{netlink = Pid, iface = Iface}) ->
-    Msg = [{table, ?LOCAL_TABLE}, {dst, Dst}, {oif, Iface}],
-    add_route2(Pid, Msg);
-add_route(Dst, Pid) ->
-    Msg = [{table, ?LOCAL_TABLE}, {dst, Dst}, {oif, ?IFIDX_LO}],
-    add_route2(Pid, Msg).
-
-add_route2(Pid, Msg) ->
+add_route2(Dst, #params{pid = Pid, iface = Iface, table = Table}) ->
+    Msg = [{table, Table}, {dst, Dst}, {oif, Iface}],
     Route = {
         inet,
         _PrefixLen = 32,
         _SrcPrefixLen = 0,
         _Tos = 0,
-        _Table = ?LOCAL_TABLE,
+        _Table = Table,
         _Protocol = boot,
         _Scope = host,
         _Type = local,
@@ -232,14 +244,17 @@ add_route2(Pid, Msg) ->
         Msg},
     {ok, _} = gen_netlink_client:rtnl_request(Pid, newroute, [create, replace], Route).
 
-remove_route(Dst, #state{netlink = Pid, iface = Iface}) ->
-    Msg = [{table, ?LOCAL_TABLE}, {dst, Dst}, {oif, Iface}],
+remove_route(Dst, Namespace, #state{netns = NetnsMap}) ->
+    remove_route2(Dst, maps:get(Namespace, NetnsMap)).
+
+remove_route2(Dst, #params{pid = Pid, iface = Iface, table = Table}) ->
+    Msg = [{table, Table}, {dst, Dst}, {oif, Iface}],
     Route = {
         inet,
         _PrefixLen = 32,
         _SrcPrefixLen = 0,
         _Tos = 0,
-        _Table = ?LOCAL_TABLE,
+        _Table = Table,
         _Protocol = boot,
         _Scope = host,
         _Type = local,
@@ -247,20 +262,16 @@ remove_route(Dst, #state{netlink = Pid, iface = Iface}) ->
         Msg},
     {ok, _} = gen_netlink_client:rtnl_request(Pid, delroute, [], Route).
 
-handle_update_netns(add_netns, Netnslist, State = #state{netns_netlink = NetnsMap0}) ->
+handle_add_netns(Netnslist, State = #state{netns = NetnsMap0}) ->
     NetnsMap1 = lists:foldl(fun maybe_add_netns/2, maps:new(), Netnslist),
     NetnsMap2 = maps:merge(NetnsMap1, NetnsMap0),
-    {maps:keys(NetnsMap1), State#state{netns_netlink = NetnsMap2}};
-handle_update_netns(remove_netns, Netnslist, State = #state{netns_netlink = NetnsMap0}) ->
+    {maps:keys(NetnsMap1), State#state{netns = NetnsMap2}}.
+
+handle_remove_netns(Netnslist, State = #state{netns = NetnsMap0}) ->
     NetnsMap1 = lists:foldl(fun maybe_remove_netns/2, NetnsMap0, Netnslist),
     RemovedNs = lists:subtract(maps:keys(NetnsMap0), maps:keys(NetnsMap1)),
-    {RemovedNs, State#state{netns_netlink = NetnsMap1}};
-handle_update_netns(reconcile_netns, Netnslist, State0 = #state{netns_netlink = NetnsMap0}) ->
-    AddNetns = [Netns || Netns = #netns{id = Id} <- Netnslist, not maps:is_key(Id, NetnsMap0)],
-    RemoveNetns = [#netns{id = Id} || Id <- maps:keys(NetnsMap0), not lists:keymember(Id, 2, Netnslist)],
-    {_, State1} = handle_update_netns(remove_netns, RemoveNetns, State0),
-    handle_update_netns(add_netns, AddNetns, State1).
-   
+    {RemovedNs, State#state{netns = NetnsMap1}}.
+
 maybe_add_netns(Netns = #netns{id = Id}, NetnsMap) ->
     maybe_add_netns(maps:is_key(Id, NetnsMap), Netns, NetnsMap).
 
@@ -269,7 +280,8 @@ maybe_add_netns(true, _, NetnsMap) ->
 maybe_add_netns(false, #netns{id = Id, ns = Namespace}, NetnsMap) ->
     case gen_netlink_client:start_link(netns, ?NETLINK_ROUTE, binary_to_list(Namespace)) of
         {ok, Pid} ->
-            maps:put(Id, Pid, NetnsMap);
+            Params = #params{pid = Pid, iface = ?IFIDX_LO, table = ?MINUTEMAN_TABLE},
+            maps:put(Id, Params, NetnsMap);
         {error, Reason} ->
             lager:error("Couldn't create route netlink client for ~p due to ~p", [Id, Reason]),
             NetnsMap
@@ -279,7 +291,7 @@ maybe_remove_netns(Netns = #netns{id = Id}, NetnsMap) ->
     maybe_remove_netns(maps:is_key(Id, NetnsMap), Netns, NetnsMap).
 
 maybe_remove_netns(true, #netns{id = Id}, NetnsMap) ->
-    Pid = maps:get(Id, NetnsMap),
+    #params{pid = Pid} = maps:get(Id, NetnsMap),
     erlang:unlink(Pid),
     gen_netlink_client:stop(Pid),
     maps:remove(Id, NetnsMap);

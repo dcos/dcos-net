@@ -14,20 +14,16 @@
 %% API
 -export([start_link/0]).
 
--export([get_dests/2,
-         remove_dest/3,
-         add_dest/4,
-         add_dest/6,
+-export([get_dests/3,
          add_dest/7,
-         remove_dest/6]).
--export([get_services/1,
-         add_service/4,
+         remove_dest/7,
+         get_services/2,
          add_service/5,
-         remove_service/2,
-         remove_service/4]).
--export([service_address/1,
-         destination_address/1]).
--export([update_netns/3]).
+         remove_service/5,
+         service_address/1,
+         destination_address/1,
+         add_netns/2,
+         remove_netns/2]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -40,8 +36,7 @@
 -define(SERVER, ?MODULE).
 
 -record(state, {
-    netlink_generic :: pid(),
-    netns_netlink = #{} :: map(),
+    netns :: map(),
     family
 }).
 -type state() :: #state{}.
@@ -82,60 +77,43 @@
 %%% API
 %%%===================================================================
 
--spec(get_services(Pid :: pid()) -> [service()]).
-get_services(Pid) ->
-    gen_server:call(Pid, get_services).
+-spec(get_services(Pid :: pid(), Namespace :: term()) -> [service()]).
+get_services(Pid, Namespace) ->
+    gen_server:call(Pid, {get_services, Namespace}).
 
 -spec(add_service(Pid :: pid(), IP :: inet:ip4_address(), Port :: inet:port_number(),
-                  Protocol :: protocol()) -> ok | error).
-add_service(Pid, IP, Port, Protocol) ->
-    gen_server:call(Pid, {add_service, IP, Port, Protocol}).
-
-add_service(Pid, IP, Port, Protocol, Namespaces) ->
-    gen_server:call(Pid, {add_service, IP, Port, Protocol, Namespaces}).
-
--spec(remove_service(Pid :: pid(), Service :: service()) -> ok | error).
-remove_service(Pid, Service) ->
-    gen_server:call(Pid, {remove_service, Service}).
+                  Protocol :: protocol(), Namespace :: term()) -> ok | error).
+add_service(Pid, IP, Port, Protocol, Namespace) ->
+    gen_server:call(Pid, {add_service, IP, Port, Protocol, Namespace}).
 
 -spec(remove_service(Pid :: pid(), IP :: inet:ip4_address(),
                      Port :: inet:port_number(),
-                     Protocol :: protocol()) -> ok | error).
-remove_service(Pid, IP, Port, Protocol) ->
-    gen_server:call(Pid, {remove_service, IP, Port, Protocol}).
+                     Protocol :: protocol(), Namespace :: term()) -> ok | error).
+remove_service(Pid, IP, Port, Protocol, Namespace) ->
+    gen_server:call(Pid, {remove_service, IP, Port, Protocol, Namespace}).
 
--spec(get_dests(Pid :: pid(), Service :: service()) -> [dest()]).
-get_dests(Pid, Service) ->
-    gen_server:call(Pid, {get_dests, Service}).
-
--spec(remove_dest(Pid :: pid(), Service :: service(),
-                  Dest :: dest()) -> ok | error).
-remove_dest(Pid, Service, Dest) ->
-    gen_server:call(Pid, {remove_dest, Service, Dest}).
+-spec(get_dests(Pid :: pid(), Service :: service(), Namespace :: term()) -> [dest()]).
+get_dests(Pid, Service, Namespace) ->
+    gen_server:call(Pid, {get_dests, Service, Namespace}).
 
 -spec(remove_dest(Pid :: pid(), ServiceIP :: inet:ip4_address(),
                   ServicePort :: inet:port_number(),
                   DestIP :: inet:ip4_address(), DestPort :: inet:port_number(),
-                  Protocol :: protocol()) -> ok | error).
-remove_dest(Pid, ServiceIP, ServicePort, DestIP, DestPort, Protocol) ->
-    gen_server:call(Pid, {remove_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol}).
-
--spec(add_dest(Pid :: pid(), Service :: service(), IP :: inet:ip4_address(),
-               Port :: inet:port_number()) -> ok | error).
-add_dest(Pid, Service, IP, Port) ->
-    gen_server:call(Pid, {add_dest, Service, IP, Port}).
+                  Protocol :: protocol(), Namespace :: term()) -> ok | error).
+remove_dest(Pid, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace) ->
+    gen_server:call(Pid, {remove_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace}).
 
 -spec(add_dest(Pid :: pid(), ServiceIP :: inet:ip4_address(), ServicePort :: inet:port_number(),
                DestIP :: inet:ip4_address(), DestPort :: inet:port_number(),
-               Protocol :: protocol()) -> ok | error).
-add_dest(Pid, ServiceIP, ServicePort, DestIP, DestPort, Protocol) ->
-    gen_server:call(Pid, {add_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol}).
+               Protocol :: protocol(), Namespace :: term()) -> ok | error).
+add_dest(Pid, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace) ->
+    gen_server:call(Pid, {add_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace}).
 
-add_dest(Pid, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespaces) ->
-    gen_server:call(Pid, {add_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespaces}).
+add_netns(Pid, UpdateValue) ->
+    gen_server:call(Pid, {add_netns, UpdateValue}).
 
-update_netns(Pid, UpdateType, UpdateValue) ->
-    gen_server:call(Pid, {update_netns, {UpdateType, UpdateValue}}).
+remove_netns(Pid, UpdateValue) ->
+    gen_server:call(Pid, {remove_netns, UpdateValue}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -169,7 +147,7 @@ start_link() ->
 init([]) ->
     {ok, Pid} = gen_netlink_client:start_link(),
     {ok, Family} = gen_netlink_client:get_family(Pid, "IPVS"),
-    {ok, #state{netlink_generic = Pid, family = Family}}.
+    {ok, #state{netns = #{host => Pid}, family = Family}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -186,42 +164,29 @@ init([]) ->
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
     {stop, Reason :: term(), NewState :: state()}).
-
-handle_call(get_services, _From, State) ->
-    Reply = handle_get_services(State),
+handle_call({get_services, Namespace}, _From, State) ->
+    Reply = handle_get_services(Namespace, State),
     {reply, Reply, State};
-handle_call({add_service, IP, Port, Protocol}, _From, State) ->
-    Reply = handle_add_service(IP, Port, Protocol, State),
+handle_call({add_service, IP, Port, Protocol, Namespace}, _From, State) ->
+    Reply = handle_add_service(IP, Port, Protocol, Namespace, State),
     {reply, Reply, State};
-handle_call({add_service, IP, Port, Protocol, Namespaces}, _From, State) ->
-    Reply = handle_add_service(IP, Port, Protocol, Namespaces, State),
+handle_call({remove_service, IP, Port, Protocol, Namespace}, _From, State) ->
+    Reply = handle_remove_service(IP, Port, Protocol, Namespace, State),
     {reply, Reply, State};
-handle_call({remove_service, Service}, _From, State) ->
-    Reply = handle_remove_service(Service, State),
+handle_call({get_dests, Service, Namespace}, _From, State) ->
+    Reply = handle_get_dests(Service, Namespace, State),
     {reply, Reply, State};
-handle_call({remove_service, IP, Port, Protocol}, _From, State) ->
-    Reply = handle_remove_service(IP, Port, Protocol, State),
+handle_call({add_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace}, _From, State) ->
+    Reply = handle_add_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace, State),
     {reply, Reply, State};
-handle_call({get_dests, Service}, _From, State) ->
-    Reply = handle_get_dests(Service, State),
+handle_call({remove_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace}, _From, State) ->
+    Reply = handle_remove_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace, State),
     {reply, Reply, State};
-handle_call({add_dest, Service, IP, Port}, _From, State) ->
-    Reply = handle_add_dest(Service, IP, Port, State),
-    {reply, Reply, State};
-handle_call({add_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol}, _From, State) ->
-    Reply = handle_add_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol, State),
-    {reply, Reply, State};
-handle_call({add_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespaces}, _From, State) ->
-    Reply = handle_add_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespaces, State),
-    {reply, Reply, State};
-handle_call({remove_dest, Service, Dest}, _From, State) ->
-    Reply = handle_remove_dest(Service, Dest, State),
-    {reply, Reply, State};
-handle_call({remove_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol}, _From, State) ->
-    Reply = handle_remove_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol, State),
-    {reply, Reply, State};
-handle_call({update_netns, {UpdateType, UpdateValue}}, _From, State0) ->
-    {Reply, State1} = handle_update_netns(UpdateType, UpdateValue, State0),
+handle_call({add_netns, UpdateValue}, _From, State0) ->
+    {Reply, State1} = handle_add_netns(UpdateValue, State0),
+    {reply, Reply, State1};
+handle_call({remove_netns, UpdateValue}, _From, State0) ->
+    {Reply, State1} = handle_remove_netns(UpdateValue, State0),
     {reply, Reply, State1}.
 
 -spec(service_address(service()) -> {protocol(), inet:ip4_address(), inet:port_number()}).
@@ -319,17 +284,18 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
--spec(handle_get_services(State :: state()) -> [service()]).
-handle_get_services(State) ->
+-spec(handle_get_services(Namespace :: term(), State :: state()) -> [service()]).
+handle_get_services(Namespace, State = #state{netns = NetnsMap}) ->
+    Pid = maps:get(Namespace, NetnsMap),
     lists:foldl(
       fun(Protocol, Acc) ->
-              Services = handle_get_services(inet, Protocol, State),
+              Services = handle_get_services(inet, Protocol, Pid, State),
               Acc ++ Services
       end, [], ?IPVS_PROTOCOLS).
 
 -spec(handle_get_services(AddressFamily :: family(), Protocol :: protocol(),
-                          State :: state()) -> [service()]).
-handle_get_services(AddressFamily, Protocol, #state{netlink_generic = Pid, family = Family}) ->
+                          Namespace :: term(), State :: state()) -> [service()]).
+handle_get_services(AddressFamily, Protocol, Pid, #state{family = Family}) ->
     AddressFamily1 = netlink_codec:family_to_int(AddressFamily),
     Protocol1 = netlink_codec:protocol_to_int(Protocol),
     Message =
@@ -347,33 +313,26 @@ handle_get_services(AddressFamily, Protocol, #state{netlink_generic = Pid, famil
         proplists:is_defined(service, MaybeService)].
 
 -spec(handle_remove_service(IP :: inet:ip4_address(), Port :: inet:port_number(),
-                            Protocol :: protocol(),
+                            Protocol :: protocol(), Namespace :: term(),
                             State :: state()) -> ok | error).
-handle_remove_service(IP, Port, Protocol, State) ->
+handle_remove_service(IP, Port, Protocol, Namespace, State) ->
     Protocol1 = netlink_codec:protocol_to_int(Protocol),
     Service = ip_to_address(IP) ++ [{port, Port}, {protocol, Protocol1}],
-    handle_remove_service(Service, State).
+    handle_remove_service(Service, Namespace, State).
 
--spec(handle_remove_service(Service :: service(), State :: state()) -> ok | error).
-handle_remove_service(Service, #state{netlink_generic = Pid, family = Family}) ->
+-spec(handle_remove_service(Service :: service(), Namespace :: term(), State :: state()) -> ok | error).
+handle_remove_service(Service, Namespace, #state{netns = NetnsMap, family = Family}) ->
+    Pid = maps:get(Namespace, NetnsMap),
     case gen_netlink_client:request(Pid, Family, ipvs, [], #del_service{request = [{service, Service}]}) of
         {ok, _} -> ok;
         _ -> error
     end.
 
 -spec(handle_add_service(IP :: inet:ip4_address(), Port :: inet:port_number(),
-                         Protocol :: protocol(), State :: state()) -> ok | error).
-handle_add_service(IP, Port, Protocol, #state{netlink_generic = Pid, family = Family}) ->
-    handle_add_service2(Pid, IP, Port, Protocol, Family).
-
-handle_add_service(IP, Port, Protocol, Namespaces, #state{netns_netlink = NetnsMap, family = Family}) ->
-    lists:foreach(fun(Namespace) -> 
-                      Pid = maps:get(Namespace, NetnsMap),
-                      handle_add_service2(Pid, IP, Port, Protocol, Family) 
-                  end, Namespaces).
-
-handle_add_service2(Pid, IP, Port, Protocol, Family) ->
+                         Protocol :: protocol(), Namespace :: term(), State :: state()) -> ok | error).
+handle_add_service(IP, Port, Protocol, Namespace, #state{netns = NetnsMap, family = Family}) ->
     Flags = 0,
+    Pid = maps:get(Namespace, NetnsMap),
     Service0 = [
         {protocol, netlink_codec:protocol_to_int(Protocol)},
         {port, Port},
@@ -389,8 +348,9 @@ handle_add_service2(Pid, IP, Port, Protocol, Family) ->
         _ -> error
     end.
 
--spec(handle_get_dests(Service :: service(), State :: state()) -> [dest()]).
-handle_get_dests(Service, #state{netlink_generic = Pid, family = Family}) ->
+-spec(handle_get_dests(Service :: service(), Namespace :: term(), State :: state()) -> [dest()]).
+handle_get_dests(Service, Namespace, #state{netns = NetnsMap, family = Family}) ->
+    Pid = maps:get(Namespace, NetnsMap),
     Message = #get_dest{request = [{service, Service}]},
     {ok, Replies} = gen_netlink_client:request(Pid, Family, ipvs, [root, match], Message),
     [proplists:get_value(dest, MaybeDest) || #netlink{msg = #new_dest{request = MaybeDest}} <- Replies,
@@ -398,25 +358,12 @@ handle_get_dests(Service, #state{netlink_generic = Pid, family = Family}) ->
 
 -spec(handle_add_dest(ServiceIP :: inet:ip4_address(), ServicePort :: inet:port_number(),
                       DestIP :: inet:ip4_address(), DestPort :: inet:port_number(),
-                      Protocol :: protocol(), State :: state()) -> ok | error).
-handle_add_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol, #state{netlink_generic = Pid, family = Family}) ->
+                      Protocol :: protocol(), Namespace :: term(), State :: state()) -> ok | error).
+handle_add_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace, #state{netns = NetnsMap, family = Family}) ->
+    Pid = maps:get(Namespace, NetnsMap),
     Protocol1 = netlink_codec:protocol_to_int(Protocol),
     Service = ip_to_address(ServiceIP) ++ [{port, ServicePort}, {protocol, Protocol1}],
     handle_add_dest(Pid, Service, DestIP, DestPort, Family).
-
-handle_add_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespaces, #state{netns_netlink = NetnsMap, family = Family}) ->
-    Protocol1 = netlink_codec:protocol_to_int(Protocol),
-    Service = ip_to_address(ServiceIP) ++ [{port, ServicePort}, {protocol, Protocol1}],
-    lists:foreach(fun(Namespace) -> 
-                      Pid = maps:get(Namespace, NetnsMap),
-                      handle_add_dest(Pid, Service, DestIP, DestPort, Family) 
-                  end, Namespaces). 
-    
-
--spec(handle_add_dest(Service :: service(), IP :: inet:ip4_address(),
-                      Port :: inet:port_number(), State :: state()) -> ok | error).
-handle_add_dest(Service, IP, Port, #state{netlink_generic = Pid, family = Family}) ->
-    handle_add_dest(Pid, Service, IP, Port, Family).
 
 handle_add_dest(Pid, Service, IP, Port, Family) ->
     Base = [{fwd_method, ?IP_VS_CONN_F_MASQ}, {weight, 1}, {u_threshold, 0}, {l_threshold, 0}],
@@ -430,16 +377,17 @@ handle_add_dest(Pid, Service, IP, Port, Family) ->
 
 -spec(handle_remove_dest(ServiceIP :: inet:ip4_address(), ServicePort :: inet:port_number(),
                          DestIP :: inet:ip4_address(), DestPort :: inet:port_number(),
-                         Protocol :: protocol(), State :: state()) -> ok | error).
-handle_remove_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol, State) ->
+                         Protocol :: protocol(), Namespace :: term(), State :: state()) -> ok | error).
+handle_remove_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace, State) ->
     Protocol1 = netlink_codec:protocol_to_int(Protocol),
     Service = ip_to_address(ServiceIP) ++ [{port, ServicePort}, {protocol, Protocol1}],
     Dest = ip_to_address(DestIP) ++ [{port, DestPort}],
-    handle_remove_dest(Service, Dest, State).
+    handle_remove_dest(Service, Dest, Namespace, State).
 
--spec(handle_remove_dest(Service :: service(), Dest :: dest(), State :: state()) -> ok | error).
-handle_remove_dest(Service, Dest, #state{netlink_generic = Pid, family = Family}) ->
+-spec(handle_remove_dest(Service :: service(), Dest :: dest(), Namespace :: term(), State :: state()) -> ok | error).
+handle_remove_dest(Service, Dest, Namespace, #state{netns = NetnsMap, family = Family}) ->
     lager:info("Deleting Dest: ~p~n", [Dest]),
+    Pid = maps:get(Namespace, NetnsMap),
     Msg = #del_dest{request = [{dest, Dest}, {service, Service}]},
     case gen_netlink_client:request(Pid, Family, ipvs, [], Msg) of
         {ok, _} -> ok;
@@ -457,19 +405,15 @@ ip_to_address2(IP0) ->
     Padding = 8 * (16 - size(IP2)),
     <<IP2/binary, 0:Padding/integer>>.
 
-handle_update_netns(add_netns, Netnslist, State = #state{netns_netlink = NetnsMap0}) ->
+handle_add_netns(Netnslist, State = #state{netns = NetnsMap0}) ->
     NetnsMap1 = lists:foldl(fun maybe_add_netns/2, maps:new(), Netnslist),
     NetnsMap2 = maps:merge(NetnsMap0, NetnsMap1),
-    {maps:keys(NetnsMap1), State#state{netns_netlink = NetnsMap2}};
-handle_update_netns(remove_netns, Netnslist, State = #state{netns_netlink = NetnsMap0}) ->
+    {maps:keys(NetnsMap1), State#state{netns = NetnsMap2}}.
+
+handle_remove_netns(Netnslist, State = #state{netns = NetnsMap0}) ->
     NetnsMap1 = lists:foldl(fun maybe_remove_netns/2, NetnsMap0, Netnslist),
     RemovedNs = lists:subtract(maps:keys(NetnsMap0), maps:keys(NetnsMap1)),
-    {RemovedNs, State#state{netns_netlink = NetnsMap1}};
-handle_update_netns(reconcile_netns, Netnslist, State0 = #state{netns_netlink = NetnsMap0}) ->
-    AddNetns = [Netns || Netns = #netns{id = Id} <- Netnslist, not maps:is_key(Id, NetnsMap0)],
-    RemoveNetns = [#netns{id = Id} || Id <- maps:keys(NetnsMap0), not lists:keymember(Id, 2, Netnslist)],
-    {_, State1} = handle_update_netns(remove_netns, RemoveNetns, State0),
-    handle_update_netns(add_netns, AddNetns, State1).
+    {RemovedNs, State#state{netns = NetnsMap1}}.
 
 maybe_add_netns(Netns = #netns{id = Id}, NetnsMap) ->
     maybe_add_netns(maps:is_key(Id, NetnsMap), Netns, NetnsMap).
