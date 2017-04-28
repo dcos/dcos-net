@@ -143,7 +143,7 @@ handle_ip_event(_Event = #{value := Value}, State0) ->
 update_netns(add_netns, UpdateValue, State = #state{ns = Namespaces0, ipvs_mgr = IPVSMgr, route_mgr = RouteMgr}) ->
     Namespaces1 = dcos_l4lb_route_mgr:add_netns(RouteMgr, UpdateValue),
     Namespaces1 = dcos_l4lb_ipvs_mgr:add_netns(IPVSMgr, UpdateValue),
-    list:foreach(fun(Ns) -> push_config(Ns, State) end, Namespaces1),
+    lists:foreach(fun(Ns) -> push_config(Ns, State) end, Namespaces1),
     Namespaces2 = ordsets:union(ordsets:from_list(Namespaces1), Namespaces0),
     State#state{ns = Namespaces2};
 update_netns(remove_netns, UpdateValue, State = #state{ns = Namespaces0, ipvs_mgr = IPVSMgr, route_mgr = RouteMgr}) ->
