@@ -31,11 +31,6 @@ udp_port() ->
 bind_interface() ->
     application:get_env(?APP, bind_interface, undefined).
 
--spec(bind_ip_blacklist() -> [inet:ipv4_address()]).
-bind_ip_blacklist() ->
-    IpStrs = application:get_env(?APP, bind_ip_blacklist, []),
-    lists:map(fun dcos_dns_app:parse_ipv4_address/1, IpStrs).
-
 -spec(bind_ips() -> [inet:ipv4_address()]).
 bind_ips() ->
     IPs0 = case application:get_env(?APP, bind_ips, []) of
@@ -47,7 +42,7 @@ bind_ips() ->
             V
     end,
     lager:debug("found ips: ~p", [IPs0]),
-    BlacklistedIPs = bind_ip_blacklist(),
+    BlacklistedIPs = application:get_env(?APP, bind_ip_blacklist, []),
     lager:debug("blacklist ips: ~p", [BlacklistedIPs]),
     IPs1 = [ IP || IP <- IPs0, not lists:member(IP, BlacklistedIPs) ],
     IPs2 = lists:usort(IPs1),

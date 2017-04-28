@@ -128,6 +128,9 @@ process_config_tuple({<<"upstream_resolvers">>, UpstreamResolvers}) ->
 process_config_tuple({<<"bind_ips">>, IPs0}) ->
     IPs1 = lists:map(fun parse_ipv4_address/1, IPs0),
     application:set_env(?APP, bind_ips, IPs1);
+process_config_tuple({<<"bind_ip_blacklist">>, IPs0}) ->
+    IPs1 = lists:map(fun parse_ipv4_address/1, IPs0),
+    application:set_env(?APP, bind_ip_blacklist, IPs1);
 process_config_tuple({Key, Value}) when is_binary(Value) ->
     application:set_env(?APP, binary_to_atom(Key, utf8), binary_to_list(Value));
 process_config_tuple({Key, Value}) ->
