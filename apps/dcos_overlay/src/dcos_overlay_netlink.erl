@@ -140,8 +140,11 @@ is_iprule_present([{rtnetlink, newrule, _, _, _, ParsedRule}|Rules], Rule) ->
   end.
 
 match_iprules({inet, 0, SrcPrefixLen, 0, Table, unspec,universe,unicast,[], [{src, Src}]},
-  {inet, 0, SrcPrefixLen, 0, Table, unspec,universe,unicast,[], [{src, Src}|_]}) ->
-  matched;
+  {inet, 0, SrcPrefixLen, 0, Table, unspec,universe,unicast,[], Prop}) ->
+  case proplists:get_value(src, Prop) of
+      Src -> matched;
+      _ -> not_matched
+  end;
 match_iprules(_,_) ->
   not_matched.
 
@@ -170,9 +173,9 @@ netlink_request(Pid, Type, Flags, Msg) ->
     0 -> %% root 
       gen_netlink_client:rtnl_request(Pid, Type, Flags, Msg);
     _ ->  
-      io:format("Would run fun ~p with flags ~p and argument ~p~n", [Type, Flags, Msg])
-  end,
-  {ok, []}.
+      io:format("Would run fun ~p with flags ~p and argument ~p~n", [Type, Flags, Msg]),
+      {ok, []}
+  end.
 
 if_nametoindex(Ifname) ->
   Uid = list_to_integer(string:strip(os:cmd("id -u"), right, $\n)),
