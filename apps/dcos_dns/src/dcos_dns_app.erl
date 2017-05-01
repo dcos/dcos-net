@@ -56,7 +56,7 @@ wait_for_reqid(ReqID, Timeout) ->
     end.
 
 %% @doc Parse an IPv4 Address
--spec parse_ipv4_address(binary()|list()) -> inet:ip4_address().
+-spec(parse_ipv4_address(binary()|list()) -> inet:ip4_address()).
 parse_ipv4_address(Value) when is_binary(Value) ->
     parse_ipv4_address(binary_to_list(Value));
 parse_ipv4_address(Value) ->
@@ -65,7 +65,7 @@ parse_ipv4_address(Value) ->
 
 %% @doc Parse an IPv4 Address with an optionally specified port.
 %% The default port will be substituted in if not given.
--spec parse_ipv4_address_with_port(binary()|list(), inet:port_number()) -> {inet:ip4_address(), inet:port_number()}.
+-spec(parse_ipv4_address_with_port(binary()|list(), inet:port_number()) -> upstream()).
 parse_ipv4_address_with_port(Value, DefaultPort) ->
     case re:split(Value, ":") of
         [IP, Port] -> {parse_ipv4_address(IP), parse_port(Port)};
@@ -98,7 +98,7 @@ maybe_start_tcp_listener() ->
             ok
     end.
 
--spec(start_tcp_listener(inet:ipv4_address()) -> supervisor:startchild_ret()).
+-spec(start_tcp_listener(inet:ip4_address()) -> supervisor:startchild_ret()).
 start_tcp_listener(IP) ->
     Port = dcos_dns_config:tcp_port(),
     Acceptors = 100,
@@ -151,19 +151,15 @@ process_config_tuple({Key, Value}) ->
     application:set_env(?APP, binary_to_atom(Key, utf8), Value).
 
 -spec(parse_upstream(ZoneDef :: [binary() | list([binary() | integer(), ...]), ...],
-                     Acc :: #{[dns:label()] => [raw_upstream()]}) -> #{[dns:label()] => [raw_upstream()]}).
+                     Acc :: #{[dns:label()] => [upstream()]}) -> #{[dns:label()] => [upstream()]}).
 parse_upstream([Zone, Upstreams0], Acc) when is_binary(Zone), is_list(Upstreams0) ->
     Labels = parse_upstream_name(Zone),
     Upstreams1 = lists:map(fun mk_upstream/1, Upstreams0),
     maps:put(Labels, Upstreams1, Acc).
 
--spec(mk_upstream(Upstream :: [binary() | integer()]) -> raw_upstream()).
-mk_upstream([Server0, Port]) when is_binary(Server0), is_integer(Port) ->
-    % Ensure that it's a valid ip address
-    parse_ipv4_address(Server0),
-
-    Server1 = binary_to_list(Server0),
-    {Server1, Port}.
+-spec(mk_upstream(Upstream :: [binary() | integer()]) -> upstream()).
+mk_upstream([Server, Port]) when is_binary(Server), is_integer(Port) ->
+    {parse_ipv4_address(Server), Port}.
 
 %%====================================================================
 %% Unit Tests

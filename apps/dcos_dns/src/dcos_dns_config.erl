@@ -35,7 +35,7 @@ forward_zones() ->
 bind_interface() ->
     application:get_env(?APP, bind_interface, undefined).
 
--spec(bind_ips() -> [inet:ipv4_address()]).
+-spec(bind_ips() -> [inet:ip4_address()]).
 bind_ips() ->
     IPs0 = case application:get_env(?APP, bind_ips, []) of
         [] ->
@@ -53,7 +53,7 @@ bind_ips() ->
     lager:debug("final ips: ~p", [IPs2]),
     IPs2.
 
--spec(get_ips() -> [inet:ipv4_address()]).
+-spec(get_ips() -> [inet:ip4_address()]).
 get_ips() ->
     IFs0 = get_ip_interfaces(),
     IPs = case bind_interface() of
@@ -66,7 +66,7 @@ get_ips() ->
     lists:usort(IPs).
 
 %% @doc Gets all the IPs for the machine
--spec(get_ip_interfaces() -> [{InterfaceName :: string(), inet:ipv4_address()}]).
+-spec(get_ip_interfaces() -> [{InterfaceName :: string(), inet:ip4_address()}]).
 get_ip_interfaces() ->
     %% The list comprehension makes it so we only get IPv4 addresses
     {ok, Iflist} = inet:getifaddrs(),

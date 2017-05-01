@@ -13,30 +13,26 @@
 -spec(upstreams_from_questions(dns:questions()) -> ordsets:ordset(upstream())).
 upstreams_from_questions([#dns_query{name=Name}]) ->
     Labels = dcos_dns_app:parse_upstream_name(Name),
-    lists:map(fun normalize_ip/1, find_upstream(Name, Labels));
+    Upstreams = find_upstream(Name, Labels),
+    lists:map(fun validate_upstream/1, Upstreams);
 
 %% There is more than one question. This is beyond our capabilities at the moment
 upstreams_from_questions([Question|Others]) ->
     dcos_dns_metrics:update([dcos_dns, ignored_questions], length(Others), ?COUNTER),
     upstreams_from_questions([Question]).
 
-%% @private
-normalize_ip({NS, Port}) when is_list(NS) ->
-    {ok, IP} = inet:parse_ipv4_address(NS),
-    {IP, Port};
-normalize_ip({IP, Port}) when is_tuple(IP) andalso is_integer(Port) ->
-    {IP, Port};
-normalize_ip(NS) when is_list(NS) ->
-    normalize_ip({NS, 53});
-normalize_ip(NS) when is_binary(NS) ->
-    normalize_ip(binary_to_list(NS)).
+-spec(validate_upstream(upstream()) -> upstream()).
+validate_upstream({{_, _, _, _}, Port} = Upstream) when is_integer(Port) ->
+    Upstream.
 
 %% @private
+-spec(mesos_resolvers() -> [upstream()]).
 mesos_resolvers() ->
     application:get_env(?APP, mesos_resolvers, []).
 
 %% This one is a little bit more complicated...
 %% @private
+-spec(erldns_resolvers() -> [upstream()]).
 erldns_resolvers() ->
     ErlDNSServers = application:get_env(erldns, servers, []),
     retrieve_servers(ErlDNSServers, []).
@@ -57,16 +53,17 @@ retrieve_servers([Config|Rest], Acc) ->
     end.
 
 %% @private
+-spec(default_resolvers() -> [upstream()]).
 default_resolvers() ->
-    Defaults = [{"8.8.8.8", 53},
-                {"4.2.2.1", 53},
-                {"8.8.8.8", 53},
-                {"4.2.2.1", 53},
-                {"8.8.8.8", 53}],
+    Defaults = [{{8, 8, 8, 8}, 53},
+                {{4, 2, 2, 1}, 53},
+                {{8, 8, 8, 8}, 53},
+                {{4, 2, 2, 1}, 53},
+                {{8, 8, 8, 8}, 53}],
     application:get_env(?APP, upstream_resolvers, Defaults).
 
 %% @private
--spec(find_upstream(Name :: binary(), Labels :: [binary()]) -> [{string(), inet:port_number()}]).
+-spec(find_upstream(Name :: binary(), Labels :: [binary()]) -> [upstream()]).
 find_upstream(_Name, [<<"mesos">>|_]) ->
     mesos_resolvers();
 find_upstream(_Name, [<<"zk">>|_]) ->
@@ -82,14 +79,14 @@ find_upstream(Name, Labels) ->
             Resolvers
     end.
 
--spec(find_custom_upstream(Labels :: [binary()]) -> [{string(), inet:port_number()}]).
+-spec(find_custom_upstream(Labels :: [binary()]) -> [upstream()]).
 find_custom_upstream(QueryLabels) ->
     ForwardZones = dcos_dns_config:forward_zones(),
     UpstreamFilter = upstream_filter_fun(QueryLabels),
     maps:fold(UpstreamFilter, [], ForwardZones).
 
 -spec(upstream_filter_fun([dns:labels()]) ->
-    fun(([dns:labels()], raw_upstream(), [raw_upstream()]) -> [raw_upstream()])).
+    fun(([dns:labels()], upstream(), [upstream()]) -> [upstream()])).
 upstream_filter_fun(QueryLabels) ->
     fun(Labels, Upstream, Acc) ->
         case lists:prefix(Labels, QueryLabels) of
@@ -100,7 +97,7 @@ upstream_filter_fun(QueryLabels) ->
         end
     end.
 
--spec(find_default_upstream(Name :: binary()) -> [{string(), inet:port_number()}]).
+-spec(find_default_upstream(Name :: binary()) -> [upstream()]).
 find_default_upstream(Name) ->
     case erldns_zone_cache:get_authority(Name) of
         {ok, _} ->

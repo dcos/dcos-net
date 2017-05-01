@@ -42,7 +42,7 @@
 
 -type dns_message() :: #dns_message{}.
 -type from_module() :: dcos_dns_udp_server | dcos_dns_tcp_handler.
--type from_key() :: {inet:ip4_address(), inet:port_number()} | pid().
+-type from_key() :: upstream() | pid().
 -type from() :: {from_module(), from_key()}.
 -type outstanding_upstream() :: {upstream(), pid()}.
 
