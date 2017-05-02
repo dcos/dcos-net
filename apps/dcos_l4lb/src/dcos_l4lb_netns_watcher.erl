@@ -21,7 +21,7 @@
 -export([init/1, terminate/3, code_change/4, callback_mode/0]).
 
 %% State callbacks
--export([reconcile/3, watch/3]).
+-export([uninitialized/3, reconcile/3, watch/3]).
 
 %% inotify_evt callbacks
 -export([inotify_event/3]).
@@ -57,9 +57,8 @@ start_link() ->
 %%--------------------------------------------------------------------
 init([]) ->
   CniDir = dcos_l4lb_config:cni_dir(),
-  Ref = setup_watch(CniDir),
-  StateData = #data{cni_dir = CniDir, watchRef = Ref},
-  {ok, reconcile, StateData, {next_event, internal, CniDir}}.
+  StateData = #data{cni_dir = CniDir},
+  {ok, uninitialized, StateData, {next_event, timeout, CniDir}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -104,8 +103,18 @@ callback_mode() ->
     state_functions.
 
 %%--------------------------------------------------------------------
-%% State transition reconcile -> maintain
+%% State transition uninitialized -> reconcile -> maintain
 %%--------------------------------------------------------------------
+uninitialized(timeout, CniDir, StateData0 = #data{cni_dir = CniDir}) ->
+  case filelib:is_dir(CniDir) of
+      true -> 
+          Ref = setup_watch(CniDir),    
+          StateData1 = StateData0#data{watchRef = Ref},
+          {next_state, reconcile, StateData1, {next_event, internal, CniDir}};
+      false ->
+          {keep_state_and_data, {timeout, 5000, CniDir}}
+   end. 
+
 reconcile(internal, CniDir, StateData = #data{cni_dir = CniDir}) ->
   Namespaces = read_files(CniDir),
   send_event(reconcile_netns, Namespaces),
@@ -137,14 +146,9 @@ inotify_event(Pid, Ref, ?inotify_msg(Masks, _Cookie, FileName)) ->
 %%% private api
 %%%====================================================================
 setup_watch(CniDir) ->
-    case filelib:is_dir(CniDir) of
-        true -> 
-            Ref = inotify:watch(CniDir, [?CLOSE_WRITE,?DELETE]),
-            ok = inotify:add_handler(Ref, ?MODULE, self()),
-            Ref;
-        false ->
-            undefined
-    end.
+    Ref = inotify:watch(CniDir, [?CLOSE_WRITE,?DELETE]),
+    ok = inotify:add_handler(Ref, ?MODULE, self()),
+    Ref.
 
 send_event(_, []) ->
   ok;

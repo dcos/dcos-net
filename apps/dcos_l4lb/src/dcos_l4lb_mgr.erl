@@ -130,8 +130,12 @@ maintain(info, {lashup_gm_route_events, #{ref := Ref, tree := Tree}}, State0 = #
 maintain(info, {lashup_kv_events, Event = #{ref := Ref}}, State0 = #state{kv_ref = Ref}) ->
     State1 = handle_ip_event(Event, State0),
     {keep_state, State1};
-maintain(cast, {netns_event, Ref, EventType, EventContent}, State0 = #state{netns_event_ref = Ref}) 
-         when EventType == add_netns orelse EventType == remove_netns ->
+maintain(cast, {netns_event, Ref, reconcile_netns, EventContent}, 
+         State0 = #state{last_configured_vips = VIPs, netns_event_ref = Ref}) ->
+    State1 = update_netns(reconcile_netns, EventContent, State0),
+    State2 = do_reconcile(VIPs, State1),
+    {keep_state, State2};
+maintain(cast, {netns_event, Ref, EventType, EventContent}, State0 = #state{netns_event_ref = Ref}) -> 
     State1 = update_netns(EventType, EventContent, State0),
     {keep_state, State1}.
 
