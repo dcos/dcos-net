@@ -28,7 +28,12 @@
     code_change/3]).
 
 
+-include_lib("gen_netlink/include/netlink.hrl").
+-include("dcos_l4lb.hrl").
+
 -define(SERVER, ?MODULE).
+-define(LOCAL_TABLE, 255). %% local table
+-define(MINUTEMAN_IFACE, "minuteman").
 
 -record(state, {
     netns :: map()
@@ -36,19 +41,10 @@
 
 -record(params, {
     pid :: pid(),
-    iface :: non_neg_integer(),
-    table :: non_neg_integer()
+    iface :: non_neg_integer()
 }).
     
-
 -type state() :: state().
--include_lib("gen_netlink/include/netlink.hrl").
--include("dcos_l4lb.hrl").
--define(LOCAL_TABLE, 255). %% local table
--define(IFIDX_LO, 1).
--define(MINUTEMAN_TABLE, 52).
--define(MINUTEMAN_IFACE, "minuteman").
-
 
 %%%===================================================================
 %%% API
@@ -100,7 +96,7 @@ start_link() ->
 init([]) ->
     {ok, Pid} = gen_netlink_client:start_link(?NETLINK_ROUTE),
     {ok, Iface} = gen_netlink_client:if_nametoindex(?MINUTEMAN_IFACE),
-    Params = #params{pid = Pid, iface = Iface, table = ?LOCAL_TABLE},
+    Params = #params{pid = Pid, iface = Iface},
     {ok, #state{netns = #{host => Params}}}.
 
 %%--------------------------------------------------------------------
@@ -203,18 +199,16 @@ code_change(_OldVsn, State, _Extra) ->
 handle_get_routes(Namespace, #state{netns = NetnsMap}) ->
     handle_get_route2(maps:get(Namespace, NetnsMap)).
 
-handle_get_route2(#params{pid = Pid, iface = Iface, table = Table}) ->
-    Req = [{table, Table}, {oif, Iface}],
+handle_get_route2(#params{pid = Pid, iface = Iface}) ->
+    Req = [{table, ?LOCAL_TABLE}, {oif, Iface}],
     {ok, Raw} = gen_netlink_client:rtnl_request(Pid, getroute, [match, root],
                                                 {inet, 0, 0, 0, 0, 0, 0, 0, [], Req}),
-    Routes0 = [route_msg_dst(Msg) || #rtnetlink{msg = Msg} <- Raw,
-                                     Iface == route_msg_oif(Msg), 
-                                     Table == route_msg_table(Msg)],
-    lager:info("Get routes ~p ~p ~p", [Iface, Table, Routes0]),
-    ordsets:from_list(Routes0).
+    Routes = [route_msg_dst(Msg) || #rtnetlink{msg = Msg} <- Raw,
+                                     Iface == route_msg_oif(Msg)],
+    lager:info("Get routes ~p ~p ~p", [Iface, Routes]),
+    ordsets:from_list(Routes).
 
 %% see netlink.hrl for the element position
-route_msg_table(Msg) -> proplists:get_value(table, element(10, Msg)).
 route_msg_oif(Msg) -> proplists:get_value(oif, element(10, Msg)).
 route_msg_dst(Msg) -> proplists:get_value(dst, element(10, Msg)).
 
@@ -229,14 +223,14 @@ handle_remove_routes(RoutesToDelete, Namespace, State) ->
 add_route(Dst, Namespace, #state{netns = NetnsMap}) ->
     add_route2(Dst, maps:get(Namespace, NetnsMap)).
 
-add_route2(Dst, #params{pid = Pid, iface = Iface, table = Table}) ->
-    Msg = [{table, Table}, {dst, Dst}, {oif, Iface}],
+add_route2(Dst, #params{pid = Pid, iface = Iface}) ->
+    Msg = [{table, ?LOCAL_TABLE}, {dst, Dst}, {oif, Iface}],
     Route = {
         inet,
         _PrefixLen = 32,
         _SrcPrefixLen = 0,
         _Tos = 0,
-        _Table = Table,
+        _Table = ?LOCAL_TABLE,
         _Protocol = boot,
         _Scope = host,
         _Type = local,
@@ -247,14 +241,14 @@ add_route2(Dst, #params{pid = Pid, iface = Iface, table = Table}) ->
 remove_route(Dst, Namespace, #state{netns = NetnsMap}) ->
     remove_route2(Dst, maps:get(Namespace, NetnsMap)).
 
-remove_route2(Dst, #params{pid = Pid, iface = Iface, table = Table}) ->
-    Msg = [{table, Table}, {dst, Dst}, {oif, Iface}],
+remove_route2(Dst, #params{pid = Pid, iface = Iface}) ->
+    Msg = [{table, ?LOCAL_TABLE}, {dst, Dst}, {oif, Iface}],
     Route = {
         inet,
         _PrefixLen = 32,
         _SrcPrefixLen = 0,
         _Tos = 0,
-        _Table = Table,
+        _Table = ?LOCAL_TABLE,
         _Protocol = boot,
         _Scope = host,
         _Type = local,
@@ -278,9 +272,11 @@ maybe_add_netns(Netns = #netns{id = Id}, NetnsMap) ->
 maybe_add_netns(true, _, NetnsMap) ->
     NetnsMap;
 maybe_add_netns(false, #netns{id = Id, ns = Namespace}, NetnsMap) ->
-    case gen_netlink_client:start_link(netns, ?NETLINK_ROUTE, binary_to_list(Namespace)) of
+    NsStr = binary_to_list(Namespace),
+    case gen_netlink_client:start_link(netns, ?NETLINK_ROUTE, NsStr) of
         {ok, Pid} ->
-            Params = #params{pid = Pid, iface = ?IFIDX_LO, table = ?MINUTEMAN_TABLE},
+            {ok, Iface} = gen_netlink_client:if_nametoindex(?MINUTEMAN_IFACE, NsStr),
+            Params = #params{pid = Pid, iface = Iface},
             maps:put(Id, Params, NetnsMap);
         {error, Reason} ->
             lager:error("Couldn't create route netlink client for ~p due to ~p", [Id, Reason]),
