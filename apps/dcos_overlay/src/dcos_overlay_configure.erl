@@ -33,18 +33,20 @@ reply(Pid, Msg) ->
 maybe_configure(Config, MyPid) ->
     lager:debug("Started applying config ~p~n", [Config]),
     KnownOverlays = dcos_overlay_poller:overlays(),
+    {ok, Netlink} = dcos_overlay_netlink:start_link(),
     lists:map(
-        fun(Overlay) -> try_configure_overlay(Config, Overlay) end,
+        fun(Overlay) -> try_configure_overlay(Netlink, Config, Overlay) end,
         KnownOverlays
     ),
+    dcos_overlay_netlink:stop(Netlink),
     lager:debug("Done applying config ~p for overlays ~p~n", [Config, KnownOverlays]),
     reply(MyPid, {dcos_overlay_configure, applied_config, Config}).
 
--spec(try_configure_overlay(config(), #mesos_state_agentoverlayinfo{}) -> term()).
-try_configure_overlay(Config, Overlay) ->
+-spec(try_configure_overlay(Pid :: pid(), config(), #mesos_state_agentoverlayinfo{}) -> term()).
+try_configure_overlay(Pid, Config, Overlay) ->
     #mesos_state_agentoverlayinfo{info = #mesos_state_overlayinfo{subnet = Subnet}} = Overlay,
     ParsedSubnet = parse_subnet(Subnet),
-    try_configure_overlay2(Config, Overlay, ParsedSubnet).
+    try_configure_overlay2(Pid, Config, Overlay, ParsedSubnet).
 
 -type prefix_len() :: 0..32.
 -spec(parse_subnet(Subnet :: binary()) -> {inet:ipv4_address(), prefix_len()}).
@@ -56,25 +58,25 @@ parse_subnet(Subnet) ->
     true = 0 =< PrefixLen andalso PrefixLen =< 32,
     {IP, PrefixLen}.
 
-try_configure_overlay2(_Config = #{key := [navstar, overlay, Subnet], value := LashupValue},
+try_configure_overlay2(Pid, _Config = #{key := [navstar, overlay, Subnet], value := LashupValue},
     Overlay, ParsedSubnet) when Subnet == ParsedSubnet ->
     lists:map(
-        fun(Value) -> maybe_configure_overlay_entry(Overlay, Value) end,
+        fun(Value) -> maybe_configure_overlay_entry(Pid, Overlay, Value) end,
         LashupValue
     );
-try_configure_overlay2(_Config, _Overlay, _ParsedSubnet) ->
+try_configure_overlay2(_Pid, _Config, _Overlay, _ParsedSubnet) ->
     ok.
 
-maybe_configure_overlay_entry(Overlay, {{VTEPIPPrefix, riak_dt_map}, Value}) ->
+maybe_configure_overlay_entry(Pid, Overlay, {{VTEPIPPrefix, riak_dt_map}, Value}) ->
     MyIP = dcos_overlay_poller:ip(),
     case lists:keyfind({agent_ip, riak_dt_lwwreg}, 1, Value) of
         {_, MyIP} ->
             ok;
         _Any ->
-            configure_overlay_entry(Overlay, VTEPIPPrefix, Value)
+            configure_overlay_entry(Pid, Overlay, VTEPIPPrefix, Value)
     end.
 
-configure_overlay_entry(Overlay, _VTEPIPPrefix = {VTEPIP, _PrefixLen}, LashupValue) ->
+configure_overlay_entry(Pid, Overlay, _VTEPIPPrefix = {VTEPIP, _PrefixLen}, LashupValue) ->
     #mesos_state_agentoverlayinfo{
         backend = #mesos_state_backendinfo{
             vxlan = #mesos_state_vxlaninfo{
@@ -90,7 +92,6 @@ configure_overlay_entry(Overlay, _VTEPIPPrefix = {VTEPIP, _PrefixLen}, LashupVal
     maybe_print_parameters([AgentIP, binary_to_list(VTEPName),
                             VTEPIP, MAC, SubnetIP, SubnetPrefixLen]),
 
-    Pid = dcos_overlay_poller:netlink(),
     VTEPNameStr = binary_to_list(VTEPName),
     MACTuple = list_to_tuple(MAC),
     {ok, _} = dcos_overlay_netlink:ipneigh_replace(Pid, VTEPIP, MACTuple, VTEPNameStr),

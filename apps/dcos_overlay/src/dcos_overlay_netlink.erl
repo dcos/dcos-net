@@ -5,7 +5,7 @@
 -module(dcos_overlay_netlink).
 
 %% Application callbacks
--export([ipneigh_replace/4, iproute_replace/5, bridge_fdb_replace/4,
+-export([start_link/0, stop/1, ipneigh_replace/4, iproute_replace/5, bridge_fdb_replace/4,
         iplink_show/2, iplink_add/5, iplink_set/3, iprule_show/1,
         iprule_add/4, make_iprule/3, match_iprules/2, is_iprule_present/2,
         ipaddr_replace/4, if_nametoindex/1]).
@@ -20,6 +20,13 @@
 -ifdef(DEV).
 -define(TEST_OR_DEV, true).
 -endif.
+
+start_link() ->
+   gen_netlink_client:start_link(?NETLINK_ROUTE).
+
+stop(Pid) ->
+    unlink(Pid),
+    exit(Pid, kill).
 
 %% eg. ipneigh_replace(Pid, {44,128,0,1}, {16#70,16#b3,16#d5,16#80,16#00,16#03}, "vtep1024").
 ipneigh_replace(Pid, Dst, Lladdr, Ifname) ->
