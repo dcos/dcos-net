@@ -34,6 +34,8 @@
     ref :: reference(),
     pid :: undefined | pid(),
     config = orddict:new() :: config(),
+    num_req = 0 :: non_neg_integer(),
+    num_res = 0 :: non_neg_integer(),
     kill_timer :: undefined | timer:tref()
 }).
 
@@ -135,8 +137,8 @@ code_change(_OldVsn, OldState, OldData, _Extra) ->
 unconfigured(info, LashupEvent = {lashup_kv_events, #{key := OverlayKey, value := Value}}, StateData0) ->
     StateData1 = handle_lashup_event(LashupEvent, StateData0),
     {ok, Timer} = timer:kill_after(?KILL_TIMER),
-    StateData2 = StateData1#data{kill_timer = Timer},
     EventContent = #{key => OverlayKey, value => Value},
+    StateData2 = StateData1#data{kill_timer = Timer, num_req = 1, num_res = 0},
     {next_state, configuring, StateData2, {next_event, internal, EventContent}}.
 
 configuring(internal, Config, _StateData) ->
@@ -145,7 +147,7 @@ configuring(internal, Config, _StateData) ->
     keep_state_and_data;
 configuring(info, {dcos_overlay_configure, applied_config, AppliedConfig}, StateData0) ->
     lager:debug("Done applying configuration: ~p", [AppliedConfig]),
-    StateData1 = maybe_update_state(AppliedConfig, StateData0),
+    StateData1 = maybe_update_state(StateData0),
     next_state_transition(StateData1);
 configuring(info, _EventContent, _StateData) ->
     {keep_state_and_data, postpone}.
@@ -190,11 +192,11 @@ determine_delta_config(NewOverlayConfig, OldOverlayConfig) ->
     Dc = ordsets:subtract(Nc, Oc),
     ordsets:to_list(Dc).
 
-maybe_update_state(#{last := false}, StateData) ->
-    StateData;
-maybe_update_state(_, StateData = #data{kill_timer = Timer}) ->
+maybe_update_state(StateData = #data{kill_timer = Timer, num_req = Req, num_res = Res}) when Req == Res + 1 ->
     timer:cancel(Timer),
-    StateData#data{config = []}. %% clean cached config
+    StateData#data{config = []}; %% clean cached config
+maybe_update_state(StateData = #data{num_res = Res}) ->
+    StateData#data{num_res = Res + 1}.
 
 next_state_transition(StateData = #data{config = []}) ->
     ReapplyTimeout = application:get_env(dcos_overlay, reapply_timeout, ?REAPPLY_TIMEOUT),
@@ -216,7 +218,7 @@ fetch_lashup_config() ->
 next_state_and_actions(Config, StateData0) ->
     Actions = create_actions(Config),
     {ok, Timer} = timer:kill_after(?KILL_TIMER),
-    StateData1 = StateData0#data{kill_timer = Timer},
+    StateData1 = StateData0#data{kill_timer = Timer, num_req = length(Actions), num_res = 0},
     {StateData1, Actions}.
 
 create_actions(Config) ->
@@ -224,13 +226,10 @@ create_actions(Config) ->
 
 create_actions([], Acc) ->
     lists:reverse(Acc);
-create_actions([Config], Acc) ->
-    Action = create_action(true, Config), %% last config
-    create_actions([], [Action|Acc]);
 create_actions([Config|Configs], Acc) ->
-    Action = create_action(false, Config),
+    Action = create_action(Config),
     create_actions(Configs, [Action|Acc]).
 
-create_action(Last, {OverlayKey, KeyValue}) ->
-    EventContent = #{key => OverlayKey, value => KeyValue, last => Last},
+create_action({OverlayKey, KeyValue}) ->
+    EventContent = #{key => OverlayKey, value => KeyValue},
     {next_event, internal, EventContent}.
