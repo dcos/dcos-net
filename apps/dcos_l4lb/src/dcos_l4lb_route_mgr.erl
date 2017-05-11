@@ -221,9 +221,9 @@ handle_remove_routes(RoutesToDelete, Namespace, State) ->
     lists:foreach(fun(Route) -> remove_route(Route, Namespace, State) end, RoutesToDelete).
  
 add_route(Dst, Namespace, #state{netns = NetnsMap}) ->
-    add_route2(Dst, maps:get(Namespace, NetnsMap)).
+    add_route2(Dst, Namespace, maps:get(Namespace, NetnsMap)).
 
-add_route2(Dst, #params{pid = Pid, iface = Iface}) ->
+add_route2(Dst, Namespace, #params{pid = Pid, iface = Iface}) ->
     Msg = [{table, ?LOCAL_TABLE}, {dst, Dst}, {oif, Iface}],
     Route = {
         inet,
@@ -232,16 +232,16 @@ add_route2(Dst, #params{pid = Pid, iface = Iface}) ->
         _Tos = 0,
         _Table = ?LOCAL_TABLE,
         _Protocol = boot,
-        _Scope = host,
-        _Type = local,
+        _Scope = rt_scope(Namespace),
+        _Type = rt_type(Namespace),
         _Flags = [],
         Msg},
     {ok, _} = gen_netlink_client:rtnl_request(Pid, newroute, [create, replace], Route).
 
 remove_route(Dst, Namespace, #state{netns = NetnsMap}) ->
-    remove_route2(Dst, maps:get(Namespace, NetnsMap)).
+    remove_route2(Dst, Namespace, maps:get(Namespace, NetnsMap)).
 
-remove_route2(Dst, #params{pid = Pid, iface = Iface}) ->
+remove_route2(Dst, Namespace, #params{pid = Pid, iface = Iface}) ->
     Msg = [{table, ?LOCAL_TABLE}, {dst, Dst}, {oif, Iface}],
     Route = {
         inet,
@@ -250,8 +250,8 @@ remove_route2(Dst, #params{pid = Pid, iface = Iface}) ->
         _Tos = 0,
         _Table = ?LOCAL_TABLE,
         _Protocol = boot,
-        _Scope = host,
-        _Type = local,
+        _Scope = rt_scope(Namespace),
+        _Type = rt_type(Namespace),
         _Flags = [],
         Msg},
     {ok, _} = gen_netlink_client:rtnl_request(Pid, delroute, [], Route).
@@ -293,3 +293,9 @@ maybe_remove_netns(true, #netns{id = Id}, NetnsMap) ->
     maps:remove(Id, NetnsMap);
 maybe_remove_netns(false, _, NetnsMap) ->
     NetnsMap.
+
+rt_scope(host) -> host;
+rt_scope(_) -> link.
+
+rt_type(host) -> local;
+rt_type(_) -> unicast.
