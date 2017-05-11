@@ -18,7 +18,8 @@
                   ip_vs_conn,
                   tcp_metrics,
                   gen_netlink,
-                  mesos_state
+                  mesos_state,
+                  inotify
                  ]},
   {mod, { dcos_l4lb_app, []}},
   {env, []}

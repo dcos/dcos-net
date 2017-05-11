@@ -60,9 +60,9 @@ test_ipvs_mgr(_Config) ->
     %% Reset IPVS State
     {ok, Pid} = dcos_l4lb_ipvs_mgr:start_link(),
     "" = os:cmd("ipvsadm -C"),
-    [] =  dcos_l4lb_ipvs_mgr:get_services(Pid),
+    [] =  dcos_l4lb_ipvs_mgr:get_services(Pid, host),
     false = has_vip({4, 4, 4, 4}, 80),
-    ok = dcos_l4lb_ipvs_mgr:add_service(Pid, {4, 4, 4, 4}, 80),
+    ok = dcos_l4lb_ipvs_mgr:add_service(Pid, {4, 4, 4, 4}, 80, tcp, host),
     true = has_vip({4, 4, 4, 4}, 80).
 
 
@@ -85,20 +85,18 @@ routes() ->
     ct:pal("got routes ~p", [Routes]),
     Routes.
 
-get_routes() ->
-    {ok, Pid} = gen_netlink_client:start_link(?NETLINK_ROUTE),
-    {ok, Iface} = gen_netlink_client:if_nametoindex("minuteman"),
-    ordsets:to_list(dcos_l4lb_route_mgr:get_routes(Pid, Iface)).
+get_routes(Pid) ->
+    ordsets:to_list(dcos_l4lb_route_mgr:get_routes(Pid, host)).
 
 test_route_mgr(_Config) ->
     os:cmd("ip link add minuteman type dummy"),
     {ok, Pid} = dcos_l4lb_route_mgr:start_link(),
-    [] = get_routes(),
-    dcos_l4lb_route_mgr:update_routes(Pid, [{1, 2, 3, 4}]),
+    [] = get_routes(Pid),
+    dcos_l4lb_route_mgr:add_routes(Pid, [{1, 2, 3, 4}], host),
     R = "local 1.2.3.4 dev minuteman  scope host",
     true = lists:member(R,  routes()),
-    [{1, 2, 3, 4}] = get_routes(),
-    dcos_l4lb_route_mgr:update_routes(Pid, []),
+    [{1, 2, 3, 4}] = get_routes(Pid),
+    dcos_l4lb_route_mgr:remove_routes(Pid, [{1, 2, 3, 4}], host),
     false = lists:member(R,  routes()),
-    [] = get_routes().
+    [] = get_routes(Pid).
 

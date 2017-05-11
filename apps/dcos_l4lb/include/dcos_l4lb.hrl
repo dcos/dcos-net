@@ -25,3 +25,6 @@
 
 -define(VIPS_KEY, [minuteman, vips]).
 -define(VIPS_KEY2, [minuteman, vips2]).
+
+-record(netns, {id :: undefined | term(),
+                ns :: undefined | binary()}).

@@ -24,6 +24,10 @@
     lookup_vips/1,
     code_change/3]).
 
+-ifdef(TEST).
+-export([setup_monitor/0]).
+-endif.
+
 -include_lib("telemetry/include/telemetry.hrl").
 
 -define(SERVER, ?MODULE).
