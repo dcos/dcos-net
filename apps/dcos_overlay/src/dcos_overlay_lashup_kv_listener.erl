@@ -194,15 +194,15 @@ determine_delta_config(NewOverlayConfig, OldOverlayConfig) ->
 
 maybe_update_state(StateData = #data{kill_timer = Timer, num_req = Req, num_res = Res}) when Req == Res + 1 ->
     timer:cancel(Timer),
-    StateData#data{config = []}; %% clean cached config
+    StateData#data{config = [], num_res = Res + 1}; %% clean cached config
 maybe_update_state(StateData = #data{num_res = Res}) ->
     StateData#data{num_res = Res + 1}.
 
-next_state_transition(StateData = #data{config = []}) ->
+next_state_transition(StateData = #data{num_req = Req, num_res = Res}) when Req == Res ->
     ReapplyTimeout = application:get_env(dcos_overlay, reapply_timeout, ?REAPPLY_TIMEOUT),
     {next_state, batching, StateData, {timeout, ReapplyTimeout, do_reapply}};
-next_state_transition(_StateData) ->
-    keep_state_and_data.
+next_state_transition(StateData) ->
+    {keep_state, StateData}.
 
 -spec(fetch_lashup_config() -> config()).
 fetch_lashup_config() ->
