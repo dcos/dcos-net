@@ -55,15 +55,14 @@ wait_for_query(timeout, idle_timeout, #state{transport = Transport, socket = Soc
 wait_for_query(info, {tcp_closed, ClosedSocket}, #state{socket = Socket}) when ClosedSocket == Socket ->
     {stop, ?SHUTDOWN(tcp_closed)};
 wait_for_query(info, {tcp, Socket, Data}, State0 = #state{socket = Socket}) ->
-    case dcos_dns_handler_sup:start_child([{?MODULE, self()}, Data]) of
+    case dcos_dns_handler_fsm:start({?MODULE, self()}, Data) of
         {ok, Pid} when is_pid(Pid) ->
-            dcos_dns_metrics:update([?MODULE, successes], 1, ?COUNTER),
             State1 = State0#state{query_pid = Pid},
             {next_state, waiting_for_reply, State1, {timeout, ?TIMEOUT, query_timeout}};
-        Else ->
-            lager:warning("Failed to start query handler: ~p", [Else]),
-            dcos_dns_metrics:update([?MODULE, failures], 1, ?COUNTER),
-            {stop, failed_to_start_query_handler}
+        {error, overload} ->
+            % NOTE: to avoid ddos spartan doesn't reply anything in case of overload
+            dcos_dns_metrics:update([?MODULE, overload], 1, ?COUNTER),
+            {stop, overload}
     end.
 
 waiting_for_reply(timeout, query_timeout, #state{transport = Transport, socket = Socket}) ->

@@ -14,7 +14,8 @@
     jsx,
     dns,
     exometer,
-    ranch
+    ranch,
+    sidejob
    ]},
   {env,[]},
   {modules, []},

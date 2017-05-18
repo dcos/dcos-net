@@ -19,8 +19,6 @@
 -include_lib("dns/include/dns_terms.hrl").
 -include_lib("dns/include/dns_records.hrl").
 
--type error() :: term().
-
 %% State callbacks
 -export([execute/2,
          wait_for_reply/2,
@@ -30,7 +28,7 @@
 -export([resolve/3]).
 
 %% API
--export([start_link/2]).
+-export([start/2]).
 
 %% gen_fsm callbacks
 -export([init/1,
@@ -40,24 +38,33 @@
          terminate/3,
          code_change/4]).
 
--type dns_message() :: #dns_message{}.
+-export_type([from_module/0, from_key/0, from/0,
+              outstanding_upstream/0]).
+
 -type from_module() :: dcos_dns_udp_server | dcos_dns_tcp_handler.
--type from_key() :: upstream() | pid().
+-type from_key() :: {pid(), upstream()} | pid().
 -type from() :: {from_module(), from_key()}.
 -type outstanding_upstream() :: {upstream(), pid()}.
 
 -record(state, {
     from = erlang:error() :: from(),
-    dns_message :: dns_message() | undefined,
+    dns_message :: dns:message() | undefined,
     data = erlang:error() :: binary(),
     outstanding_upstreams = [] :: [outstanding_upstream()],
     send_query_time :: integer(),
     start_timestamp = undefined :: os:timestamp()
 }).
 
--spec(start_link(from(), binary()) -> {ok, pid()} | ignore | {error, error()}).
-start_link(From, Data) ->
-    gen_fsm:start_link(?MODULE, [From, Data], []).
+-spec(start(from(), binary() | dns:message()) -> {ok, pid()} | {error, overload}).
+start(From, Data) ->
+    case sidejob_supervisor:start_child(dcos_dns_handler_fsm_sj,
+                                        gen_fsm, start_link,
+                                        [?MODULE, [From, Data], []]) of
+        {error, overload} ->
+            {error, overload};
+        {ok, Pid} ->
+            {ok, Pid}
+    end.
 
 %% @private
 init([From, Data]) ->
@@ -222,10 +229,12 @@ maybe_done(Upstream, #state{outstanding_upstreams=OutstandingUpstreams0}=State) 
 
 %% @private
 reply_success(Data, _State = #state{from = {FromModule, FromKey}}) ->
+    dcos_dns_metrics:update([FromModule, successes], 1, ?COUNTER),
     FromModule:do_reply(FromKey, Data).
 
 %% @private
 reply_fail(_State1 = #state{dns_message = DNSMessage, from = {FromModule, FromKey}}) ->
+    dcos_dns_metrics:update([FromModule, failures], 1, ?COUNTER),
     Reply =
         DNSMessage#dns_message{
             rc = ?DNS_RCODE_SERVFAIL

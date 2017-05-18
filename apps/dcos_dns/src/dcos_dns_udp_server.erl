@@ -26,7 +26,8 @@
 %%% API
 %%%===================================================================
 
-do_reply(To = {Pid, IP, Port}, Data) ->
+-spec(do_reply(dcos_dns_handler_fsm:from_key(), binary()) -> ok).
+do_reply(To = {Pid, {IP, Port}}, Data) ->
     lager:debug("Doing reply to ~p: ~p", [To, Data]),
     gen_server:cast(Pid, {send_behalf, IP, Port, Data}).
 
@@ -61,13 +62,12 @@ handle_cast(_Request, State) ->
 
 handle_info({udp, RecvSocket, FromIP, FromPort, Data},
             State = #state{socket = Socket}) when Socket == RecvSocket ->
-    case dcos_dns_handler_sup:start_child([{?MODULE, {self(), FromIP, FromPort}}, Data]) of
+    From = {self(), {FromIP, FromPort}},
+    case dcos_dns_handler_fsm:start({?MODULE, From}, Data) of
         {ok, Pid} when is_pid(Pid) ->
-            dcos_dns_metrics:update([?MODULE, successes], 1, ?COUNTER),
             ok;
-        Else ->
-            lager:warning("Failed to start query handler: ~p", [Else]),
-            dcos_dns_metrics:update([?MODULE, failures], 1, ?COUNTER),
+        {error, overload} ->
+            dcos_dns_metrics:update([?MODULE, overload], 1, ?COUNTER),
             error
     end,
     {noreply, State};

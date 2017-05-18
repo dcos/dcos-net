@@ -109,4 +109,8 @@
  {<<"setup">>,
   {git,"git://github.com/uwiger/setup.git",
        {ref,"85447ca5eb671db0517a475791ac7fb3604bf44d"}},
-  1}].
+  1},
+ {<<"sidejob">>,
+  {git,"https://github.com/basho/sidejob.git",
+       {ref,"8ac680320cd2caa39a02e24b7f59bbe82a64222e"}},
+  0}].

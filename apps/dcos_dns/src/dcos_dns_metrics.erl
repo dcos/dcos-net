@@ -22,10 +22,12 @@ setup() ->
     %% Successes and failures for the UDP server.
     ok = exometer:ensure([dcos_dns_udp_server, successes], ?SPIRAL, []),
     ok = exometer:ensure([dcos_dns_udp_server, failures], ?SPIRAL, []),
+    ok = exometer:ensure([dcos_dns_udp_server, overload], ?SPIRAL, []),
 
     %% Successes and failures for the TCP server.
     ok = exometer:ensure([dcos_dns_tcp_handler, successes], ?SPIRAL, []),
     ok = exometer:ensure([dcos_dns_tcp_handler, failures], ?SPIRAL, []),
+    ok = exometer:ensure([dcos_dns_tcp_handler, overload], ?SPIRAL, []),
 
     %% Number of queries received where we've answered only one of
     %% multiple questions presented.
