@@ -47,7 +47,10 @@ start_link(LocalIP) ->
 %%%===================================================================
 init([LocalIP]) ->
     Port = dcos_dns_config:udp_port(),
-    {ok, Socket} = gen_udp:open(Port, [{reuseaddr, true}, {active, true}, binary, {ip, LocalIP}]),
+    {ok, Socket} = gen_udp:open(Port, [
+        {reuseaddr, true}, {active, true}, binary,
+        {ip, LocalIP}, {recbuf, 1024*1024}
+    ]),
     link(Socket),
     {ok, #state{port = Port, socket = Socket}}.
 
