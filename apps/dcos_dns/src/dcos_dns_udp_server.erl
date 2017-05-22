@@ -28,10 +28,11 @@
 %%% API
 %%%===================================================================
 
--spec(do_reply(dcos_dns_handler_fsm:from_key(), binary()) -> ok).
-do_reply(To = {Pid, {IP, Port}}, Data) ->
-    lager:debug("Doing reply to ~p: ~p", [To, Data]),
-    gen_server:cast(Pid, {send_behalf, IP, Port, Data}).
+-spec(do_reply({Socket, IP, Port}, Data :: iodata()) -> not_owner | inet:posix()
+    when Socket :: gen_udp:socket(), IP ::  inet:socket_address() | inet:hostname(),
+         Port :: inet:port_number()).
+do_reply({Socket, IP, Port}, Data) ->
+    gen_udp:send(Socket, IP, Port, Data).
 
 -spec(start_link(LocalIP :: inet:ip4_address()) ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
@@ -55,15 +56,12 @@ init([LocalIP]) ->
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
-handle_cast({send_behalf, IP, Port, Data}, State = #state{socket = Socket}) ->
-    gen_udp:send(Socket, IP, Port, Data),
-    {noreply, State};
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-handle_info({udp, RecvSocket, FromIP, FromPort, Data},
-            State = #state{socket = Socket}) when Socket == RecvSocket ->
-    From = {self(), {FromIP, FromPort}},
+handle_info({udp, Socket, FromIP, FromPort, Data},
+            State = #state{socket = Socket}) ->
+    From = {Socket, FromIP, FromPort},
     case dcos_dns_handler_fsm:start({?MODULE, From}, Data) of
         {ok, Pid} when is_pid(Pid) ->
             ok;

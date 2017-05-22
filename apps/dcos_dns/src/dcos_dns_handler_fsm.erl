@@ -38,12 +38,9 @@
          terminate/3,
          code_change/4]).
 
--export_type([from_module/0, from_key/0, from/0,
-              outstanding_upstream/0]).
+-export_type([from/0]).
 
--type from_module() :: dcos_dns_udp_server | dcos_dns_tcp_handler.
--type from_key() :: {pid(), upstream()} | pid().
--type from() :: {from_module(), from_key()}.
+-type from() :: {module(), term()}.
 -type outstanding_upstream() :: {upstream(), pid()}.
 
 -record(state, {
