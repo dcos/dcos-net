@@ -65,17 +65,12 @@ start(From, Data) ->
 
 %% @private
 init([From, Data]) ->
-    %% My fate is sealed
-    %% I must die
-    %% This is a result of DCOS-5858... Bugs happen.
-    timer:send_after(?TIMEOUT * 2, timeout),
-    timer:exit_after(?TIMEOUT * 3, timeout_kill),
-    timer:kill_after(?TIMEOUT * 4),
+    erlang:send_after(?TIMEOUT * 2, self(), timeout),
     process_flag(trap_exit, true),
     case From of
         {dcos_dns_tcp_handler, Pid} when is_pid(Pid) ->
             %% Link handler pid.
-            link(Pid);
+            erlang:link(Pid);
         _ ->
             %% Don't link.
             ok
@@ -103,19 +98,18 @@ handle_info(timeout, wait_for_reply, State) ->
 handle_info(timeout, waiting_for_rest_replies, State) ->
     mark_rest_as_failed(State),
     {stop, normal, State};
-handle_info({'EXIT', _FromPid, normal}, StateName, State) ->
+handle_info({'DOWN', _MonRef, process, _Pid, normal}, StateName, State) ->
     {next_state, StateName, State};
-handle_info({'EXIT', FromPid, Reason}, StateName,
+handle_info({'DOWN', _MonRef, process, Pid, Reason}, StateName,
             #state{outstanding_upstreams=OutstandingUpstreams0}=State) ->
     OutstandingUpstreams =
-        case lists:keyfind(FromPid, 2, OutstandingUpstreams0) of
+        case lists:keyfind(Pid, 2, OutstandingUpstreams0) of
             false ->
                 lager:warning("Error, unrecognized late response, reason: ~p", [Reason]),
                 OutstandingUpstreams0;
             {Upstream, _Pid} ->
                 dcos_dns_metrics:update([?MODULE, Upstream, failures], 1, ?SPIRAL),
                 lists:keydelete(Upstream, 1, OutstandingUpstreams0)
-
         end,
     {next_state, StateName, State#state{outstanding_upstreams=OutstandingUpstreams}, ?TIMEOUT};
 handle_info(Info, StateName, State) ->
@@ -123,19 +117,7 @@ handle_info(Info, StateName, State) ->
     {next_state, StateName, State, ?TIMEOUT}.
 
 %% @private
-terminate(timeout_kill, _StateName, State) ->
-    dcos_dns_metrics:update([?APP, timeout_kill], 1, ?SPIRAL),
-    mark_rest_as_failed(State),
-    ok;
-terminate(_Reason, _StateName, #state{from=From}) ->
-    case From of
-        {dcos_dns_tcp_handler, Pid} when is_pid(Pid) ->
-            %% Unlink handler pid.
-            unlink(Pid);
-        _ ->
-            %% Don't link.
-            ok
-    end,
+terminate(_Reason, _StateName, _State) ->
     ok.
 
 %% @private
@@ -235,54 +217,55 @@ reply_fail(_State1 = #state{dns_message = DNSMessage, from = {FromModule, FromKe
 
 %% @private
 resolve(Parent, Upstream, State) ->
-    try do_resolve(Parent, Upstream, State) of
-        _ ->
-            ok
+    try
+        do_resolve(Parent, Upstream, State)
     catch
-        exit:Exception ->
-            lager:warning("Resolver (~p) Process exited: ~p stacktrace ~p", [Upstream, Exception, erlang:get_stacktrace()]),
-            %% Reraise the exception
-            exit(Exception);
-        Reason ->
-            lager:warning("Resolver (~p) Process exited: ~p stacktrace ~p", [Upstream, Reason, erlang:get_stacktrace()]),
-            exit(unknown_error)
+        Class:Reason ->
+            StackTrace = erlang:get_stacktrace(),
+            lager:warning("Resolver (~p) Process exited: ~p stacktrace ~p",
+                [Upstream, Reason, erlang:get_stacktrace()]),
+            erlang:raise(Class, Reason, StackTrace)
     end.
 
 do_resolve(Parent, Upstream = {UpstreamIP, UpstreamPort}, #state{data = Data, from = {dcos_dns_udp_server, _}}) ->
-    lager:debug("Sending query to Upstream: ~p", [Upstream]),
-    {ok, _} = timer:kill_after(?TIMEOUT),
     {ok, Socket} = gen_udp:open(0, [{reuseaddr, true}, {active, once}, binary]),
-    link(Socket),
     gen_udp:send(Socket, UpstreamIP, UpstreamPort, Data),
-    %% Should put a timeout here given we're linked to our parents?
-    receive
-        {udp, Socket, UpstreamIP, UpstreamPort, ReplyData} ->
-            lager:debug("Received Reply"),
-            gen_fsm:send_event(Parent, {upstream_reply, Upstream, ReplyData});
-        Else ->
-            lager:debug("Received else: ~p, while upstream: ~p", [Else, Upstream])
+    MonRef = erlang:monitor(process, Parent),
+    try
+        receive
+            {'DOWN', MonRef, process, _Pid, Reason} ->
+                exit(Reason);
+            {udp, Socket, UpstreamIP, UpstreamPort, ReplyData} ->
+                gen_fsm:send_event(Parent, {upstream_reply, Upstream, ReplyData})
         after ?TIMEOUT ->
-            lager:debug("Timed out waiting for upstream: ~p", [Upstream])
-    end,
-    gen_udp:close(Socket),
-    ok;
+            ok
+        end
+    after
+        gen_udp:close(Socket)
+    end;
 
 %% @private
 do_resolve(Parent, Upstream = {UpstreamIP, UpstreamPort}, #state{data = Data, from = {dcos_dns_tcp_handler, _}}) ->
-    {ok, _} = timer:kill_after(?TIMEOUT),
     TCPOptions = [{active, once}, binary, {packet, 2}, {send_timeout, 1000}],
     {ok, Socket} = gen_tcp:connect(UpstreamIP, UpstreamPort, TCPOptions, ?TIMEOUT),
-    link(Socket),
     ok = gen_tcp:send(Socket, Data),
-    %% Should put a timeout here given we're linked to our parents?
-    receive
-        {tcp, Socket, ReplyData} ->
-            gen_fsm:send_event(Parent, {upstream_reply, Upstream, ReplyData})
-    after ?TIMEOUT ->
-        ok
-    end,
-    gen_tcp:close(Socket),
-    ok.
+    MonRef = erlang:monitor(process, Parent),
+    try
+        receive
+            {'DOWN', MonRef, process, _Pid, Reason} ->
+                exit(Reason);
+            {tcp, Socket, ReplyData} ->
+                gen_fsm:send_event(Parent, {upstream_reply, Upstream, ReplyData});
+            {tcp_closed, Socket} ->
+                exit(closed);
+            {tcp_error, Socket, Reason} ->
+                exit(Reason)
+        after ?TIMEOUT ->
+            ok
+        end
+    after
+        gen_tcp:close(Socket)
+    end.
 
 %% @private
 take_upstreams(Upstreams0) when length(Upstreams0) < 2 -> %% 0, 1 or 2 Upstreams
