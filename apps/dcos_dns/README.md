@@ -24,3 +24,16 @@ In addition to this watchdog, we also run genresolv, which checks whether or not
 
 ## Spartan Interface
 Spartan creates its own network interface. This interface is actually a dummy device called `spartan`. This device hosts 3 IPs, `198.51.100.1/32`, `198.51.100.2/32`, `198.51.100.3/32`. 
+
+## HTTP Interface
+
+Spartan implements a simple REST API for service discovery over HTTP:
+
+* GET /v1/version: lists the Spartan version
+* GET /v1/config: lists the Spartan configuration info (not implemented)
+* GET /v1/hosts/{host}: lists the IP address of a host
+* GET /v1/services/{service}: lists the host, IP address, and port for a service
+* GET /v1/enumerate: lists all DNS information (not implemented)
+* GET /v1/records: lists all DNS records
+
+This HTTP API is reachable at http://<host>:63053/. For more information please see Mesos-DNS [documentation](https://github.com/mesosphere/mesos-dns/blob/master/docs/docs/http.md).

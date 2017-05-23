@@ -15,7 +15,8 @@
     dns,
     exometer,
     ranch,
-    sidejob
+    sidejob,
+    cowboy
    ]},
   {env,[]},
   {modules, []},
