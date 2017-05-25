@@ -63,7 +63,6 @@ all() ->
 init_per_testcase(TestCaseName, Config) ->
   ct:pal("Starting Testcase: ~p", [TestCaseName]),
   ct:timetrap(infinity),
-  {ok, _} = dcos_overlay_mockhttp_backend:start_link([]),
   {Masters, Agents} = start_nodes(Config),
   {Pids, _} = rpc:multicall(Masters ++ Agents, os, getpid, []),
   Config1 = proplists:delete(pid, Config),
