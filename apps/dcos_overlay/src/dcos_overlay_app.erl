@@ -15,7 +15,7 @@
 %%====================================================================
 
 start(_StartType, _StartArgs) ->
-    'dcos_overlay_sup':start_link().
+    dcos_overlay_sup:start_link([application:get_env(dcos_overlay, enable_overlay, true)]).
 
 stop(_State) ->
     ok.
