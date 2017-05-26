@@ -13,7 +13,8 @@
 %% Application callbacks
 -export([
     start/2,
-    stop/1
+    stop/1,
+    load_config_files/1
 ]).
 
 %%====================================================================
@@ -63,6 +64,10 @@ add_master2() ->
         ]}).
 
 load_config_files() ->
+    load_config_files(undefined).
+
+-spec load_config_files(App :: atom()) -> ok.
+load_config_files(App) ->
     case file:list_dir(?DEFAULT_CONFIG_DIR) of
       {ok, []} ->
         lager:info("Found an empty config directory: ~p", [?DEFAULT_CONFIG_DIR]);
@@ -70,25 +75,35 @@ load_config_files() ->
         lager:info("Couldn't find config directory: ~p", [?DEFAULT_CONFIG_DIR]);
       {ok, Filenames} ->
         AbsFilenames = lists:map(fun abs_filename/1, Filenames),
-        lists:foreach(fun load_config_file/1, AbsFilenames)
+        lists:foreach(fun (Filename) ->
+            load_config_file(App, Filename)
+        end, AbsFilenames)
     end.
 
 abs_filename(Filename) ->
     filename:absname(Filename, ?DEFAULT_CONFIG_DIR).
 
-load_config_file(Filename) ->
+load_config_file(App, Filename) ->
     case file:consult(Filename) of
         {ok, []} ->
             lager:info("Found an empty config file: ~p~n", [Filename]);
         {error, eacces} ->
             lager:info("Couldn't load config: ~p", [Filename]);
         {ok, Result} ->
-            load_config(Result),
+            load_config(App, Result),
             lager:info("Loaded config: ~p", [Filename])
     end.
 
-load_config([Result]) ->
-    lists:foreach(fun load_app_config/1, Result).
+load_config(App, [Result]) ->
+    lists:foreach(fun (AppOptions) ->
+        load_app_config(App, AppOptions)
+    end, Result).
 
-load_app_config({App, Options}) ->
-    lists:foreach(fun({OptionKey, OptionValue}) -> application:set_env(App, OptionKey, OptionValue) end, Options).
+load_app_config(undefined, {App, Options}) ->
+    load_app_config(App, {App, Options});
+load_app_config(App, {App, Options}) ->
+    lists:foreach(fun ({OptionKey, OptionValue}) ->
+        application:set_env(App, OptionKey, OptionValue)
+    end, Options);
+load_app_config(_App, _AppOptions) ->
+    ok.

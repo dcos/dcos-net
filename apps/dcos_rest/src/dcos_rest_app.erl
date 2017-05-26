@@ -18,6 +18,7 @@
 %%====================================================================
 
 start(_StartType, _StartArgs) ->
+    dcos_net_app:load_config_files(dcos_rest),
     setup_cowboy(),
     dcos_rest_sup:start_link().
 
