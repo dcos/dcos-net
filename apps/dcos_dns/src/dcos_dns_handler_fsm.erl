@@ -153,15 +153,9 @@ execute(timeout, State = #state{data = Data}) ->
             dcos_dns_metrics:update([?APP, no_upstreams_available], 1, ?SPIRAL),
             reply_fail(State1),
             {stop, normal, State};
-        Upstreams0 ->
+        Upstreams ->
             StartTimestamp = os:timestamp(),
-            QueryUpstreams = take_upstreams(Upstreams0),
-            OutstandingUpstreams = lists:map(fun(Upstream) ->
-                            Pid = spawn_link(?MODULE,
-                                             resolve,
-                                             [self(), Upstream, State]),
-                            {Upstream, Pid}
-                            end, QueryUpstreams),
+            OutstandingUpstreams = start_workers(Upstreams, State),
             State2 = State1#state{start_timestamp=StartTimestamp,
                                   outstanding_upstreams=OutstandingUpstreams},
             {next_state, wait_for_reply, State2, ?TIMEOUT}
@@ -358,3 +352,18 @@ mark_rest_as_failed(Upstreams) ->
     lists:foreach(fun({Upstream, _Pid}) ->
         dcos_dns_metrics:update([?MODULE, Upstream, failures], 1, ?SPIRAL)
                   end, Upstreams).
+
+start_workers([Upstream], State) ->
+    _ = resolve(self(), Upstream, State),
+    [{Upstream, self()}];
+start_workers(Upstreams, State) ->
+    QueryUpstreams = take_upstreams(Upstreams),
+    lists:map(fun (Upstream) ->
+        Pid =
+            proc_lib:spawn(
+                ?MODULE, resolve,
+                [self(), Upstream, State]
+            ),
+        erlang:monitor(process, Pid),
+        {Upstream, Pid}
+    end, QueryUpstreams).
