@@ -11,6 +11,7 @@
 
 %% tests
 -export([
+         overload_test/1,
          multiple_query_test/1,
          upstream_test/1,
          mesos_test/1,
@@ -39,8 +40,9 @@ init_per_suite(_Config) ->
                                             ok = application:set_env(App, Par, Val)
                         end, Environment)
                   end, Terms),
-    application:set_env(dcos_dns, mesos_resolvers, [{{127, 0, 0, 1}, 62053}]),
-    application:ensure_all_started(dcos_dns),
+    ok = application:set_env(dcos_dns, handler_limit, 16),
+    ok = application:set_env(dcos_dns, mesos_resolvers, [{{127, 0, 0, 1}, 62053}]),
+    {ok, _} = application:ensure_all_started(dcos_dns),
     generate_fixture_mesos_zone(),
     _Config.
 
@@ -58,7 +60,8 @@ all() ->
      upstream_test,
      mesos_test,
      zk_test,
-     multiple_query_test
+     multiple_query_test,
+     overload_test
     ].
 
 generate_fixture_mesos_zone() ->
@@ -134,6 +137,42 @@ multiple_query_test(_Config) ->
     Expected = "1.1.1.1\n2.2.2.2\n127.0.0.1\n",
     Command = "dig -p 8053 @127.0.0.1 +keepopen +tcp +short spartan1.testing.express spartan2.testing.express master.mesos",
     ?assertCmdOutput(Expected, Command).
+
+overload_test(_Config) ->
+    try
+        ok = meck:new(dcos_dns_udp_server, [unstick, passthrough]),
+        ok = meck:expect(
+                dcos_dns_udp_server, do_reply,
+                fun (From, Data) ->
+                    timer:sleep(500),
+                    catch meck:passthrough([From, Data])
+                end),
+        Parent = self(),
+        Pids = lists:map(fun (_) ->
+            proc_lib:spawn_link(fun () ->
+                Host = "master.mesos",
+                Opts = resolver_options(),
+                Result =
+                    case inet_res:resolve(Host, in, a, Opts, 700) of
+                        {ok, _} -> ok;
+                        {error, timeout} -> timeout
+                    end,
+                Parent ! {done, self(), Result}
+            end)
+        end, lists:seq(0, 32)),
+        Results = lists:map(fun (Pid) ->
+            receive
+                {done, Pid, Result} ->
+                    Result
+            after
+                1000 ->
+                    throw(timeout)
+            end
+        end, Pids),
+        ?assertMatch([ok, timeout], lists:usort(Results))
+    after
+        ok = meck:unload(dcos_dns_udp_server)
+    end.
 
 %% @private
 %% @doc Use the dcos_dns resolver.

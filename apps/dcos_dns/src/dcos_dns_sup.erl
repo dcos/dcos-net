@@ -42,15 +42,6 @@ init([]) ->
             modules => [dcos_dns_config_loader_server]
         },
 
-    HandlerSup = #{
-        id => dcos_dns_handler_sup,
-        start => {dcos_dns_handler_sup, start_link, []},
-        restart => permanent,
-        shutdown => 5000,
-        type => supervisor,
-        modules => [dcos_dns_handler_sup]
-    },
-
     WatchdogSup = #{
         id => dcos_dns_watchdog,
         start => {dcos_dns_watchdog, start_link, []},
@@ -67,8 +58,12 @@ init([]) ->
     ok = localhost_zone_setup(),
 
     %% Systemd Sup intentionally goes last
-    Children = [HandlerSup, ZkRecordServer, ConfigLoaderServer, WatchdogSup],
+    Children = [ZkRecordServer, ConfigLoaderServer, WatchdogSup],
     Children1 = maybe_add_udp_servers(Children),
+
+    sidejob:new_resource(
+        dcos_dns_handler_fsm_sj, sidejob_supervisor,
+        dcos_dns_config:handler_limit()),
 
     %% The top level sup should never die.
     {ok, { {one_for_all, 10000, 1}, Children1} }.

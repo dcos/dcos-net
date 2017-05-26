@@ -12,7 +12,15 @@
 -include("dcos_dns.hrl").
 
 %% API
--export([exhibitor_timeout/0, udp_enabled/0, tcp_enabled/0, tcp_port/0, udp_port/0, bind_interface/0, bind_ips/0, forward_zones/0]).
+-export([
+    exhibitor_timeout/0,
+    udp_enabled/0, udp_port/0,
+    tcp_enabled/0, tcp_port/0,
+    bind_interface/0, bind_ips/0,
+    forward_zones/0,
+    handler_limit/0
+]).
+
 exhibitor_timeout() ->
     application:get_env(?APP, exhibitor_timeout, ?EXHIBITOR_TIMEOUT).
 
@@ -27,6 +35,9 @@ tcp_port() ->
 
 udp_port() ->
     application:get_env(?APP, udp_port, 5454).
+
+handler_limit() ->
+    application:get_env(?APP, handler_limit, 1024).
 
 -spec(forward_zones() -> #{[dns:label()] => [{string(), integer()}]}).
 forward_zones() ->
