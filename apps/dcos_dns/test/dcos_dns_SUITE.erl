@@ -15,7 +15,10 @@
          multiple_query_test/1,
          upstream_test/1,
          mesos_test/1,
-         zk_test/1
+         zk_test/1,
+         http_hosts_test/1,
+         http_services_test/1,
+         http_records_test/1
         ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -44,6 +47,7 @@ init_per_suite(_Config) ->
     ok = application:set_env(dcos_dns, mesos_resolvers, [{{127, 0, 0, 1}, 62053}]),
     {ok, _} = application:ensure_all_started(dcos_dns),
     generate_fixture_mesos_zone(),
+    generate_thisdcos_directory_zone(),
     _Config.
 
 end_per_suite(_Config) ->
@@ -61,6 +65,9 @@ all() ->
      mesos_test,
      zk_test,
      multiple_query_test,
+     http_hosts_test,
+     http_services_test,
+     http_records_test,
      overload_test
     ].
 
@@ -97,6 +104,62 @@ generate_fixture_mesos_zone() ->
     ],
     Sha = crypto:hash(sha, term_to_binary(Records)),
     ok = erldns_zone_cache:put_zone({<<"mesos">>, Sha, Records}).
+
+generate_thisdcos_directory_zone() ->
+    Records = [
+        #dns_rr{
+            name = <<"thisdcos.directory">>,
+            type = ?DNS_TYPE_SOA,
+            ttl = 5,
+            data = #dns_rrdata_soa{
+                mname = <<"ns.spartan">>, %% Nameserver
+                rname = <<"support.mesosphere.com">>,
+                serial = 0,
+                refresh = 60,
+                retry = 180,
+                expire = 86400,
+                minimum = 1
+            }
+        },
+        #dns_rr{
+            name = <<"commontest.thisdcos.directory">>,
+            type = ?DNS_TYPE_A,
+            ttl = 5,
+            data = #dns_rrdata_a{ip = {127, 0, 0, 1}}
+        },
+        #dns_rr{
+            name = <<"spartan">>,
+            type = ?DNS_TYPE_NS,
+            ttl = 3600,
+            data = #dns_rrdata_ns{
+                dname = <<"ns.spartan">>
+            }
+        },
+        #dns_rr{
+            name = <<"_service._tcp.commontest.thisdcos.directory">>,
+            type = ?DNS_TYPE_SRV,
+            ttl = 5,
+            data = #dns_rrdata_srv{
+                priority = 0,
+                weight = 0,
+                port = 1024,
+                target = <<"commontest.thisdcos.directory">>
+            }
+        },
+        #dns_rr{
+            name = <<"_service._tcp.commontest.thisdcos.directory">>,
+            type = ?DNS_TYPE_SRV,
+            ttl = 5,
+            data = #dns_rrdata_srv{
+                priority = 0,
+                weight = 0,
+                port = 2048,
+                target = <<"commontest.thisdcos.directory">>
+            }
+        }
+    ],
+    Sha = crypto:hash(sha, term_to_binary(Records)),
+    ok = erldns_zone_cache:put_zone({<<"thisdcos.directory">>, Sha, Records}).
 
 %% ===================================================================
 %% tests
@@ -179,3 +242,49 @@ overload_test(_Config) ->
 resolver_options() ->
     LocalResolver = "127.0.0.1:8053",
     [{nameservers, [dcos_dns_app:parse_ipv4_address_with_port(LocalResolver, 53)]}].
+
+http_hosts_test(_Config) ->
+    Records = request("http://localhost:63053/v1/hosts/commontest.thisdcos.directory"),
+    lists:foreach(fun (RR) ->
+        ?assertMatch(
+            {<<"host">>, <<"commontest.thisdcos.directory">>},
+            lists:keyfind(<<"host">>, 1, RR)),
+        {<<"ip">>, Ip} =
+            lists:keyfind(<<"ip">>, 1, RR),
+        ?assertMatch(
+            {ok, _},
+            inet:parse_address(binary_to_list(Ip)))
+    end, Records).
+
+http_services_test(_Config) ->
+    Records = request("http://localhost:63053/v1/services/_service._tcp.commontest.thisdcos.directory"),
+    lists:foreach(fun (RR) ->
+        ?assertMatch(
+            {<<"service">>, <<"_service._tcp.commontest.thisdcos.directory">>},
+            lists:keyfind(<<"service">>, 1, RR)),
+        ?assertMatch(
+            {<<"host">>, <<"commontest.thisdcos.directory">>},
+            lists:keyfind(<<"host">>, 1, RR)),
+        ?assertMatch(
+            {<<"ip">>, <<"127.0.0.1">>},
+            lists:keyfind(<<"ip">>, 1, RR)),
+        {<<"port">>, Port} = lists:keyfind(<<"port">>, 1, RR),
+        ?assertMatch(true, lists:member(Port, [1024, 2048]))
+    end, Records).
+
+http_records_test(_Config) ->
+    Records = request("http://localhost:63053/v1/records"),
+    Records0 =
+        lists:filter(fun (RR) ->
+            {<<"name">>, Name} = lists:keyfind(<<"name">>, 1, RR),
+            lists:member(Name, [<<"ready.spartan">>, <<"ns.spartan">>,
+                                <<"ns.zk">>, <<"zk-1.zk">>, <<"localhost">>,
+                                <<"commontest.thisdcos.directory">>,
+                                <<"_service._tcp.commontest.thisdcos.directory">>])
+        end, Records),
+    ?assertMatch(8, length(Records0)).
+
+request(Url) ->
+    {ok, {_, _, Data}} =
+        httpc:request(get, {Url, []}, [], [{body_format, binary}]),
+    jsx:decode(Data).
