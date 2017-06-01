@@ -19,6 +19,13 @@ function valid_ip()
     return $stat
 }
 
+function check_epmd() {
+    if ! ${ERTS_DIR}/bin/epmd -port ${ERL_EPMD_PORT} -names > /dev/null; then
+        echo "EPMD is not reachable at port \"${ERL_EPMD_PORT}\"" >&2
+        exit 1;
+    fi
+}
+
 ENV_FILE="/opt/mesosphere/etc/${APP_NAME}.env"
 if [ -f $ENV_FILE ]; then
   . $ENV_FILE
@@ -37,7 +44,10 @@ else
     IP=$(ip r g 192.88.99.0 | grep -Po 'src \K[\d.]+')
 fi
 NAME=${APP_NAME}@${IP}
-RELNAME="`dirname \"$0\"`"/${APP_NAME}
+SCRIPT=$(readlink -f $0 || true)
+[ -z $SCRIPT ] && SCRIPT=$0
+SCRIPT_DIR="$(cd `dirname "$SCRIPT"` && pwd -P)"
+RELNAME="${SCRIPT_DIR}/${APP_NAME}"
 
 ## If ERLANG_DISTRIBUTION is unset, then set it to inet_tcp
 ERLANG_DISTRIBUTION=${ERLANG_DISTRIBUTION:=inet_tcp}
@@ -87,5 +97,11 @@ export ERL_FLAGS="${ERL_FLAGS} -ssl_dist_opt server_depth ${SERVER_DEPTH}"
 ## Mesos state config (SSL)
 export ERL_FLAGS="${ERL_FLAGS} -mesos_state ssl ${MESOS_STATE_SSL_ENABLED}"
 
+### EPMD
+export ERL_EPMD_PORT=61420
+ERTS_VSN="{{ erts_vsn }}"
+RELEASE_ROOT_DIR="$(cd `dirname "${SCRIPT_DIR}"` && pwd -P)"
+ERTS_DIR="$RELEASE_ROOT_DIR/erts-$ERTS_VSN"
+check_epmd
 
-NAME=${NAME} RELX_REPLACE_OS_VARS=true ERL_EPMD_PORT=61420 RELX_OUT_FILE_PATH=/tmp ${RELNAME} $@
+NAME=${NAME} RELX_REPLACE_OS_VARS=true RELX_OUT_FILE_PATH=/tmp ${RELNAME} $@
