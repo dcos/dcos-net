@@ -39,7 +39,6 @@ callback_mode() ->
     state_functions.
 
 init([Ref, Socket, Transport, Opts]) ->
-    {ok, _} = timer:kill_after(?TIMEOUT * 5),
     link(Socket),
     State0 = #state{socket = Socket, transport = Transport, ref = Ref},
     {ok, uninitialized, State0, {next_event, internal, {do_init, Opts}}}.
@@ -52,19 +51,26 @@ uninitialized(internal, {do_init, _Opts = []}, State0 = #state{ref = Ref, socket
 wait_for_query(timeout, idle_timeout, #state{transport = Transport, socket = Socket}) ->
     Transport:close(Socket),
     {stop, ?SHUTDOWN(idle_timeout)};
-wait_for_query(info, {tcp_closed, ClosedSocket}, #state{socket = Socket}) when ClosedSocket == Socket ->
+wait_for_query(info, {tcp_closed, Socket}, #state{socket = Socket}) ->
     {stop, ?SHUTDOWN(tcp_closed)};
 wait_for_query(info, {tcp, Socket, Data}, State0 = #state{socket = Socket}) ->
     case dcos_dns_handler_fsm:start({?MODULE, self()}, Data) of
         {ok, Pid} when is_pid(Pid) ->
+            _MonRef = erlang:monitor(process, Pid),
             State1 = State0#state{query_pid = Pid},
             {next_state, waiting_for_reply, State1, {timeout, ?TIMEOUT, query_timeout}};
         {error, overload} ->
             % NOTE: to avoid ddos spartan doesn't reply anything in case of overload
             dcos_dns_metrics:update([?MODULE, overload], 1, ?COUNTER),
             {stop, overload}
-    end.
+    end;
+wait_for_query(info, {'DOWN', _MonRef, process, _Pid, normal}, State) ->
+    {next_state, wait_for_query, State, {timeout, ?TIMEOUT, idle_timeout}}.
 
+waiting_for_reply(info, {'DOWN', _MonRef, process, _Pid, normal}, State) ->
+    {next_state, waiting_for_reply, State, {timeout, ?TIMEOUT, query_timeout}};
+waiting_for_reply(info, {'DOWN', _MonRef, process, Pid, Reason}, #state{query_pid = Pid}) ->
+    {stop, ?SHUTDOWN(Reason)};
 waiting_for_reply(timeout, query_timeout, #state{transport = Transport, socket = Socket}) ->
     Transport:close(Socket),
     {stop, ?SHUTDOWN(query_timeout)};

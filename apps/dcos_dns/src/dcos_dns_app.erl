@@ -103,7 +103,8 @@ maybe_start_tcp_listener() ->
 start_tcp_listener(IP) ->
     Port = dcos_dns_config:tcp_port(),
     Acceptors = 100,
-    Options = [{port, Port}, {ip, IP}],
+    SendTimeout = application:get_env(dcos_dns, send_timeout, 3000),
+    Options = [{port, Port}, {ip, IP}, {send_timeout, SendTimeout}],
     {ok, _} = ranch:start_listener({?TCP_LISTENER_NAME, IP},
         Acceptors,
         ranch_tcp,
