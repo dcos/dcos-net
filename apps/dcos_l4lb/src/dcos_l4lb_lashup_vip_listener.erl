@@ -34,12 +34,6 @@
 -define(RPC_TIMEOUT, 5000).
 -define(MON_CALLBACK_TIME, 5000).
 -define(RPC_RETRY_TIME, 15000).
--define(ZONE_NAMES, [
-    [<<"l4lb">>, <<"thisdcos">>, <<"directory">>],
-    [<<"l4lb">>, <<"thisdcos">>, <<"global">>],
-    [<<"dclb">>, <<"thisdcos">>, <<"directory">>],
-    [<<"dclb">>, <<"thisdcos">>, <<"global">>]
-]).
 
 -include_lib("stdlib/include/ms_transform.hrl").
 -include("dcos_l4lb.hrl").
