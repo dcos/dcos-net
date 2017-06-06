@@ -90,12 +90,12 @@ key([], _) ->
 key(KeyData, _) ->
     lists:map(fun(X) -> binary_to_atom(X, utf8) end, KeyData).
 
-
 encode_key({{Name, Type = riak_dt_lwwreg}, Value}) ->
-    {Name, [{type, Type}, {value, encode_key(Value)}]};
+    #{value := Key} = encode_key(Name),
+    {Key, [{type, Type}, {value, encode_key(Value)}]};
 encode_key({{Name, Type = riak_dt_orswot}, Value}) ->
-    {Name, [{type, Type}, {value, lists:map(fun encode_key/1, Value)}]};
-
+    #{value := Key} = encode_key(Name),
+    {Key, [{type, Type}, {value, lists:map(fun encode_key/1, Value)}]};
 encode_key(Value) when is_atom(Value) ->
     #{type => atom, value => Value};
 encode_key(Value) when is_binary(Value) ->
