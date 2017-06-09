@@ -1,32 +1,15 @@
 -module(dcos_dns_sup).
--author("Christopher Meiklejohn <christopher.meiklejohn@gmail.com>").
-
 -behaviour(supervisor).
+-export([start_link/0, init/1]).
 
-%% API
--export([start_link/0]).
-
-%% Supervisor callbacks
--export([init/1]).
-
--define(SERVER, ?MODULE).
 -include("dcos_dns.hrl").
 
 -include_lib("dns/include/dns_terms.hrl").
 -include_lib("dns/include/dns_records.hrl").
 
-%%====================================================================
-%% API functions
-%%====================================================================
-
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
-%%====================================================================
-%% Supervisor callbacks
-%%====================================================================
-
-%% Child :: {Id,StartFunc,Restart,Shutdown,Type,Modules}
 init([]) ->
     ZkRecordServer = {dcos_dns_zk_record_server,
                       {dcos_dns_zk_record_server, start_link, []},
@@ -50,6 +33,32 @@ init([]) ->
         type => worker,
         modules => [dcos_dns_watchdog]
     },
+
+    KeyMgr = #{
+        id => dcos_dns_key_mgr,
+        start => {dcos_dns_key_mgr, start_link, []},
+        restart => transient,
+        modules => [dcos_dns_key_mgr],
+        type => worker,
+        shutdown => 5000
+    },
+    PollSrv = #{
+        id => dcos_dns_poll_server,
+        start => {dcos_dns_poll_server, start_link, []},
+        restart => permanent,
+        shutdown => 5000,
+        type => worker,
+        modules => [dcos_dns_poll_server]
+    },
+    ListenerSrv = #{
+        id => dcos_dns_listener,
+        start => {dcos_dns_listener, start_link, []},
+        restart => permanent,
+        shutdown => 5000,
+        type => worker,
+        modules => [dcos_dns_listener]
+    },
+
     %% Configure metrics.
     dcos_dns_metrics:setup(),
 
@@ -58,7 +67,7 @@ init([]) ->
     ok = localhost_zone_setup(),
 
     %% Systemd Sup intentionally goes last
-    Children = [ZkRecordServer, ConfigLoaderServer, WatchdogSup],
+    Children = [ZkRecordServer, ConfigLoaderServer, WatchdogSup, KeyMgr, PollSrv, ListenerSrv],
     Children1 = maybe_add_udp_servers(Children),
 
     sidejob:new_resource(

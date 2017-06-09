@@ -1,0 +1,5693 @@
+// 20161228161141
+// http://35.160.49.248/mesos/master/state
+
+{
+  "version": "1.2.0",
+  "git_sha": "9736e0a608bc227957be4886bbe8372e23f62b7d",
+  "build_date": "2016-12-14 23:37:43",
+  "build_time": 1481758663.0,
+  "build_user": "",
+  "start_time": 1482947603.41792,
+  "elected_time": 1482947603.4237,
+  "id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27",
+  "pid": "master@10.0.5.128:5050",
+  "hostname": "10.0.5.128",
+  "activated_slaves": 2.0,
+  "deactivated_slaves": 0.0,
+  "leader": "master@10.0.5.128:5050",
+  "leader_info": {
+    "id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27",
+    "pid": "master@10.0.5.128:5050",
+    "port": 5050,
+    "hostname": "10.0.5.128"
+  },
+  "cluster": "sargun-xm8czb9",
+  "external_log_file": "/var/lib/dcos/mesos/log/mesos-master.log",
+  "flags": {
+    "agent_ping_timeout": "15secs",
+    "slave_removal_rate_limit": "1/20mins",
+    "agent_reregister_timeout": "10mins",
+    "allocation_interval": "1secs",
+    "allocator": "HierarchicalDRF",
+    "authenticate_agents": "false",
+    "authenticate_frameworks": "false",
+    "authenticate_http_frameworks": "false",
+    "authenticate_http_readonly": "false",
+    "authenticate_http_readwrite": "false",
+    "authenticators": "crammd5",
+    "authorizers": "local",
+    "cluster": "sargun-xm8czb9",
+    "external_log_file": "/var/lib/dcos/mesos/log/mesos-master.log",
+    "framework_sorter": "drf",
+    "help": "false",
+    "hostname_lookup": "false",
+    "http_authenticators": "basic",
+    "initialize_driver_logging": "true",
+    "log_auto_initialize": "true",
+    "logbufsecs": "0",
+    "logging_level": "INFO",
+    "max_slave_ping_timeouts": "20",
+    "max_completed_frameworks": "50",
+    "max_completed_tasks_per_framework": "1000",
+    "modules_dir": "/opt/mesosphere/etc/mesos-master-modules",
+    "offer_timeout": "2mins",
+    "quiet": "false",
+    "quorum": "1",
+    "recovery_agent_removal_limit": "100%",
+    "registry": "replicated_log",
+    "registry_fetch_timeout": "1mins",
+    "registry_gc_interval": "15mins",
+    "registry_max_agent_age": "2weeks",
+    "registry_max_agent_count": "102400",
+    "registry_store_timeout": "1mins",
+    "registry_strict": "false",
+    "root_submissions": "true",
+    "user_sorter": "drf",
+    "version": "false",
+    "webui_dir": "/opt/mesosphere/packages/mesos--1d9b1c9170fa245e6bf1a2ab3700903a405f0a70/share/mesos/webui",
+    "weights": "",
+    "work_dir": "/var/lib/dcos/mesos/master",
+    "zk_session_timeout": "10secs"
+  },
+  "slaves": [
+    {
+      "id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+      "pid": "slave(1)@10.0.0.182:5051",
+      "hostname": "10.0.0.182",
+      "registered_time": 1482947697.25404,
+      "resources": {
+        "disk": 35577.0,
+        "mem": 14018.0,
+        "gpus": 0.0,
+        "cpus": 4.0,
+        "ports": "[1025-2180, 2182-3887, 3889-5049, 5052-8079, 8082-8180, 8182-32000]"
+      },
+      "used_resources": {
+        "disk": 0.0,
+        "mem": 128.0,
+        "gpus": 0.0,
+        "cpus": 0.001
+      },
+      "offered_resources": {
+        "disk": 0.0,
+        "mem": 0.0,
+        "gpus": 0.0,
+        "cpus": 0.0
+      },
+      "reserved_resources": {
+
+      },
+      "unreserved_resources": {
+        "disk": 35577.0,
+        "mem": 14018.0,
+        "gpus": 0.0,
+        "cpus": 4.0,
+        "ports": "[1025-2180, 2182-3887, 3889-5049, 5052-8079, 8082-8180, 8182-32000]"
+      },
+      "attributes": {
+
+      },
+      "active": true,
+      "version": "1.2.0"
+    },
+    {
+      "id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S0",
+      "pid": "slave(1)@10.0.7.205:5051",
+      "hostname": "10.0.7.205",
+      "registered_time": 1482947685.41781,
+      "resources": {
+        "disk": 35577.0,
+        "mem": 14018.0,
+        "gpus": 0.0,
+        "cpus": 4.0,
+        "ports": "[1-21, 23-5050, 5052-32000]"
+      },
+      "used_resources": {
+        "disk": 0.0,
+        "mem": 0.0,
+        "gpus": 0.0,
+        "cpus": 0.0
+      },
+      "offered_resources": {
+        "disk": 0.0,
+        "mem": 0.0,
+        "gpus": 0.0,
+        "cpus": 0.0
+      },
+      "reserved_resources": {
+        "slave_public": {
+          "disk": 35577.0,
+          "mem": 14018.0,
+          "gpus": 0.0,
+          "cpus": 4.0,
+          "ports": "[1-21, 23-5050, 5052-32000]"
+        }
+      },
+      "unreserved_resources": {
+        "disk": 0.0,
+        "mem": 0.0,
+        "gpus": 0.0,
+        "cpus": 0.0
+      },
+      "attributes": {
+        "public_ip": "true"
+      },
+      "active": true,
+      "version": "1.2.0"
+    }
+  ],
+  "frameworks": [
+    {
+      "id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0001",
+      "name": "metronome",
+      "pid": "scheduler-675d3754-39b3-4786-a84d-dd8f9e0b4ace@10.0.5.128:40897",
+      "used_resources": {
+        "disk": 0.0,
+        "mem": 0.0,
+        "gpus": 0.0,
+        "cpus": 0.0
+      },
+      "offered_resources": {
+        "disk": 0.0,
+        "mem": 0.0,
+        "gpus": 0.0,
+        "cpus": 0.0
+      },
+      "capabilities": [
+
+      ],
+      "hostname": "10.0.5.128",
+      "webui_url": "http://10.0.5.128:9000",
+      "active": true,
+      "connected": true,
+      "recovered": false,
+      "user": "root",
+      "failover_timeout": 604800000.0,
+      "checkpoint": true,
+      "registered_time": 1482947621.22915,
+      "unregistered_time": 0.0,
+      "resources": {
+        "disk": 0.0,
+        "mem": 0.0,
+        "gpus": 0.0,
+        "cpus": 0.0
+      },
+      "reregistered_time": 1482949823.5191,
+      "role": "*",
+      "tasks": [
+
+      ],
+      "completed_tasks": [
+
+      ],
+      "offers": [
+
+      ],
+      "executors": [
+
+      ]
+    },
+    {
+      "id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+      "name": "marathon",
+      "pid": "scheduler-57452589-9d9f-4b6b-a46a-d3d8d631144d@10.0.5.128:40815",
+      "used_resources": {
+        "disk": 0.0,
+        "mem": 128.0,
+        "gpus": 0.0,
+        "cpus": 0.001
+      },
+      "offered_resources": {
+        "disk": 0.0,
+        "mem": 0.0,
+        "gpus": 0.0,
+        "cpus": 0.0
+      },
+      "capabilities": [
+        "TASK_KILLING_STATE",
+        "GPU_RESOURCES",
+        "PARTITION_AWARE"
+      ],
+      "hostname": "10.0.5.128",
+      "webui_url": "http://10.0.5.128:8080",
+      "active": true,
+      "connected": true,
+      "recovered": false,
+      "user": "root",
+      "failover_timeout": 604800.0,
+      "checkpoint": true,
+      "registered_time": 1482947621.20573,
+      "unregistered_time": 0.0,
+      "principal": "dcos_marathon",
+      "resources": {
+        "disk": 0.0,
+        "mem": 128.0,
+        "gpus": 0.0,
+        "cpus": 0.001
+      },
+      "reregistered_time": 1482949823.95574,
+      "role": "slave_public",
+      "tasks": [
+        {
+          "id": "dockertest.55144aae-cd5b-11e6-b6f5-fea80569c9e0",
+          "name": "dockertest",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_RUNNING",
+          "resources": {
+            "disk": 0.0,
+            "mem": 128.0,
+            "gpus": 0.0,
+            "cpus": 0.001
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482970292.82691,
+              "labels": [
+                {
+                  "key": "Docker.NetworkSettings.IPAddress",
+                  "value": "9.0.2.130"
+                }
+              ],
+              "container_status": {
+                "container_id": {
+                  "value": "e7c656cc-dcaa-4b76-9860-663ad5c6358f"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "ip_address": "9.0.2.130"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "dockertest",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "DOCKER",
+            "docker": {
+              "image": "ubuntu:latest",
+              "network": "USER",
+              "privileged": false,
+              "force_pull_image": false
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "completed_tasks": [
+        {
+          "id": "wet2.98fda263-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950641.26685,
+              "container_status": {
+                "container_id": {
+                  "value": "bc30bc8d-ad9f-4a40-8b10-67453fd6c76b"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.2"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950642.26222,
+              "container_status": {
+                "container_id": {
+                  "value": "bc30bc8d-ad9f-4a40-8b10-67453fd6c76b"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.2"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.9bfb03e4-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950646.27473,
+              "container_status": {
+                "container_id": {
+                  "value": "a4067c1b-dd7d-4b83-b84e-77a8c656b5a7"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.3"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950647.26604,
+              "container_status": {
+                "container_id": {
+                  "value": "a4067c1b-dd7d-4b83-b84e-77a8c656b5a7"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.3"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.9ef8b385-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950651.27424,
+              "container_status": {
+                "container_id": {
+                  "value": "bbf88e9f-8c27-419a-9b98-1063176054e0"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.4"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950652.26605,
+              "container_status": {
+                "container_id": {
+                  "value": "bbf88e9f-8c27-419a-9b98-1063176054e0"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.4"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.a1f6d856-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950656.17461,
+              "container_status": {
+                "container_id": {
+                  "value": "5c608dad-8e2e-437f-b1b3-c4f2f321ee5d"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.5"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950657.16687,
+              "container_status": {
+                "container_id": {
+                  "value": "5c608dad-8e2e-437f-b1b3-c4f2f321ee5d"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.5"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.a4f4d617-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950661.37037,
+              "container_status": {
+                "container_id": {
+                  "value": "4c8a65a7-2906-4053-bf97-46771090ecc7"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.6"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950662.36164,
+              "container_status": {
+                "container_id": {
+                  "value": "4c8a65a7-2906-4053-bf97-46771090ecc7"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.6"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.a7f2fae8-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950666.17555,
+              "container_status": {
+                "container_id": {
+                  "value": "9cb18ff6-0b25-4641-b43c-5d91206cdc4d"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.7"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950667.16694,
+              "container_status": {
+                "container_id": {
+                  "value": "9cb18ff6-0b25-4641-b43c-5d91206cdc4d"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.7"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.aaf0d199-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950671.17344,
+              "container_status": {
+                "container_id": {
+                  "value": "058f687f-01cb-43a8-84bf-a7d58151d7ea"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.8"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950672.16505,
+              "container_status": {
+                "container_id": {
+                  "value": "058f687f-01cb-43a8-84bf-a7d58151d7ea"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.8"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.adeea84a-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950676.17486,
+              "container_status": {
+                "container_id": {
+                  "value": "c7bdbaee-349a-4d1f-9a27-81a96d6a295e"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.9"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950677.16649,
+              "container_status": {
+                "container_id": {
+                  "value": "c7bdbaee-349a-4d1f-9a27-81a96d6a295e"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.9"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.b0eccd1b-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950681.36977,
+              "container_status": {
+                "container_id": {
+                  "value": "9b534862-cd45-41ac-a1a7-dd8344ab0773"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.10"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950682.46121,
+              "container_status": {
+                "container_id": {
+                  "value": "9b534862-cd45-41ac-a1a7-dd8344ab0773"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.10"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.b3eacadc-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950686.47544,
+              "container_status": {
+                "container_id": {
+                  "value": "965018c8-65ed-41d8-b120-1f2f287c895e"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.11"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950687.36613,
+              "container_status": {
+                "container_id": {
+                  "value": "965018c8-65ed-41d8-b120-1f2f287c895e"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.11"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.b6e8c89d-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950691.37201,
+              "container_status": {
+                "container_id": {
+                  "value": "438a95db-e303-4cc6-a47a-e5dcfc039915"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.12"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950692.36005,
+              "container_status": {
+                "container_id": {
+                  "value": "438a95db-e303-4cc6-a47a-e5dcfc039915"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.12"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.b9e6c65e-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950696.27266,
+              "container_status": {
+                "container_id": {
+                  "value": "b5e50f9d-2fa7-4ac5-aef0-df4d50cf5ee8"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.13"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950697.26488,
+              "container_status": {
+                "container_id": {
+                  "value": "b5e50f9d-2fa7-4ac5-aef0-df4d50cf5ee8"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.13"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.bce4c41f-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950701.45959,
+              "container_status": {
+                "container_id": {
+                  "value": "645599e8-369d-482d-88ff-e6c7e4054551"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.14"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950702.4689,
+              "container_status": {
+                "container_id": {
+                  "value": "645599e8-369d-482d-88ff-e6c7e4054551"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.14"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.bfe29ad0-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950706.36709,
+              "container_status": {
+                "container_id": {
+                  "value": "5cfb56ce-90c9-43b0-9247-e37271982a3a"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.15"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950707.35952,
+              "container_status": {
+                "container_id": {
+                  "value": "5cfb56ce-90c9-43b0-9247-e37271982a3a"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.15"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.c2e0e6b1-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950711.47605,
+              "container_status": {
+                "container_id": {
+                  "value": "1629bef1-a0b1-4429-9d1a-6f9d6d3fbfb5"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.16"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950712.46844,
+              "container_status": {
+                "container_id": {
+                  "value": "1629bef1-a0b1-4429-9d1a-6f9d6d3fbfb5"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.16"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.c5de9652-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950716.3736,
+              "container_status": {
+                "container_id": {
+                  "value": "e4436a04-7c82-4874-8d7f-12972fa7113d"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.17"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950717.36547,
+              "container_status": {
+                "container_id": {
+                  "value": "e4436a04-7c82-4874-8d7f-12972fa7113d"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.17"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.c8dcbb23-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950721.37431,
+              "container_status": {
+                "container_id": {
+                  "value": "488db7e4-d713-4b91-96e2-5d1a3b7408b6"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.18"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950722.26553,
+              "container_status": {
+                "container_id": {
+                  "value": "488db7e4-d713-4b91-96e2-5d1a3b7408b6"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.18"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.cbda91d4-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950726.4756,
+              "container_status": {
+                "container_id": {
+                  "value": "d2422978-66f6-4fd1-9891-2d02d69492f1"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.19"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950727.46573,
+              "container_status": {
+                "container_id": {
+                  "value": "d2422978-66f6-4fd1-9891-2d02d69492f1"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.19"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.ced8b6a5-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950731.5752,
+              "container_status": {
+                "container_id": {
+                  "value": "f249319b-733e-4ad3-9a83-69f20709626d"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.20"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950732.56639,
+              "container_status": {
+                "container_id": {
+                  "value": "f249319b-733e-4ad3-9a83-69f20709626d"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.20"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.d1d66646-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950736.57591,
+              "container_status": {
+                "container_id": {
+                  "value": "ecc807c8-e3ff-4bea-9df5-7892dce13e4b"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.21"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950737.56779,
+              "container_status": {
+                "container_id": {
+                  "value": "ecc807c8-e3ff-4bea-9df5-7892dce13e4b"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.21"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.d4d48b17-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950741.4723,
+              "container_status": {
+                "container_id": {
+                  "value": "382290c8-bf73-4b04-8a14-6cb497cacbf1"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.22"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950742.46466,
+              "container_status": {
+                "container_id": {
+                  "value": "382290c8-bf73-4b04-8a14-6cb497cacbf1"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.22"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.d7d288d8-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950746.56362,
+              "container_status": {
+                "container_id": {
+                  "value": "e5bcd054-837d-4c59-8e4d-ea88e9cad7ca"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.23"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950747.5556,
+              "container_status": {
+                "container_id": {
+                  "value": "e5bcd054-837d-4c59-8e4d-ea88e9cad7ca"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.23"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.dad08699-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950751.66885,
+              "container_status": {
+                "container_id": {
+                  "value": "26b6802f-5413-4fc4-9caa-70592b2fa27e"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.24"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950752.66098,
+              "container_status": {
+                "container_id": {
+                  "value": "26b6802f-5413-4fc4-9caa-70592b2fa27e"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.24"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.ddce845a-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950756.67521,
+              "container_status": {
+                "container_id": {
+                  "value": "76f42634-019a-4896-96ed-2dac37ab624f"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.25"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950757.66781,
+              "container_status": {
+                "container_id": {
+                  "value": "76f42634-019a-4896-96ed-2dac37ab624f"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.25"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.e0cc821b-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950761.67109,
+              "container_status": {
+                "container_id": {
+                  "value": "6e9e40c6-4566-486c-a0ab-4ee0027093de"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.26"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950762.66249,
+              "container_status": {
+                "container_id": {
+                  "value": "6e9e40c6-4566-486c-a0ab-4ee0027093de"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.26"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.e3caa6ec-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950766.66167,
+              "container_status": {
+                "container_id": {
+                  "value": "a7a15f9c-947b-4f70-88c1-a682f364d99b"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.27"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950767.7511,
+              "container_status": {
+                "container_id": {
+                  "value": "a7a15f9c-947b-4f70-88c1-a682f364d99b"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.27"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.e6c87d9d-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950771.7693,
+              "container_status": {
+                "container_id": {
+                  "value": "4d17bb84-0267-41a9-86b5-fda70345dce5"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.28"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950772.77943,
+              "container_status": {
+                "container_id": {
+                  "value": "4d17bb84-0267-41a9-86b5-fda70345dce5"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.28"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.e9c6a26e-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950776.57199,
+              "container_status": {
+                "container_id": {
+                  "value": "e0d6d0c7-d33c-4697-bd08-8251ca5749f2"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.29"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950777.56341,
+              "container_status": {
+                "container_id": {
+                  "value": "e0d6d0c7-d33c-4697-bd08-8251ca5749f2"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.29"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.ecc4a02f-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950781.77404,
+              "container_status": {
+                "container_id": {
+                  "value": "75fd6b62-e744-4922-a3b3-d26404df0f56"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.30"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950782.76487,
+              "container_status": {
+                "container_id": {
+                  "value": "75fd6b62-e744-4922-a3b3-d26404df0f56"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.30"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.efc275e0-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950786.66805,
+              "container_status": {
+                "container_id": {
+                  "value": "aab8ccd6-ce31-4736-8a9e-0806a375482a"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.31"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950787.65808,
+              "container_status": {
+                "container_id": {
+                  "value": "aab8ccd6-ce31-4736-8a9e-0806a375482a"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.31"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.f2c073a1-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950791.76647,
+              "container_status": {
+                "container_id": {
+                  "value": "d07f51dc-b3ec-408a-97af-e42ce3f191f0"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.32"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950792.75671,
+              "container_status": {
+                "container_id": {
+                  "value": "d07f51dc-b3ec-408a-97af-e42ce3f191f0"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.32"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.f5be7162-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950796.67289,
+              "container_status": {
+                "container_id": {
+                  "value": "78353122-9364-4ada-8b96-55258c47b362"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.33"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950797.6648,
+              "container_status": {
+                "container_id": {
+                  "value": "78353122-9364-4ada-8b96-55258c47b362"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.33"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.f8bc6f23-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950801.6737,
+              "container_status": {
+                "container_id": {
+                  "value": "c3c4c7d1-e898-4bf7-996e-d0d6f36a68f5"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.34"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950802.66531,
+              "container_status": {
+                "container_id": {
+                  "value": "c3c4c7d1-e898-4bf7-996e-d0d6f36a68f5"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.34"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.fbba6ce4-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950806.66839,
+              "container_status": {
+                "container_id": {
+                  "value": "756b1bdf-4caf-4985-910c-906da0c10c55"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.35"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950807.65923,
+              "container_status": {
+                "container_id": {
+                  "value": "756b1bdf-4caf-4985-910c-906da0c10c55"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.35"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.feb86aa5-cd2d-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950811.87263,
+              "container_status": {
+                "container_id": {
+                  "value": "23b25076-8146-41d7-bb6d-82f6563195fe"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.36"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950812.86093,
+              "container_status": {
+                "container_id": {
+                  "value": "23b25076-8146-41d7-bb6d-82f6563195fe"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.36"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.01c2c476-cd2e-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950816.96658,
+              "container_status": {
+                "container_id": {
+                  "value": "9c023e09-fca1-4c2f-a9ea-9bd0a59f49a8"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.37"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950818.05865,
+              "container_status": {
+                "container_id": {
+                  "value": "9c023e09-fca1-4c2f-a9ea-9bd0a59f49a8"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.37"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.052d1897-cd2e-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950822.67761,
+              "container_status": {
+                "container_id": {
+                  "value": "d81bab1f-b964-46c7-9f93-5b6b62e4a31d"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.38"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950823.66886,
+              "container_status": {
+                "container_id": {
+                  "value": "d81bab1f-b964-46c7-9f93-5b6b62e4a31d"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.38"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.08e20a48-cd2e-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950828.97299,
+              "container_status": {
+                "container_id": {
+                  "value": "76001486-fecc-4b36-bb0a-a68f9d3c472c"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.39"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950829.96296,
+              "container_status": {
+                "container_id": {
+                  "value": "76001486-fecc-4b36-bb0a-a68f9d3c472c"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.39"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.0d0b1a89-cd2e-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950835.87219,
+              "container_status": {
+                "container_id": {
+                  "value": "c9af834b-8893-45f7-9f52-aedc434fd89b"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.40"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950836.86431,
+              "container_status": {
+                "container_id": {
+                  "value": "c9af834b-8893-45f7-9f52-aedc434fd89b"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.40"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.11a5632a-cd2e-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950843.57706,
+              "container_status": {
+                "container_id": {
+                  "value": "a4bb1161-ec26-4f00-b857-8f52b9bd54ea"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.41"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950844.56818,
+              "container_status": {
+                "container_id": {
+                  "value": "a4bb1161-ec26-4f00-b857-8f52b9bd54ea"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.41"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.14a312cb-cd2e-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950848.67453,
+              "container_status": {
+                "container_id": {
+                  "value": "65d90d24-bfc0-409d-83c7-05a6554f09b7"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.42"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950849.66514,
+              "container_status": {
+                "container_id": {
+                  "value": "65d90d24-bfc0-409d-83c7-05a6554f09b7"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.42"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.17a1108c-cd2e-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950853.57318,
+              "container_status": {
+                "container_id": {
+                  "value": "62c44894-e6ff-4150-acb2-17d7a995cfba"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.43"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950854.5642,
+              "container_status": {
+                "container_id": {
+                  "value": "62c44894-e6ff-4150-acb2-17d7a995cfba"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.43"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.1a9f5c6d-cd2e-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950858.67031,
+              "container_status": {
+                "container_id": {
+                  "value": "563d81b1-0b8b-4603-bf9b-a65cc9e65689"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.44"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950859.66162,
+              "container_status": {
+                "container_id": {
+                  "value": "563d81b1-0b8b-4603-bf9b-a65cc9e65689"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.44"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.1d9d0c0e-cd2e-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950863.67495,
+              "container_status": {
+                "container_id": {
+                  "value": "48a3436f-a9e7-4b36-9be7-7f44a072a5eb"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.45"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950864.56709,
+              "container_status": {
+                "container_id": {
+                  "value": "48a3436f-a9e7-4b36-9be7-7f44a072a5eb"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.45"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.209b09cf-cd2e-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950868.76879,
+              "container_status": {
+                "container_id": {
+                  "value": "a5fc754d-2273-4352-9964-588040327754"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.46"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950869.761,
+              "container_status": {
+                "container_id": {
+                  "value": "a5fc754d-2273-4352-9964-588040327754"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.46"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.23990790-cd2e-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950873.77565,
+              "container_status": {
+                "container_id": {
+                  "value": "0e0e7dc6-a798-410d-bc21-5198ad12e130"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.47"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950874.76578,
+              "container_status": {
+                "container_id": {
+                  "value": "0e0e7dc6-a798-410d-bc21-5198ad12e130"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.47"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.26970551-cd2e-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950878.57281,
+              "container_status": {
+                "container_id": {
+                  "value": "1334520d-8c36-4b0e-97ac-af4cbe231eb8"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.48"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950879.56437,
+              "container_status": {
+                "container_id": {
+                  "value": "1334520d-8c36-4b0e-97ac-af4cbe231eb8"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.48"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.29950312-cd2e-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950883.67488,
+              "container_status": {
+                "container_id": {
+                  "value": "1f5c97bb-04b5-4a18-bd55-f87e73ec6ab8"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.49"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950884.66715,
+              "container_status": {
+                "container_id": {
+                  "value": "1f5c97bb-04b5-4a18-bd55-f87e73ec6ab8"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.49"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.2c948773-cd2e-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950888.6773,
+              "container_status": {
+                "container_id": {
+                  "value": "60f3c647-9412-4b6a-870c-d62bfaa32443"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.50"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950889.66851,
+              "container_status": {
+                "container_id": {
+                  "value": "60f3c647-9412-4b6a-870c-d62bfaa32443"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.50"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.2f928534-cd2e-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950893.87143,
+              "container_status": {
+                "container_id": {
+                  "value": "7a0e7482-a440-490e-8ed6-851bb1e8f832"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.51"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950894.86352,
+              "container_status": {
+                "container_id": {
+                  "value": "7a0e7482-a440-490e-8ed6-851bb1e8f832"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.51"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.329082f5-cd2e-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950898.95959,
+              "container_status": {
+                "container_id": {
+                  "value": "a16ad0bd-a7e5-4fe4-95dc-ce16f0445847"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.52"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950899.9699,
+              "container_status": {
+                "container_id": {
+                  "value": "a16ad0bd-a7e5-4fe4-95dc-ce16f0445847"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.52"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.358e80b6-cd2e-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950903.77693,
+              "container_status": {
+                "container_id": {
+                  "value": "96fcd444-25d7-4d39-a9d5-94749943c7c3"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.53"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950904.76825,
+              "container_status": {
+                "container_id": {
+                  "value": "96fcd444-25d7-4d39-a9d5-94749943c7c3"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.53"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.388c7e77-cd2e-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950908.87356,
+              "container_status": {
+                "container_id": {
+                  "value": "b266cf11-e548-486a-b2f4-052025d33a11"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.54"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950909.86488,
+              "container_status": {
+                "container_id": {
+                  "value": "b266cf11-e548-486a-b2f4-052025d33a11"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.54"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.3b8aa348-cd2e-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950913.86932,
+              "container_status": {
+                "container_id": {
+                  "value": "4b675182-53e7-4b8d-a594-ccad23b133bb"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.55"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950914.8612,
+              "container_status": {
+                "container_id": {
+                  "value": "4b675182-53e7-4b8d-a594-ccad23b133bb"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.55"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.3e8879f9-cd2e-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950918.77468,
+              "container_status": {
+                "container_id": {
+                  "value": "db430e4f-d5f9-45c6-9796-f56f62031381"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.56"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950919.76706,
+              "container_status": {
+                "container_id": {
+                  "value": "db430e4f-d5f9-45c6-9796-f56f62031381"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.56"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet2.418677ba-cd2e-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FAILED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950923.96996,
+              "container_status": {
+                "container_id": {
+                  "value": "29229d92-a781-48c4-839d-0afeaa86942d"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.57"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FAILED",
+              "timestamp": 1482950924.9621,
+              "container_status": {
+                "container_id": {
+                  "value": "29229d92-a781-48c4-839d-0afeaa86942d"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.57"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "wet.7d8fe6f4-cd27-11e6-a590-fea80569c9e0",
+          "name": "wet",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FINISHED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1,
+            "ports": "[1891-1891]"
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482948033.15099,
+              "container_status": {
+                "container_id": {
+                  "value": "5e056911-9bc8-4c57-85e3-6e8c5c6751cf"
+                },
+                "network_infos": [
+                  {
+                    "ip_addresses": [
+                      {
+                        "ip_address": "10.0.0.182"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "healthy": true
+            },
+            {
+              "state": "TASK_KILLING",
+              "timestamp": 1482960720.84942,
+              "container_status": {
+                "container_id": {
+                  "value": "5e056911-9bc8-4c57-85e3-6e8c5c6751cf"
+                },
+                "network_infos": [
+                  {
+                    "ip_addresses": [
+                      {
+                        "ip_address": "10.0.0.182"
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FINISHED",
+              "timestamp": 1482960721.05005,
+              "container_status": {
+                "container_id": {
+                  "value": "5e056911-9bc8-4c57-85e3-6e8c5c6751cf"
+                },
+                "network_infos": [
+                  {
+                    "ip_addresses": [
+                      {
+                        "ip_address": "10.0.0.182"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet",
+            "ports": {
+              "ports": [
+                {
+                  "number": 1891,
+                  "name": "test",
+                  "protocol": "tcp"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "wet2.4484757b-cd2e-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FINISHED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482950928.7732,
+              "container_status": {
+                "container_id": {
+                  "value": "76314c7b-b97e-4043-b00c-c8ab14c9d056"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.58"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_KILLING",
+              "timestamp": 1482960724.21241,
+              "container_status": {
+                "container_id": {
+                  "value": "76314c7b-b97e-4043-b00c-c8ab14c9d056"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.58"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FINISHED",
+              "timestamp": 1482960724.36048,
+              "container_status": {
+                "container_id": {
+                  "value": "76314c7b-b97e-4043-b00c-c8ab14c9d056"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.58"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "dawker.c28ecc3c-cd43-11e6-b6f5-fea80569c9e0",
+          "name": "dawker",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_KILLED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 128.0,
+            "gpus": 0.0,
+            "cpus": 0.001,
+            "ports": "[22770-22770]"
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482960168.90482,
+              "labels": [
+                {
+                  "key": "Docker.NetworkSettings.IPAddress",
+                  "value": "172.17.0.2"
+                }
+              ],
+              "container_status": {
+                "container_id": {
+                  "value": "6fefac2a-447a-4d0b-aecd-0a59d63718bc"
+                },
+                "network_infos": [
+                  {
+                    "ip_addresses": [
+                      {
+                        "ip_address": "172.17.0.2"
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_KILLING",
+              "timestamp": 1482961625.98493,
+              "container_status": {
+                "container_id": {
+                  "value": "6fefac2a-447a-4d0b-aecd-0a59d63718bc"
+                },
+                "network_infos": [
+                  {
+                    "ip_addresses": [
+                      {
+                        "ip_address": "10.0.0.182"
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_KILLED",
+              "timestamp": 1482961646.54701,
+              "container_status": {
+                "container_id": {
+                  "value": "6fefac2a-447a-4d0b-aecd-0a59d63718bc"
+                },
+                "network_infos": [
+                  {
+                    "ip_addresses": [
+                      {
+                        "ip_address": "10.0.0.182"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "dawker",
+            "ports": {
+              "ports": [
+                {
+                  "number": 22770,
+                  "name": "test",
+                  "protocol": "tcp",
+                  "labels": {
+                    "labels": [
+                      {
+                        "key": "network-scope",
+                        "value": "host"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "container": {
+            "type": "DOCKER",
+            "docker": {
+              "image": "ubuntu:latest",
+              "network": "BRIDGE",
+              "port_mappings": [
+                {
+                  "host_port": 22770,
+                  "container_port": 22770,
+                  "protocol": "tcp"
+                }
+              ],
+              "privileged": false,
+              "force_pull_image": false
+            }
+          }
+        },
+        {
+          "id": "wet2.66f8eafd-cd47-11e6-b6f5-fea80569c9e0",
+          "name": "wet2",
+          "framework_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-0000",
+          "executor_id": "",
+          "slave_id": "202a8fb5-b0d0-4482-b72a-38f42b7a6c27-S1",
+          "state": "TASK_FINISHED",
+          "resources": {
+            "disk": 0.0,
+            "mem": 32.0,
+            "gpus": 0.0,
+            "cpus": 0.1
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1482961724.16911,
+              "container_status": {
+                "container_id": {
+                  "value": "4b9ff2f0-c6b8-434f-a46b-ce0a2cffa646"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.59"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_KILLING",
+              "timestamp": 1482970244.67104,
+              "container_status": {
+                "container_id": {
+                  "value": "4b9ff2f0-c6b8-434f-a46b-ce0a2cffa646"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.59"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            },
+            {
+              "state": "TASK_FINISHED",
+              "timestamp": 1482970244.78455,
+              "container_status": {
+                "container_id": {
+                  "value": "4b9ff2f0-c6b8-434f-a46b-ce0a2cffa646"
+                },
+                "network_infos": [
+                  {
+                    "labels": [
+
+                    ],
+                    "ip_addresses": [
+                      {
+                        "protocol": "IPv4",
+                        "ip_address": "9.0.2.59"
+                      }
+                    ],
+                    "name": "dcos"
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "wet2",
+            "ports": {
+
+            }
+          },
+          "container": {
+            "type": "MESOS",
+            "mesos": {
+
+            },
+            "network_infos": [
+              {
+                "ip_addresses": [
+                  {
+
+                  }
+                ],
+                "name": "dcos",
+                "labels": {
+
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "offers": [
+
+      ],
+      "executors": [
+
+      ]
+    }
+  ],
+  "completed_frameworks": [
+
+  ],
+  "orphan_tasks": [
+
+  ],
+  "unregistered_frameworks": [
+
+  ]
+}

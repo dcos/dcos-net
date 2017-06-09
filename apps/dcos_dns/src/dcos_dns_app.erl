@@ -1,5 +1,4 @@
 -module(dcos_dns_app).
--author("Christopher Meiklejohn <christopher.meiklejohn@gmail.com>").
 
 -behaviour(application).
 -export([start/2, stop/1]).

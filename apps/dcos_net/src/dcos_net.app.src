@@ -1,0 +1,22 @@
+{application, dcos_net,
+ [{description, "An OTP application"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {mod, {dcos_net_app, []}},
+  {applications,
+   [kernel,
+    stdlib,
+    dcos_rest,
+    dcos_dns,
+    dcos_overlay,
+    dcos_l4lb,
+    lashup,
+    lager
+   ]},
+  {env,[]},
+  {modules, []},
+
+  {contributors, []},
+  {licenses, []},
+  {links, []}
+ ]}.
