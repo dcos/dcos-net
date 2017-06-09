@@ -2,8 +2,7 @@
 -author("Christopher Meiklejohn <christopher.meiklejohn@gmail.com>").
 
 %% common_test callbacks
--export([%% suite/0,
-         init_per_suite/1,
+-export([init_per_suite/1,
          end_per_suite/1,
          init_per_testcase/2,
          end_per_testcase/2,
@@ -36,21 +35,25 @@
 %% ===================================================================
 
 init_per_suite(_Config) ->
-    application:load(erldns),
-    {ok, [Terms]} = file:consult(?CONFIG),
-    lists:foreach(fun({App, Environment}) ->
-                        lists:foreach(fun({Par, Val}) ->
-                                            ok = application:set_env(App, Par, Val)
-                        end, Environment)
-                  end, Terms),
-    ok = application:set_env(dcos_dns, handler_limit, 16),
-    ok = application:set_env(dcos_dns, mesos_resolvers, [{{127, 0, 0, 1}, 62053}]),
+    Workers = [
+        dcos_dns_key_mgr,
+        dcos_dns_poll_server,
+        dcos_dns_listener,
+        dcos_dns_watchdog
+    ],
+    meck_mods(Workers),
     {ok, _} = application:ensure_all_started(dcos_dns),
+    meck:unload(Workers),
     generate_fixture_mesos_zone(),
     generate_thisdcos_directory_zone(),
     _Config.
 
 end_per_suite(_Config) ->
+    [ begin
+        ok = application:stop(App),
+        ok = application:unload(App)
+    end || {App, _, _} <- application:which_applications(),
+    not lists:member(App, [stdlib, kernel]) ],
     _Config.
 
 init_per_testcase(_Case, _Config) ->
@@ -70,6 +73,12 @@ all() ->
      http_records_test,
      overload_test
     ].
+
+meck_mods(Mods) when is_list(Mods) ->
+    lists:foreach(fun meck_mods/1, Mods);
+meck_mods(Mod) ->
+    meck:new(Mod, [non_strict]),
+    meck:expect(Mod, start_link, fun () -> {ok, self()} end).
 
 generate_fixture_mesos_zone() ->
     Records = [

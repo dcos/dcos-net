@@ -1,7 +1,7 @@
 -module(dcos_rest_vips_handler).
 
 -export([
-    init/2,
+    init/3,
     allowed_methods/2,
     content_types_provided/2,
     process/2
@@ -9,8 +9,8 @@
 
 -include_lib("dcos_l4lb/include/dcos_l4lb.hrl").
 
-init(Req, Opts) ->
-    {cowboy_rest, Req, Opts}.
+init(_Transport, Req, Opts) ->
+    {upgrade, protocol, cowboy_rest, Req, Opts}.
 
 allowed_methods(Req, State) ->
     {[<<"GET">>], Req, State}.

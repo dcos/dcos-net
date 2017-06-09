@@ -14,6 +14,7 @@
                   lashup,
                   telemetry,
                   dns,
+                  erldns,
                   mesos_state,
                   ip_vs_conn,
                   tcp_metrics,

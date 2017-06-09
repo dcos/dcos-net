@@ -20,6 +20,8 @@
          configure_mnesia_dir/2,
          dcos_overlay_test/1]).
 
+-export([create_data/1]).
+
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
 -include_lib("mesos_state/include/mesos_state_overlay_pb.hrl").
@@ -27,9 +29,6 @@
 -define(AGENT_COUNT, 3).
 -define(MASTER_COUNT, 1).
 -define(NUM_OF_TRIES, 10).
--define(OVERLAY_MODULE_PORT, 5051).
--define(OVERLAY_END_POINT, "/overlay-agent/overlay").
--define(COWBOY_LISTENER, dcos_overlay_mockhttp).
 -define(outputdir(BaseDir), filename:join([BaseDir, "output"])).
 -define(lashupdir(BaseDir), filename:join([BaseDir, "lashup"])).
 -define(mnesiadir(BaseDir), filename:join([BaseDir, "mnesia"])).
@@ -42,18 +41,9 @@ init_per_suite(Config) ->
     {ok, _} -> ok;
     {error, {already_started, _}} -> ok
   end,
-  {ok, _} = application:ensure_all_started(cowboy),
-  setup_cowboy(?OVERLAY_MODULE_PORT),
   Config.
 
-setup_cowboy(Port) ->
-  Paths = [{?OVERLAY_END_POINT, dcos_overlay_mockhttp_frontend, [overlay]}],
-  Opts = [{env, [{dispatch, cowboy_router:compile([{'_', Paths}])}]}],
-  {ok, _} = cowboy:start_http(?COWBOY_LISTENER, 100, [{port, Port}], Opts).
-
 end_per_suite(Config) ->
-  ok = cowboy:stop_listener(?COWBOY_LISTENER),
-  ok = application:stop(cowboy),
   net_kernel:stop(),
   Config.
 
@@ -148,6 +138,16 @@ start_nodes(Config) ->
   rpc:multicall(Nodes, code, add_pathsa, [CodePath]),
   rpc:multicall(Nodes, application, set_env, [lager, handlers, Handlers, [{persistent, true}]]),
   rpc:multicall(Nodes, application, ensure_all_started, [lager]),
+  rpc:multicall(Nodes, meck, new, [httpc, [no_link, passthrough]]),
+  rpc:multicall(Nodes, meck, expect, [httpc, request,
+    fun (get, {_, Headers}, _, _) ->
+        Node = proplists:get_value("node", Headers),
+        io:format(user, "Node: ~p", [Node]),
+        Data = ?MODULE:create_data(list_to_binary(Node)),
+        BinData = mesos_state_overlay_pb:encode_msg(Data),
+        {ok, {{"HTTP/1.1", 200, "OK"}, [], BinData}}
+    end
+  ]),
   configure_output_dir(Nodes, Config),
   configure_lashup_dir(Nodes, Config),
   lists:foreach(fun(Node) -> configure_mnesia_dir(Node, Config) end, Nodes),
@@ -274,3 +274,39 @@ get_node_data(NodeNumber) ->
   Vtep_mac = [16#70, 16#B3, 16#D5, 16#80, 0, NodeNumber],
   Subnet = {9,0,NodeNumber,0},
   [AgentIP, "vtep1024", Vtep_ip, Vtep_mac, Subnet, 24].
+
+create_data(Agent) ->
+    Node = integer_to_binary(parse_node(Agent)),
+    HexNode = integer_to_binary(binary_to_integer(Node, 16)),
+    #mesos_state_agentinfo{
+        ip = <<"10.0.0.", Node/binary>>,
+        overlays = [
+            #mesos_state_agentoverlayinfo{
+                info = #mesos_state_overlayinfo{
+                    name = <<"dcos">>,
+                    prefix = 24,
+                    subnet = <<"9.0.0.0/8">>
+                },
+                subnet = <<"9.0.", Node/binary, ".0/24">>,
+                backend = #mesos_state_backendinfo{
+                    vxlan = #mesos_state_vxlaninfo{
+                        vni = 1024,
+                        vtep_ip = <<"44.128.0.", Node/binary, "/20">>,
+                        vtep_mac = <<"70:b3:d5:80:00:", HexNode/binary>>,
+                        vtep_name = <<"vtep1024">>
+                    }
+                },
+                mesos_bridge = #mesos_state_bridgeinfo{
+                    name = <<"m-dcos">>,
+                    ip = <<"9.0.", Node/binary, ".0/25">>
+                },
+                docker_bridge = #mesos_state_bridgeinfo{
+                    name = <<"d-dcos">>,
+                    ip = <<"9.0.", Node/binary, ".128/25">>
+                },
+                state = #'mesos_state_agentoverlayinfo.state'{
+                    status = 'STATUS_OK'
+                }
+            }
+        ]
+    }.
