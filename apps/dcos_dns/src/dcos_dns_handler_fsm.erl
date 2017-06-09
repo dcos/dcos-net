@@ -227,7 +227,12 @@ resolve(Parent, Upstream, State) ->
             erlang:raise(Class, Reason, StackTrace)
     end.
 
-do_resolve(Parent, Upstream = {UpstreamIP, UpstreamPort}, #state{data = Data, from = {dcos_dns_udp_server, _}}) ->
+do_resolve(Parent, Upstream, #state{data = Data, from = {dcos_dns_udp_server, _}}) ->
+    do_udp_resolve(Parent, Upstream, Data);
+do_resolve(Parent, Upstream, #state{data = Data, from = {dcos_dns_tcp_handler, _}}) ->
+    do_tcp_resolve(Parent, Upstream, Data).
+
+do_udp_resolve(Parent, Upstream = {UpstreamIP, UpstreamPort}, Data) ->
     {ok, Socket} = gen_udp:open(0, [{reuseaddr, true}, {active, once}, binary]),
     gen_udp:send(Socket, UpstreamIP, UpstreamPort, Data),
     MonRef = erlang:monitor(process, Parent),
@@ -242,10 +247,9 @@ do_resolve(Parent, Upstream = {UpstreamIP, UpstreamPort}, #state{data = Data, fr
         end
     after
         gen_udp:close(Socket)
-    end;
+    end.
 
-%% @private
-do_resolve(Parent, Upstream = {UpstreamIP, UpstreamPort}, #state{data = Data, from = {dcos_dns_tcp_handler, _}}) ->
+do_tcp_resolve(Parent, Upstream = {UpstreamIP, UpstreamPort}, Data) ->
     TCPOptions = [{active, once}, binary, {packet, 2}, {send_timeout, 1000}],
     {ok, Socket} = gen_tcp:connect(UpstreamIP, UpstreamPort, TCPOptions, ?TIMEOUT),
     ok = gen_tcp:send(Socket, Data),

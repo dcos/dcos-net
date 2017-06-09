@@ -54,19 +54,19 @@ lookup_failure2(Config) ->
   ok.
 
 lookup_failure3(Config) ->
-  {ok, _} = lashup_kv:request_op(?VIPS_KEY2, {update, [{update,
-                                                       {{tcp, {name, {<<"de8b9dc86">>, <<"marathon">>}}, 6000},
-                                                        riak_dt_orswot},
-                                                       {add, {{10, 0, 1, 31}, {{10, 0, 1, 31}, 12998}}}}]}),
+  {ok, _} = update_de8b9dc86_marathon(),
   lookup_failure(Config),
   ok.
 
 lookup_vip(_Config) ->
-  {ok, _} = lashup_kv:request_op(?VIPS_KEY2, {update, [{update,
-                                                       {{tcp, {name, {<<"de8b9dc86">>, <<"marathon">>}}, 6000},
-                                                        riak_dt_orswot},
-                                                       {add, {{10, 0, 1, 31}, {{10, 0, 1, 31}, 12998}}}}]}),
+  {ok, _} = update_de8b9dc86_marathon(),
   [] = dcos_l4lb_lashup_vip_listener:lookup_vips([]),
   [{ip, IP}] = dcos_l4lb_lashup_vip_listener:lookup_vips([{name, <<"de8b9dc86.marathon">>}]),
   [{name, <<"de8b9dc86.marathon">>}] = dcos_l4lb_lashup_vip_listener:lookup_vips([{ip, IP}]),
   ok.
+
+update_de8b9dc86_marathon() ->
+  lashup_kv:request_op(?VIPS_KEY2, {update, [{update,
+    {{tcp, {name, {<<"de8b9dc86">>, <<"marathon">>}}, 6000}, riak_dt_orswot},
+    {add, {{10, 0, 1, 31}, {{10, 0, 1, 31}, 12998}}}
+  }]}).
