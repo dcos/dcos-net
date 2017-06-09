@@ -30,6 +30,7 @@
 %%====================================================================
 
 start(_StartType, _StartArgs) ->
+    dcos_net_app:load_config_files(dcos_dns),
     maybe_load_json_config(), %% Maybe load the relevant DCOS configuration
     Ret = dcos_dns_sup:start_link(),
     maybe_start_tcp_listener(),
@@ -151,7 +152,7 @@ start_http_listener(IP) ->
 %                                         ["4.4.4.4", 53]]]]
 %  }
 maybe_load_json_config() ->
-    case file:read_file("/opt/mesosphere/etc/spartan.json") of
+    case file:read_file("/opt/mesosphere/etc/dcos-dns.json") of
         {ok, FileBin} ->
             load_json_config(FileBin);
         _ ->

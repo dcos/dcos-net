@@ -6,29 +6,22 @@
 all() -> [test_normalize].
 
 init_per_suite(Config) ->
-  %% this might help, might not...
-  os:cmd(os:find_executable("epmd") ++ " -daemon"),
-  {ok, Hostname} = inet:gethostname(),
-  case net_kernel:start([list_to_atom("runner@" ++ Hostname), shortnames]) of
-    {ok, _} -> ok;
-    {error, {already_started, _}} -> ok
-  end,
-  Config.
+    application:load(dcos_l4lb),
+    PrivateDir = ?config(priv_dir, Config),
+    application:set_env(dcos_l4lb, agent_dets_basedir, PrivateDir),
+    {ok, _} = application:ensure_all_started(dcos_l4lb),
+    Config.
 
 end_per_suite(Config) ->
-  net_kernel:stop(),
-  Config.
+    [ begin
+        ok = application:stop(App),
+        ok = application:unload(App)
+    end || {App, _, _} <- application:which_applications(),
+    not lists:member(App, [stdlib, kernel]) ],
+    os:cmd("rm -rf Mnesia.*"),
+    Config.
 
-test_normalize(Config) ->
-      PrivateDir = ?config(priv_dir, Config),
-      application:set_env(dcos_l4lb, agent_dets_basedir, PrivateDir),
-      case os:cmd("id -u") of
-        "0\n" ->
-          ok;
-        _ ->
-          application:set_env(dcos_l4lb, enable_networking, false)
-      end,
-      {ok, _} = application:ensure_all_started(dcos_l4lb),
+test_normalize(_Config) ->
     Normalized = dcos_l4lb_mgr:normalize_services_and_dests({[{address_family, 2},
       {protocol, 6},
       {address, <<11, 197, 245, 133, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>>},
@@ -107,7 +100,4 @@ test_normalize(Config) ->
     Normalized = {{tcp, {11, 197, 245, 133}, 9042},
                   [{{10, 10, 0, 83}, 9042},
                    {{10, 10, 0, 248}, 9042},
-                   {{10, 10, 0, 253}, 9042}]},
-    ok = application:stop(dcos_l4lb),
-    ok = application:stop(lashup),
-    ok = application:stop(mnesia).
+                   {{10, 10, 0, 253}, 9042}]}.

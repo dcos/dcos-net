@@ -14,33 +14,25 @@ all() ->
    lookup_failure3].
 
 init_per_suite(Config) ->
-  %% this might help, might not...
-  os:cmd(os:find_executable("epmd") ++ " -daemon"),
-  {ok, Hostname} = inet:gethostname(),
-  case net_kernel:start([list_to_atom("runner@" ++ Hostname), shortnames]) of
-    {ok, _} -> ok;
-    {error, {already_started, _}} -> ok
-  end,
-  Config.
+    Config.
 
 end_per_suite(Config) ->
-  net_kernel:stop(),
-  Config.
+    Config.
 
 init_per_testcase(test_uninitalized_table, Config) -> Config;
 init_per_testcase(_, Config) ->
-  meck:new(dcos_l4lb_lashup_vip_listener, [passthrough]),
-  meck:expect(dcos_l4lb_lashup_vip_listener, setup_monitor, fun() -> ok end),
-  application:set_env(dcos_l4lb, enable_networking, false),
-  {ok, _} = application:ensure_all_started(dcos_l4lb),
-  Config.
+    {ok, _} = application:ensure_all_started(dcos_l4lb),
+    Config.
 
 end_per_testcase(test_uninitalized_table, _Config) -> ok;
 end_per_testcase(_, _Config) ->
-  meck:unload(dcos_l4lb_lashup_vip_listener),
-  ok = application:stop(dcos_l4lb),
-  ok = application:stop(lashup),
-  ok = application:stop(mnesia).
+    [ begin
+        ok = application:stop(App),
+        ok = application:unload(App)
+    end || {App, _, _} <- application:which_applications(),
+    not lists:member(App, [stdlib, kernel]) ],
+    os:cmd("rm -rf Mnesia.*"),
+    ok.
 
 test_uninitalized_table(_Config) ->
   IP = {10, 0, 1, 10},

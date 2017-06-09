@@ -1,4 +1,4 @@
-PACKAGE         ?= navstar
+PACKAGE         ?= dcos-net
 VERSION         ?= $(shell git describe --tags)
 BASE_DIR         = $(shell pwd)
 ERLANG_BIN       = $(shell dirname $(shell which erl))
