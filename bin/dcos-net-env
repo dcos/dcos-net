@@ -1,6 +1,7 @@
 #!/bin/bash
 
-APP_NAME=navstar
+APP_NAME=dcos-net
+NODE_NAME=navstar
 
 function valid_ip()
 {
@@ -43,7 +44,7 @@ if [ -x /opt/mesosphere/bin/detect_ip ]; then
 else
     IP=$(ip r g 192.88.99.0 | grep -Po 'src \K[\d.]+')
 fi
-NAME=${APP_NAME}@${IP}
+NAME=${NODE_NAME}@${IP}
 SCRIPT=$(readlink -f $0 || true)
 [ -z $SCRIPT ] && SCRIPT=$0
 SCRIPT_DIR="$(cd `dirname "$SCRIPT"` && pwd -P)"

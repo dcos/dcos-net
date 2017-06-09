@@ -1,9 +1,1 @@
-navstar
-=====
-
-An OTP application
-
-Build
------
-
-    $ rebar3 compile
+# dcos-net

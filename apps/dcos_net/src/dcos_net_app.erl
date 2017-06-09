@@ -7,7 +7,7 @@
 
 -behaviour(application).
 
--define(DEFAULT_CONFIG_DIR, "/opt/mesosphere/etc/navstar.config.d").
+-define(DEFAULT_CONFIG_DIR, "/opt/mesosphere/etc/dcos-net.config.d").
 -define(MASTERS_KEY, {masters, riak_dt_orswot}).
 
 %% Application callbacks
@@ -35,7 +35,7 @@ stop(_State) ->
 %%====================================================================
 
 maybe_add_master() ->
-    case application:get_env(navstar, is_master, false) of
+    case application:get_env(dcos_net, is_master, false) of
         false ->
             ok;
         true ->

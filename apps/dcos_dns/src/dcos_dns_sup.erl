@@ -2,13 +2,11 @@
 -behaviour(supervisor).
 -export([start_link/0, init/1]).
 
--include("dcos_dns.hrl").
-
 -include_lib("dns/include/dns_terms.hrl").
 -include_lib("dns/include/dns_records.hrl").
 
 start_link() ->
-    supervisor:start_link({local, ?SERVER}, ?MODULE, []).
+    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
     ZkRecordServer = {dcos_dns_zk_record_server,

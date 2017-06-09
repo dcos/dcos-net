@@ -10,30 +10,23 @@ all() ->
   [test_gen_server, test_handle_poll_state].
 
 init_per_suite(Config) ->
-  %% this might help, might not...
-  os:cmd(os:find_executable("epmd") ++ " -daemon"),
-  {ok, Hostname} = inet:gethostname(),
-  case net_kernel:start([list_to_atom("runner@" ++ Hostname), shortnames]) of
-    {ok, _} -> ok;
-    {error, {already_started, _}} -> ok
-  end,
-  os:cmd("rm -rf Mnesia.runner@" ++ Hostname ++ "/*"),
-  os:cmd("rm -rf runner@" ++ Hostname ++ "/*"),
-  Config.
+    Config.
 
 end_per_suite(Config) ->
-  net_kernel:stop(),
-  Config.
+    Config.
 
 init_per_testcase(_, Config) ->
-  application:set_env(dcos_l4lb, enable_networking, false),
-  {ok, _} = application:ensure_all_started(dcos_l4lb),
-  Config.
+    {ok, _} = application:ensure_all_started(dcos_l4lb),
+    Config.
 
 end_per_testcase(_, _Config) ->
-  ok = application:stop(dcos_l4lb),
-  ok = application:stop(lashup),
-  ok = application:stop(mnesia).
+    [ begin
+        ok = application:stop(App),
+        ok = application:unload(App)
+    end || {App, _, _} <- application:which_applications(),
+    not lists:member(App, [stdlib, kernel]) ],
+    os:cmd("rm -rf Mnesia.*"),
+    ok.
 
 test_gen_server(_Config) ->
     hello = erlang:send(dcos_l4lb_mesos_poller, hello),

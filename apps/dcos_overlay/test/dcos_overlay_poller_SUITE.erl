@@ -39,7 +39,7 @@ init_per_testcase(TestCaseName, Config) ->
     meck:new(httpc),
     meck:expect(httpc, request, fun(get, _, _, _) ->
         Node = <<"master1@nohost">>,
-        Data = dcos_overlay_mockhttp_frontend:create_data(Node),
+        Data = dcos_overlay_SUITE:create_data(Node),
         BinData = mesos_state_overlay_pb:encode_msg(Data),
         {ok, {{"HTTP/1.1", 200, "OK"}, [], BinData}}
     end),

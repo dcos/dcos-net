@@ -14,35 +14,26 @@ all() -> [test_init,
           test_gen_server].
 
 init_per_suite(Config) ->
-  %% this might help, might not...
-  os:cmd(os:find_executable("epmd") ++ " -daemon"),
-  {ok, Hostname} = inet:gethostname(),
-  case net_kernel:start([list_to_atom("runner@" ++ Hostname), shortnames]) of
-    {ok, _} -> ok;
-    {error, {already_started, _}} -> ok
-  end,
-  Config.
+    Config.
 
 end_per_suite(Config) ->
-  net_kernel:stop(),
-  Config.
+    Config.
 
 init_per_testcase(Test, Config) ->
+    application:load(ip_vs_conn),
     application:set_env(ip_vs_conn, proc_file, proc_file(Config, Test)),
-    case os:cmd("id -u") of
-        "0\n" ->
-            ok;
-        _ ->
-            application:set_env(dcos_l4lb, enable_networking, false)
-    end,
     set_interval(Test),
     {ok, _} = application:ensure_all_started(dcos_l4lb),
     Config.
 
 end_per_testcase(_, _Config) ->
-  ok = application:stop(dcos_l4lb),
-  ok = application:stop(lashup),
-  ok = application:stop(mnesia).
+    [ begin
+        ok = application:stop(App),
+        ok = application:unload(App)
+    end || {App, _, _} <- application:which_applications(),
+    not lists:member(App, [stdlib, kernel]) ],
+    os:cmd("rm -rf Mnesia.*"),
+    ok.
 
 test_init(_Config) -> ok.
 test_gen_server(_Config) ->
@@ -110,10 +101,10 @@ proc_file(Config, test_one_conn) ->
     DataDir = ?config(data_dir, Config),
     DataDir ++ "/proc_ip_vs_conn1";
 proc_file(Config, _) ->
-    DataDir = ?config(data_dir, Config),
-    DataDir ++ "/proc_ip_vs_conn2".
+    DataDir = ?config(data_dir, Config), DataDir ++ "/proc_ip_vs_conn2".
 
 set_interval(test_wait_metrics) ->
+    application:load(dcos_l4lb),
     application:set_env(dcos_l4lb, metrics_interval_seconds, 1),
     application:set_env(dcos_l4lb, metrics_splay_seconds, 1);
 set_interval(_) -> ok.

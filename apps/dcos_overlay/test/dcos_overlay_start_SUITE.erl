@@ -13,7 +13,7 @@
     dcos_overlay_start/1
 ]).
 
--define(DEFAULT_CONFIG_DIR, "/opt/mesosphere/etc/navstar.config.d").
+-define(DEFAULT_CONFIG_DIR, "/opt/mesosphere/etc/dcos-net.config.d").
 
 init_per_testcase(_TestCase, Config) ->
     meck:new(file, [unstick, passthrough]),
