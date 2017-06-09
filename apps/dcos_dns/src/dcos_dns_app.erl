@@ -73,6 +73,11 @@ parse_ipv4_address_with_port(Value, DefaultPort) ->
         [IP] -> {parse_ipv4_address(IP), DefaultPort}
     end.
 
+%% @doc Same as parse_ipv4_address_with_port(Value, 53).
+-spec(parse_ipv4_address_with_port(binary()|list()) -> upstream()).
+parse_ipv4_address_with_port(Value) ->
+    parse_ipv4_address_with_port(Value, 53).
+
 -spec(parse_upstream_name(dns:dname()) -> [dns:label()]).
 parse_upstream_name(Name) when is_binary(Name) ->
     LowerName = dns:dname_to_lower(Name),
@@ -165,7 +170,7 @@ load_json_config(FileBin) ->
     lists:foreach(fun process_config_tuple/1, ConfigTuples).
 
 process_config_tuple({<<"upstream_resolvers">>, UpstreamResolvers}) ->
-    UpstreamIPsAndPorts = lists:map(fun (Resolver) -> parse_ipv4_address_with_port(Resolver, 53) end, UpstreamResolvers),
+    UpstreamIPsAndPorts = lists:map(fun parse_ipv4_address_with_port/1, UpstreamResolvers),
     application:set_env(?APP, upstream_resolvers, UpstreamIPsAndPorts);
 process_config_tuple({<<"forward_zones">>, Upstreams0}) ->
     Upstreams1 = lists:foldl(fun parse_upstream/2, maps:new(), Upstreams0),

@@ -44,18 +44,11 @@ start_link(Opts) ->
 %%% gen_server callbacks
 %%%===================================================================
 
-%% @private
--spec init([]) -> {ok, #state{}}.
 init([]) ->
     update_zone([]),
     timer:send_after(0, ?REFRESH_MESSAGE),
     {ok, #state{}}.
 
-%% @private
--spec handle_call(term(), {pid(), term()}, #state{}) ->
-    {reply, term(), #state{}}.
-
-%% @private
 handle_call(?REFRESH_MESSAGE, _FRom, State0) ->
     {noreply, State1} = handle_info(?REFRESH_MESSAGE, State0),
     {reply, ok, State1};
@@ -63,14 +56,10 @@ handle_call(Msg, _From, State) ->
     lager:warning("Unhandled messages: ~p", [Msg]),
     {reply, ok, State}.
 
-%% @private
--spec handle_cast(term(), #state{}) -> {noreply, #state{}}.
 handle_cast(Msg, State) ->
     lager:warning("Unhandled messages: ~p", [Msg]),
     {noreply, State}.
 
-%% @private
--spec handle_info(term(), #state{}) -> {noreply, #state{}}.
 handle_info(?REFRESH_MESSAGE, State) ->
     case application:get_env(?APP, mesos_resolvers, []) of
         [] ->
@@ -85,13 +74,9 @@ handle_info(Msg, State) ->
     lager:warning("Unhandled messages: ~p", [Msg]),
     {noreply, State}.
 
-%% @private
--spec terminate(term(), #state{}) -> term().
 terminate(_Reason, _State) ->
     ok.
 
-%% @private
--spec code_change(term() | {down, term()}, #state{}, term()) -> {ok, #state{}}.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
@@ -159,7 +144,7 @@ ns_name() ->
     list_to_binary(string:join(["ns", ?TLD], ".")).
 
 %% @private
--spec(generate_record({N :: non_neg_integer(), IPAddress :: inet:ip4_address()}) -> #dns_rr{}).
+-spec(generate_record({N :: non_neg_integer(), IPAddress :: inet:ip4_address()}) -> dns:rr()).
 generate_record({N, IpAddress}) ->
     NewHostname = "zk-" ++ integer_to_list(N) ++ "." ++ ?TLD,
     #dns_rr{

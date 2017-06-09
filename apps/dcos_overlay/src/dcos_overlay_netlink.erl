@@ -35,8 +35,8 @@ ipneigh_replace(Pid, Dst, Lladdr, Ifname) ->
   Neigh = {
     _Family = inet,
     _Ifindex = Ifindex,
-    _State = ?NUD_PERMANENT, 
-    _Flags = 0, 
+    _State = ?NUD_PERMANENT,
+    _Flags = 0,
     _NdmType = 0,
     Attr},
   netlink_request(Pid, newneigh, [create, replace], Neigh).
@@ -66,23 +66,23 @@ bridge_fdb_replace(Pid, Dst, Lladdr, Ifname) ->
     _Family = bridge,
     _Ifindex = Ifindex,
     _State = State,
-    _Flags = 2,  %% NTF_SELF  
+    _Flags = 2,  %% NTF_SELF
     _NdmType = 0,
     Attr},
   netlink_request(Pid, newneigh, [create, replace], Neigh).
 
-%% eg. iplink_show(Pid, "vtep1024") -> 
-%%        [{rtnetlink,newlink,[],3,31030, 
+%% eg. iplink_show(Pid, "vtep1024") ->
+%%        [{rtnetlink,newlink,[],3,31030,
 %%          {unspec,arphrd_ether,8, [lower_up,multicast,running,broadcast,up],
 %%           [], [{ifname,"vtep1024"}, ...]}}]
 iplink_show(Pid, Ifname) ->
   Attr = [{ifname, Ifname}, {ext_mask, 1}],
   Link = {packet, arphrd_netrom, 0, [], [], Attr},
-  netlink_request(Pid, getlink, [], Link). 
+  netlink_request(Pid, getlink, [], Link).
 
 %% iplink_add(Pid, "vtep1024", "vxlan", 1024, 64000)
 iplink_add(Pid, Ifname, Kind, Id, DstPort) ->
-  Vxlan = [{id, Id}, {ttl, 0}, {tos, 0}, {learning, 1}, {proxy, 0}, 
+  Vxlan = [{id, Id}, {ttl, 0}, {tos, 0}, {learning, 1}, {proxy, 0},
            {rsc, 0}, {l2miss, 0}, {l3miss, 0}, {udp_csum, 0},
            {udp_zero_csum6_tx, 0}, {udp_zero_csum6_rx, 0},
            {remcsum_tx, 0}, {remcsum_rx, 0}, {port, DstPort}],
@@ -115,7 +115,7 @@ iplink_set(Pid, Lladdr, Ifname) ->
 %%       {inet,0,8,0,42,unspec,universe,unicast,[],
 %%          [{table,42},{priority,32765},{src,{9,0,0,0}}]}}, ....]
 iprule_show(Pid) ->
- Attr = [{29, <<1:32/native-integer>>}], %% [{ext_mask, 1}] 
+ Attr = [{29, <<1:32/native-integer>>}], %% [{ext_mask, 1}]
  Rule = {inet, 0, 0, 0, 0, 0, 0, 0, [], Attr},
  netlink_request(Pid, getrule, [root, match], Rule).
 
@@ -136,7 +136,7 @@ iprule_add(Pid, Src, SrcPrefixLen, Table) ->
  netlink_request(Pid, newrule, [create, excl], Rule).
 
 make_iprule(Src, SrcPrefixLen, Table) ->
-    {inet,0,SrcPrefixLen,0,Table,unspec,universe,unicast,[], [{src, Src}]}.
+    {inet, 0, SrcPrefixLen, 0, Table, unspec, universe, unicast, [], [{src, Src}]}.
 
 is_iprule_present([], _) ->
   false;
@@ -146,27 +146,27 @@ is_iprule_present([{rtnetlink, newrule, _, _, _, ParsedRule}|Rules], Rule) ->
       not_matched -> is_iprule_present(Rules, Rule)
   end.
 
-match_iprules({inet, 0, SrcPrefixLen, 0, Table, unspec,universe,unicast,[], [{src, Src}]},
-  {inet, 0, SrcPrefixLen, 0, Table, unspec,universe,unicast,[], Prop}) ->
+match_iprules({inet, 0, SrcPrefixLen, 0, Table, unspec, universe, unicast, [], [{src, Src}]},
+  {inet, 0, SrcPrefixLen, 0, Table, unspec, universe, unicast, [], Prop}) ->
   case proplists:get_value(src, Prop) of
       Src -> matched;
       _ -> not_matched
   end;
-match_iprules(_,_) ->
+match_iprules(_, _) ->
   not_matched.
 
-%% ipaddr_add(Pid, {44,128,0,1}, 32, "vtep1024"). 
+%% ipaddr_add(Pid, {44,128,0,1}, 32, "vtep1024").
 ipaddr_replace(Pid, IP, PrefixLen, Ifname) ->
- Attr = [{local, IP},{address, IP}],
+ Attr = [{local, IP}, {address, IP}],
  Ifindex = if_nametoindex(Ifname),
  Msg = {
-   _Family = inet, 
-   _PrefixLen = PrefixLen, 
-   _Flags = 0, 
-   _Scope = 0, 
-   _Ifindex = Ifindex, 
+   _Family = inet,
+   _PrefixLen = PrefixLen,
+   _Flags = 0,
+   _Scope = 0,
+   _Ifindex = Ifindex,
    Attr},
- netlink_request(Pid, newaddr, [create, replace], Msg). 
+ netlink_request(Pid, newaddr, [create, replace], Msg).
 
 
 real_if_nametoindex(IfName) ->
@@ -177,9 +177,9 @@ real_if_nametoindex(IfName) ->
 netlink_request(Pid, Type, Flags, Msg) ->
   Uid = list_to_integer(string:strip(os:cmd("id -u"), right, $\n)),
   case Uid of
-    0 -> %% root 
+    0 -> %% root
       gen_netlink_client:rtnl_request(Pid, Type, Flags, Msg);
-    _ ->  
+    _ ->
       io:format("Would run fun ~p with flags ~p and argument ~p~n", [Type, Flags, Msg]),
       {ok, []}
   end.

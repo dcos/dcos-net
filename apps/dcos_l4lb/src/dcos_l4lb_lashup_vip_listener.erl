@@ -52,12 +52,7 @@
 %%% API
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Starts the server
-%%
-%% @end
-%%--------------------------------------------------------------------
+%% @doc Starts the server
 -spec(start_link() ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link() ->
@@ -67,20 +62,6 @@ start_link() ->
 %%% gen_server callbacks
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Initializes the server
-%%
-%% @spec init(Args) -> {ok, State} |
-%%                     {ok, State, Timeout} |
-%%                     ignore |
-%%                     {stop, Reason}
-%% @end
-%%--------------------------------------------------------------------
--spec(init(Args :: term()) ->
-    {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
-    {stop, Reason :: term()} | ignore).
 init([]) ->
     ets_restart(name_to_ip),
     ets_restart(ip_to_name),
@@ -90,93 +71,30 @@ init([]) ->
     State = #state{ref = Ref, max_ip_num = MaxIP, min_ip_num = MinIP},
     {ok, State}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Handling call messages
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec(handle_call(Request :: term(), From :: {pid(), Tag :: term()},
-    State :: state()) ->
-    {reply, Reply :: term(), NewState :: state()} |
-    {reply, Reply :: term(), NewState :: state(), timeout() | hibernate} |
-    {noreply, NewState :: state()} |
-    {noreply, NewState :: state(), timeout() | hibernate} |
-    {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
-    {stop, Reason :: term(), NewState :: state()}).
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Handling cast messages
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec(handle_cast(Request :: term(), State :: state()) ->
-    {noreply, NewState :: state()} |
-    {noreply, NewState :: state(), timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: state()}).
 handle_cast(push_vips, State) ->
     {noreply, State};
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Handling all non call/cast messages
-%%
-%% @spec handle_info(Info, State) -> {noreply, State} |
-%%                                   {noreply, State, Timeout} |
-%%                                   {stop, Reason, State}
-%% @end
-%%--------------------------------------------------------------------
--spec(handle_info(Info :: timeout() | term(), State :: state()) ->
-    {noreply, NewState :: state()} |
-    {noreply, NewState :: state(), timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: state()}).
 handle_info({lashup_kv_events, Event = #{ref := Reference}}, State0 = #state{ref = Reference}) ->
     State1 = handle_event(Event, State0),
     {noreply, State1};
 handle_info(_Info, State) ->
     {noreply, State}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% This function is called by a gen_server when it is about to
-%% terminate. It should be the opposite of Module:init/1 and do any
-%% necessary cleaning up. When it returns, the gen_server terminates
-%% with Reason. The return value is ignored.
-%%
-%% @spec terminate(Reason, State) -> void()
-%% @end
-%%--------------------------------------------------------------------
--spec(terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
-    State :: state()) -> term()).
 terminate(_Reason, _State) ->
     ok.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Convert process state when code is changed
-%%
-%% @spec code_change(OldVsn, State, Extra) -> {ok, NewState}
-%% @end
-%%--------------------------------------------------------------------
--spec(code_change(OldVsn :: term() | {down, term()}, State :: state(),
-    Extra :: term()) ->
-    {ok, NewState :: state()} | {error, Reason :: term()}).
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
 -spec(lookup_vips([{ip, inet:ip4_address()}|{name, binary()}]) ->
                   [{name, binary()}|{ip, inet:ip4_address()}|{badmatch, term()}]).
 lookup_vips(Names) ->
@@ -241,7 +159,7 @@ push_state_to_dcos_dns(State) ->
         ok = erldns_zone_cache:put_zone(Zone)
     end, ZoneNames).
 
--spec(zone([binary()], state()) -> {Name :: binary(), Sha :: binary(), [#dns_rr{}]}).
+-spec(zone([binary()], state()) -> {Name :: binary(), Sha :: binary(), [dns:rr()]}).
 zone(ZoneComponents, State) ->
     Now = timeish(),
     zone(Now, ZoneComponents, State).
@@ -257,24 +175,11 @@ timeish() ->
             Time + erlang:unique_integer([positive, monotonic])
     end.
 
--spec(zone(Now :: 0..4294967295, [binary()], state()) -> {Name :: binary(), Sha :: binary(), [#dns_rr{}]}).
+-spec(zone(Now :: 0..4294967295, [binary()], state()) -> {Name :: binary(), Sha :: binary(), [dns:rr()]}).
 zone(Now, ZoneComponents, _State) ->
     ZoneName = binary_to_name(ZoneComponents),
     Records0 = [
-        #dns_rr{
-            name = ZoneName,
-            type = ?DNS_TYPE_SOA,
-            ttl = 5,
-            data = #dns_rrdata_soa{
-                mname = binary_to_name([<<"ns">>|ZoneComponents]), %% Nameserver
-                rname = <<"support.mesosphere.com">>,
-                serial = Now, %% Hopefully there is not more than 1 update/sec :)
-                refresh = 5,
-                retry = 5,
-                expire = 5,
-                minimum = 1
-            }
-        },
+        zone_soa_record(Now, ZoneName, ZoneComponents),
         #dns_rr{
             name = binary_to_name(ZoneComponents),
             type = ?DNS_TYPE_NS,
@@ -295,6 +200,22 @@ zone(Now, ZoneComponents, _State) ->
     {_, Records1} = ets:foldl(fun add_record_fold/2, {ZoneComponents, Records0}, name_to_ip),
     Sha = crypto:hash(sha, term_to_binary(Records1)),
     {ZoneName, Sha, Records1}.
+
+zone_soa_record(Now, ZoneName, ZoneComponents) ->
+    #dns_rr{
+        name = ZoneName,
+        type = ?DNS_TYPE_SOA,
+        ttl = 5,
+        data = #dns_rrdata_soa{
+            mname = binary_to_name([<<"ns">>|ZoneComponents]), %% Nameserver
+            rname = <<"support.mesosphere.com">>,
+            serial = Now, %% Hopefully there is not more than 1 update/sec :)
+            refresh = 5,
+            retry = 5,
+            expire = 5,
+            minimum = 1
+        }
+    }.
 
 add_record_fold({Name, IPInt}, {ZoneComponents, Records0}) ->
     Record = #dns_rr{

@@ -33,35 +33,23 @@
 %%%===================================================================
 
 
-%% @doc Same as start_link([]).
 -spec start_link() -> {ok, pid()} | ignore | {error, term()}.
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-%% @private
--spec init([]) -> {ok, #state{}}.
 init([]) ->
     {ok, _} = timer:send_after(?REFRESH_INTERVAL, ?REFRESH_MESSAGE),
     Timer = schedule_kill(),
     {ok, #state{kill_timer = Timer}}.
 
-%% @private
--spec handle_call(term(), {pid(), term()}, #state{}) ->
-    {reply, term(), #state{}}.
-
-%% @private
 handle_call(Msg, _From, State) ->
     lager:warning("Unhandled messages: ~p", [Msg]),
     {reply, ok, State}.
 
-%% @private
--spec handle_cast(term(), #state{}) -> {noreply, #state{}}.
 handle_cast(Msg, State) ->
     lager:warning("Unhandled messages: ~p", [Msg]),
     {noreply, State}.
 
-%% @private
--spec handle_info(term(), #state{}) -> {noreply, #state{}}.
 handle_info(?REFRESH_MESSAGE, State = #state{kill_timer = KillTimer}) ->
     lager:debug("Waking up watchdog"),
     {ok, Timer1} = timer:kill_after(?REFRESH_INTERVAL * 4),
@@ -74,13 +62,9 @@ handle_info(Msg, State) ->
     lager:warning("Unhandled messages: ~p", [Msg]),
     {noreply, State}.
 
-%% @private
--spec terminate(term(), #state{}) -> term().
 terminate(_Reason, _State) ->
     ok.
 
-%% @private
--spec code_change(term() | {down, term()}, #state{}, term()) -> {ok, #state{}}.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 

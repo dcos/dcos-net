@@ -29,9 +29,9 @@
 -define(AGENT_COUNT, 3).
 -define(MASTER_COUNT, 1).
 -define(NUM_OF_TRIES, 10).
--define(outputdir(BaseDir), filename:join([BaseDir, "output"])).
--define(lashupdir(BaseDir), filename:join([BaseDir, "lashup"])).
--define(mnesiadir(BaseDir), filename:join([BaseDir, "mnesia"])).
+-define(OUTPUTDIR(BaseDir), filename:join([BaseDir, "output"])).
+-define(LASHUPDIR(BaseDir), filename:join([BaseDir, "lashup"])).
+-define(MNESIADIR(BaseDir), filename:join([BaseDir, "mnesia"])).
 
 init_per_suite(Config) ->
   %% this might help, might not...
@@ -65,8 +65,8 @@ end_per_testcase(_, Config) ->
 
 cleanup_files(Config) ->
   PrivateDir = ?config(priv_dir, Config),
-  os:cmd("rm -rf " ++ ?lashupdir(PrivateDir) ++ "/*"),
-  os:cmd("rm -rf " ++ ?mnesiadir(PrivateDir) ++ "/*").
+  os:cmd("rm -rf " ++ ?LASHUPDIR(PrivateDir) ++ "/*"),
+  os:cmd("rm -rf " ++ ?MNESIADIR(PrivateDir) ++ "/*").
 
 agents() ->
   [list_to_atom(lists:flatten(io_lib:format("agent~p", [X]))) || X <- lists:seq(1, ?AGENT_COUNT)].
@@ -96,21 +96,21 @@ boot_timeout() ->
 
 configure_output_dir(Nodes, Config) ->
    PrivateDir = ?config(priv_dir, Config),
-   OutputDir = filename:join(?outputdir(PrivateDir), node()),
+   OutputDir = filename:join(?OUTPUTDIR(PrivateDir), node()),
    ok = filelib:ensure_dir(OutputDir ++ "/"),
-   OutputEnv = [dcos_overlay, outputdir, ?outputdir(PrivateDir)],
+   OutputEnv = [dcos_overlay, outputdir, ?OUTPUTDIR(PrivateDir)],
    {_, []} = rpc:multicall(Nodes, application, set_env, OutputEnv).
 
 configure_lashup_dir(Nodes, Config) ->
   PrivateDir = ?config(priv_dir, Config),
-  LashupDir = ?lashupdir(PrivateDir),
+  LashupDir = ?LASHUPDIR(PrivateDir),
   ok = filelib:ensure_dir(LashupDir ++ "/"),
   LashupEnv = [lashup, work_dir, LashupDir],
   {_, []} = rpc:multicall(Nodes, application, set_env, LashupEnv).
 
 configure_mnesia_dir(Node, Config) ->
   PrivateDir = ?config(priv_dir, Config),
-  MnesiaDir = filename:join(?mnesiadir(PrivateDir), Node),
+  MnesiaDir = filename:join(?MNESIADIR(PrivateDir), Node),
   ok = filelib:ensure_dir(MnesiaDir ++ "/"),
   MnesiaEnv = [mnesia, dir, MnesiaDir],
   ok = rpc:call(Node, application, set_env, MnesiaEnv).
@@ -123,37 +123,51 @@ start_nodes(Config) ->
   io:format("Starting nodes: ~p", [Results]),
   Nodes = [NodeName || {ok, NodeName} <- Results],
   {Masters, Agents} = lists:split(length(masters()), Nodes),
-  CodePath = code:get_path(),
-  Handlers = [
-    {lager_console_backend, debug},
-    {lager_file_backend, [{file, "error.log"}, {level, error}]},
-    {lager_file_backend, [{file, "console.log"}, {level, debug},
-      {formatter, lager_default_formatter},
-      {formatter_config, [
-        node, ": ", time, " [", severity, "] ", pid, " (", module, ":", function, ":", line, ")", " ", message, "\n"
-      ]}
-    ]},
-    {lager_common_test_backend, debug}
-  ],
-  rpc:multicall(Nodes, code, add_pathsa, [CodePath]),
-  rpc:multicall(Nodes, application, set_env, [lager, handlers, Handlers, [{persistent, true}]]),
-  rpc:multicall(Nodes, application, ensure_all_started, [lager]),
-  rpc:multicall(Nodes, meck, new, [httpc, [no_link, passthrough]]),
-  rpc:multicall(Nodes, meck, expect, [httpc, request,
-    fun (get, {_, Headers}, _, _) ->
-        Node = proplists:get_value("node", Headers),
-        io:format(user, "Node: ~p", [Node]),
-        Data = ?MODULE:create_data(list_to_binary(Node)),
-        BinData = mesos_state_overlay_pb:encode_msg(Data),
-        {ok, {{"HTTP/1.1", 200, "OK"}, [], BinData}}
-    end
-  ]),
-  configure_output_dir(Nodes, Config),
-  configure_lashup_dir(Nodes, Config),
-  lists:foreach(fun(Node) -> configure_mnesia_dir(Node, Config) end, Nodes),
-  {_, []} = rpc:multicall(Masters, application, set_env, [lashup, contact_nodes, Masters]),
-  {_, []} = rpc:multicall(Agents, application, set_env, [lashup, contact_nodes, Masters]), 
+  configure_nodes(Config, Masters, Agents),
   {Masters, Agents}.
+
+configure_nodes(Config, Masters, Agents) ->
+    Nodes = Masters ++ Agents,
+    Handlers = lager_config_handlers(),
+    CodePath = code:get_path(),
+    rpc:multicall(Nodes, code, add_pathsa, [CodePath]),
+    rpc:multicall(Nodes, application, set_env, [lager, handlers, Handlers, [{persistent, true}]]),
+    rpc:multicall(Nodes, application, ensure_all_started, [lager]),
+    rpc:multicall(Nodes, meck, new, [httpc, [no_link, passthrough]]),
+    rpc:multicall(Nodes, meck, expect, [httpc, request, fun meck_httpc_request/4]),
+    configure_output_dir(Nodes, Config),
+    configure_lashup_dir(Nodes, Config),
+    lists:foreach(fun(Node) -> configure_mnesia_dir(Node, Config) end, Nodes),
+    {_, []} = rpc:multicall(Masters, application, set_env, [lashup, contact_nodes, Masters]),
+    {_, []} = rpc:multicall(Agents, application, set_env, [lashup, contact_nodes, Masters]).
+
+lager_config_handlers() ->
+    [
+        {lager_console_backend, debug},
+        {lager_file_backend, [
+            {file, "error.log"},
+            {level, error}
+        ]},
+        {lager_file_backend, [
+            {file, "console.log"},
+            {level, debug},
+            {formatter, lager_default_formatter},
+            {formatter_config, [
+                node, ": ", time,
+                " [", severity, "] ", pid,
+                " (", module, ":", function, ":", line, ")",
+                " ", message, "\n"
+            ]}
+        ]},
+        {lager_common_test_backend, debug}
+    ].
+
+meck_httpc_request(get, {_, Headers}, _, _) ->
+    Node = proplists:get_value("node", Headers),
+    io:format(user, "Node: ~p", [Node]),
+    Data = ?MODULE:create_data(list_to_binary(Node)),
+    BinData = mesos_state_overlay_pb:encode_msg(Data),
+    {ok, {{"HTTP/1.1", 200, "OK"}, [], BinData}}.
 
 %% Sometimes nodes stick around on Circle-CI
 %% TODO: Figure out why and troubleshoot
@@ -224,7 +238,7 @@ dcos_overlay_test(Config) ->
 
 check_files(N, Config) when N > 0 ->
   NumNodes = ?AGENT_COUNT + ?MASTER_COUNT + 1, % agents, masters and runner
-  {ok, Filenames} = file:list_dir(?outputdir(?config(priv_dir, Config))),
+  {ok, Filenames} = file:list_dir(?OUTPUTDIR(?config(priv_dir, Config))),
   io:format("Files: ~p", [Filenames]),
   case length(Filenames) of
       NumNodes ->
@@ -233,23 +247,23 @@ check_files(N, Config) when N > 0 ->
         timer:sleep(5000), % give time for file generation
         check_files(N-1, Config)
   end;
-check_files(_,_) ->
+check_files(_, _) ->
   not_ok.
 
 check_data(N, Config) when N > 0 ->
    case verify_data(Config) of
-       [] -> 
+       [] ->
          ok;
        _ ->
          timer:sleep(5000),
          check_data(N-1, Config)
      end;
-check_data(_,_) ->
-  not_ok.     
+check_data(_, _) ->
+  not_ok.
 
 verify_data(Config) ->
   [Master|_] = ?config(masters, Config),
-  Filename = filename:join(?outputdir(?config(priv_dir, Config)), Master),
+  Filename = filename:join(?OUTPUTDIR(?config(priv_dir, Config)), Master),
   {ok, Actual} = file:consult(Filename),
   Expected = expected_data(Master),
   io:format("Actual ~p\n", [Actual]),
@@ -257,22 +271,22 @@ verify_data(Config) ->
   Result = ordsets:subtract(ordsets:from_list(Expected), ordsets:from_list(Actual)),
   io:format("Result ~p\n", [Result]),
   Result.
-  
+
 expected_data(Master) ->
   NumNodes = ?AGENT_COUNT + ?MASTER_COUNT,
   MasterNode = parse_node(list_to_binary(atom_to_list(Master))),
-  [ get_node_data(N) || N <- lists:seq(1,NumNodes), N =/= MasterNode].
+  [ get_node_data(N) || N <- lists:seq(1, NumNodes), N =/= MasterNode].
 
 parse_node(Agent) ->
   [Bin1, _ ] = binary:split(Agent, <<"@">>),
-  [_, Num] = binary:split(Bin1, [<<"master">>,<<"agent">>]),
+  [_, Num] = binary:split(Bin1, [<<"master">>, <<"agent">>]),
   binary_to_integer(Num).
 
 get_node_data(NodeNumber) ->
-  AgentIP = {10,0,0,NodeNumber},
-  Vtep_ip = {44,128,0,NodeNumber},
+  AgentIP = {10, 0, 0, NodeNumber},
+  Vtep_ip = {44, 128, 0, NodeNumber},
   Vtep_mac = [16#70, 16#B3, 16#D5, 16#80, 0, NodeNumber],
-  Subnet = {9,0,NodeNumber,0},
+  Subnet = {9, 0, NodeNumber, 0},
   [AgentIP, "vtep1024", Vtep_ip, Vtep_mac, Subnet, 24].
 
 create_data(Agent) ->

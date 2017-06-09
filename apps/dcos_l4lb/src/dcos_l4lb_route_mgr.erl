@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, 
+-export([start_link/0,
          get_routes/2,
          add_routes/3,
          remove_routes/3,
@@ -31,7 +31,6 @@
 -include_lib("gen_netlink/include/netlink.hrl").
 -include("dcos_l4lb.hrl").
 
--define(SERVER, ?MODULE).
 -define(LOCAL_TABLE, 255). %% local table
 -define(MINUTEMAN_IFACE, "minuteman").
 
@@ -43,8 +42,6 @@
     pid :: pid(),
     iface :: non_neg_integer()
 }).
-    
--type state() :: state().
 
 %%%===================================================================
 %%% API
@@ -79,41 +76,12 @@ start_link() ->
 %%% gen_server callbacks
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Initializes the server
-%%
-%% @spec init(Args) -> {ok, State} |
-%%                     {ok, State, Timeout} |
-%%                     ignore |
-%%                     {stop, Reason}
-%% @end
-%%--------------------------------------------------------------------
--spec(init(Args :: term()) ->
-    {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
-    {stop, Reason :: term()} | ignore).
 init([]) ->
     {ok, Pid} = gen_netlink_client:start_link(?NETLINK_ROUTE),
     {ok, Iface} = gen_netlink_client:if_nametoindex(?MINUTEMAN_IFACE),
     Params = #params{pid = Pid, iface = Iface},
     {ok, #state{netns = #{host => Params}}}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Handling call messages
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec(handle_call(Request :: term(), From :: {pid(), Tag :: term()},
-    State :: state()) ->
-    {reply, Reply :: term(), NewState :: state()} |
-    {reply, Reply :: term(), NewState :: state(), timeout() | hibernate} |
-    {noreply, NewState :: state()} |
-    {noreply, NewState :: state(), timeout() | hibernate} |
-    {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
-    {stop, Reason :: term(), NewState :: state()}).
 handle_call({get_routes, Namespace}, _From, State) ->
     Routes = handle_get_routes(Namespace, State),
     {reply, Routes, State};
@@ -132,64 +100,15 @@ handle_call({remove_netns, UpdateValue}, _From, State0) ->
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Handling cast messages
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec(handle_cast(Request :: term(), State :: state()) ->
-    {noreply, NewState :: state()} |
-    {noreply, NewState :: state(), timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: state()}).
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Handling all non call/cast messages
-%%
-%% @spec handle_info(Info, State) -> {noreply, State} |
-%%                                   {noreply, State, Timeout} |
-%%                                   {stop, Reason, State}
-%% @end
-%%--------------------------------------------------------------------
--spec(handle_info(Info :: timeout() | term(), State :: state()) ->
-    {noreply, NewState :: state()} |
-    {noreply, NewState :: state(), timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: state()}).
 handle_info(_Info, State) ->
     {noreply, State}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% This function is called by a gen_server when it is about to
-%% terminate. It should be the opposite of Module:init/1 and do any
-%% necessary cleaning up. When it returns, the gen_server terminates
-%% with Reason. The return value is ignored.
-%%
-%% @spec terminate(Reason, State) -> void()
-%% @end
-%%--------------------------------------------------------------------
--spec(terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
-    State :: state()) -> term()).
 terminate(_Reason, _State) ->
     ok.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Convert process state when code is changed
-%%
-%% @spec code_change(OldVsn, State, Extra) -> {ok, NewState}
-%% @end
-%%--------------------------------------------------------------------
--spec(code_change(OldVsn :: term() | {down, term()}, State :: state(),
-    Extra :: term()) ->
-    {ok, NewState :: state()} | {error, Reason :: term()}).
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
@@ -219,31 +138,24 @@ handle_add_routes(RoutesToAdd, Namespace, State) ->
 handle_remove_routes(RoutesToDelete, Namespace, State) ->
     lager:info("Removing routes from Namespace ~p ~p", [Namespace, RoutesToDelete]),
     lists:foreach(fun(Route) -> remove_route(Route, Namespace, State) end, RoutesToDelete).
- 
+
 add_route(Dst, Namespace, #state{netns = NetnsMap}) ->
     add_route2(Dst, Namespace, maps:get(Namespace, NetnsMap)).
 
-add_route2(Dst, Namespace, #params{pid = Pid, iface = Iface}) ->
-    Msg = [{table, ?LOCAL_TABLE}, {dst, Dst}, {oif, Iface}],
-    Route = {
-        inet,
-        _PrefixLen = 32,
-        _SrcPrefixLen = 0,
-        _Tos = 0,
-        _Table = ?LOCAL_TABLE,
-        _Protocol = boot,
-        _Scope = rt_scope(Namespace),
-        _Type = rt_type(Namespace),
-        _Flags = [],
-        Msg},
+add_route2(Dst, Namespace, Params = #params{pid = Pid}) ->
+    Route = get_route2(Dst, Namespace, Params),
     {ok, _} = gen_netlink_client:rtnl_request(Pid, newroute, [create, replace], Route).
 
 remove_route(Dst, Namespace, #state{netns = NetnsMap}) ->
     remove_route2(Dst, Namespace, maps:get(Namespace, NetnsMap)).
 
-remove_route2(Dst, Namespace, #params{pid = Pid, iface = Iface}) ->
+remove_route2(Dst, Namespace, Params = #params{pid = Pid}) ->
+    Route = get_route2(Dst, Namespace, Params),
+    {ok, _} = gen_netlink_client:rtnl_request(Pid, delroute, [], Route).
+
+get_route2(Dst, Namespace, #params{iface = Iface}) ->
     Msg = [{table, ?LOCAL_TABLE}, {dst, Dst}, {oif, Iface}],
-    Route = {
+    {
         inet,
         _PrefixLen = 32,
         _SrcPrefixLen = 0,
@@ -253,8 +165,8 @@ remove_route2(Dst, Namespace, #params{pid = Pid, iface = Iface}) ->
         _Scope = rt_scope(Namespace),
         _Type = rt_type(Namespace),
         _Flags = [],
-        Msg},
-    {ok, _} = gen_netlink_client:rtnl_request(Pid, delroute, [], Route).
+        Msg
+    }.
 
 handle_add_netns(Netnslist, State = #state{netns = NetnsMap0}) ->
     NetnsMap1 = lists:foldl(fun maybe_add_netns/2, maps:new(), Netnslist),
