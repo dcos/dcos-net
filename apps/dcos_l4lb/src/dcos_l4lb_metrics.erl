@@ -23,7 +23,8 @@
 
 -define(SERVER, ?MODULE).
 
--type backend_conns() :: #{inet:ip4_address() => [#ip_vs_conn{}]}.
+-type ip_vs_conn() :: #ip_vs_conn{}.
+-type backend_conns() :: #{inet:ip4_address() => [ip_vs_conn()]}.
 -type metrics() :: []. %% netlink record
 
 -record(state, {
@@ -36,37 +37,17 @@
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
--spec(init(term()) ->
-    {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
-
-    {stop, Reason :: term()} | ignore).
 init([]) ->
     process_flag(trap_exit, true),
     erlang:send_after(splay_ms(), self(), push_metrics),
     {ok, #state{}}.
 
--spec(handle_call(Request :: term(), From :: {pid(), Tag :: term()},
-    State :: #state{}) ->
-    {reply, Reply :: term(), NewState :: #state{}} |
-    {reply, Reply :: term(), NewState :: #state{}, timeout() | hibernate} |
-    {noreply, NewState :: #state{}} |
-    {noreply, NewState :: #state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
-    {stop, Reason :: term(), NewState :: #state{}}).
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
--spec(handle_cast(Request :: term(), State :: #state{}) ->
-    {noreply, NewState :: #state{}} |
-    {noreply, NewState :: #state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: #state{}}).
 handle_cast(_Request, State) ->
     {noreply, State}.
 
--spec(handle_info(Info :: timeout() | term(), State :: #state{}) ->
-    {noreply, NewState :: #state{}} |
-    {noreply, NewState :: #state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: #state{}}).
 handle_info(push_metrics, State = #state{}) ->
     ok = ip_vs_conn_monitor:get_connections(update_connections),
     erlang:send_after(splay_ms(), self(), push_metrics),
@@ -84,14 +65,9 @@ handle_info(start_update_metrics, State) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
--spec(terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
-    State :: #state{}) -> term()).
 terminate(_Reason, _State = #state{}) ->
     ok.
 
--spec(code_change(OldVsn :: term() | {down, term()}, State :: #state{},
-    Extra :: term()) ->
-    {ok, NewState :: #state{}} | {error, Reason :: term()}).
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
@@ -118,7 +94,7 @@ update_connections(OldConns, Conns) ->
     OpenedOrDead = opened_or_dead(PollDelay, Conns),
     {OpenedOrDead, NewBackends}.
 
--spec(update_metrics(conn_map(), metrics()) -> [{#ip_vs_conn{}, integer(), integer()}]).
+-spec(update_metrics(conn_map(), metrics()) -> [{ip_vs_conn(), integer(), integer()}]).
 update_metrics(Backends, Metrics) ->
     P99s = get_p99s(Backends, Metrics),
     lists:flatmap(fun apply_p99/1, P99s).
@@ -158,7 +134,7 @@ is_opened(_KV) -> true.
 opened_or_dead(PD, Conns) ->
     maps:filter(fun(K, V) -> is_opened({K, V}) or is_dead(PD, {K, V}) end, Conns).
 
--spec(record_connection(#ip_vs_conn{})-> ok).
+-spec(record_connection(ip_vs_conn())-> ok).
 record_connection(Conn = #ip_vs_conn{tcp_state = syn_recv}) ->
     conn_failed(Conn);
 record_connection(Conn = #ip_vs_conn{tcp_state = syn_sent}) ->
@@ -166,14 +142,14 @@ record_connection(Conn = #ip_vs_conn{tcp_state = syn_sent}) ->
 record_connection(Conn) ->
     conn_success(Conn).
 
--spec(conn_failed(#ip_vs_conn{}) -> ok).
+-spec(conn_failed(ip_vs_conn()) -> ok).
 conn_failed(#ip_vs_conn{dst_ip = IP, dst_port = Port,
                         to_ip = VIP, to_port = VIPPort}) ->
     Tags = named_tags(IP, Port, VIP, VIPPort),
     AggTags = [[hostname], [hostname, backend]],
     telemetry:counter(mm_connect_failures, Tags, AggTags, 1).
 
--spec(conn_success(#ip_vs_conn{}) -> ok).
+-spec(conn_success(ip_vs_conn()) -> ok).
 conn_success(#ip_vs_conn{dst_ip = IP, dst_port = Port,
                          to_ip = VIP, to_port = VIPPort}) ->
     Tags = named_tags(IP, Port, VIP, VIPPort),

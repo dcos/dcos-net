@@ -38,6 +38,7 @@
     num_res = 0 :: non_neg_integer(),
     kill_timer :: undefined | timer:tref()
 }).
+-type data() :: #data{}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -54,19 +55,6 @@ start_link() ->
 %%% gen_statem callbacks
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Initializes the server
-%%
-%% @spec init(Args) -> {ok, State, Data} |
-%%                     ignore |
-%%                     {stop, Reason}
-%% @end
-%%--------------------------------------------------------------------
--spec(init(Args :: term()) ->
-    {ok, State :: atom(), Data :: #data{}} |
-    {stop, Reason :: term()} | ignore).
 init([]) ->
     MaxHeapSizeInWords = (?HEAPSIZE bsl 20) div erlang:system_info(wordsize), %%100 MB
     process_flag(message_queue_data, on_heap),
@@ -75,51 +63,18 @@ init([]) ->
     {ok, Ref} = lashup_kv_events_helper:start_link(MatchSpec),
     {ok, unconfigured, #data{ref = Ref}}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Initializes the server
-%%
-%% @spec callback_mode() -> handle_event_function | state_functions
-%% @end
-%%--------------------------------------------------------------------
--spec(callback_mode() -> handle_event_function | state_functions).
-callback_mode() -> 
+callback_mode() ->
     state_functions.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% This function is called by a gen_statem when it is about to
-%% terminate. It should be the opposite of Module:init/1 and do any
-%% necessary cleaning up. When it returns, the gen_statem terminates
-%% with Reason. The return value is ignored.
-%%
-%% @spec terminate(Reason, State, Data) -> void()
-%% @end
-%%--------------------------------------------------------------------
--spec(terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
-    State :: atom(), Data :: #data{}) -> term()).
 terminate(_Reason, _State, _Data) ->
     ok.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Convert process state when code is changed
-%%
-%% @spec code_change(OldVsn, OldState, OldData, Extra) -> {state_functions, NewState, NewData}
-%% @end
-%%--------------------------------------------------------------------
--spec(code_change(OldVsn :: term() | {down, term()}, OldState :: atom(),
-    OldData :: #data{}, Extra :: term()) ->
-    {ok, NewState :: atom(), NewData :: #data{}}).
 code_change(_OldVsn, OldState, OldData, _Extra) ->
     {ok, OldState, OldData}.
 
 %%-----------------------------------------------------------------------------------------------------
 %% State transition
-%%----------------------------------------------------------------------------------------------------- 
+%%-----------------------------------------------------------------------------------------------------
 %%                                                              lashup_event
 %%                                                               +------+
 %%                                                               |      |
@@ -151,7 +106,7 @@ configuring(info, {dcos_overlay_configure, applied_config, AppliedConfig}, State
     next_state_transition(StateData1);
 configuring(info, _EventContent, _StateData) ->
     {keep_state_and_data, postpone}.
-            
+
 batching(info, LashupEvent, StateData0) ->
     StateData1 = handle_lashup_event(LashupEvent, StateData0),
     {keep_state, StateData1, {timeout, ?BATCH_TIMEOUT, do_configure}};
@@ -171,7 +126,7 @@ reapplying(internal, reapply, StateData0) ->
 mk_key_matchspec() ->
     ets:fun2ms(fun({[navstar, overlay, '_']}) -> true end).
 
--spec(handle_lashup_event(LashupEvent :: tuple(), #data{}) -> #data{}).
+-spec(handle_lashup_event(LashupEvent :: tuple(), data()) -> data()).
 handle_lashup_event({lashup_kv_events, #{type := ingest_new, key := OverlayKey, value := NewOverlayConfig, ref := Ref}},
              StateData = #data{ref = Ref}) ->
     handle_lashup_event2(OverlayKey, NewOverlayConfig, [], StateData);
@@ -179,11 +134,11 @@ handle_lashup_event({lashup_kv_events, #{type := ingest_update, key := OverlayKe
              old_value := OldOverlayConfig, ref := Ref}}, StateData = #data{ref = Ref}) ->
     handle_lashup_event2(OverlayKey, NewOverlayConfig, OldOverlayConfig, StateData).
 
--spec(handle_lashup_event2(Key :: list(), NewOverlayConfig :: list(), OldOverlayConfig :: list(), #data{}) -> #data{}).
+-spec(handle_lashup_event2(Key :: list(), NewOverlayConfig :: list(), OldOverlayConfig :: list(), data()) -> data()).
 handle_lashup_event2(OverlayKey = [navstar, overlay, Subnet], NewOverlayConfig, OldOverlayConfig,
              StateData = #data{config = OldConfig}) when is_tuple(Subnet), tuple_size(Subnet) == 2 ->
-    DeltaOverlayConfig = determine_delta_config(NewOverlayConfig, OldOverlayConfig), 
-    NewConfig = orddict:append_list(OverlayKey, DeltaOverlayConfig, OldConfig), 
+    DeltaOverlayConfig = determine_delta_config(NewOverlayConfig, OldOverlayConfig),
+    NewConfig = orddict:append_list(OverlayKey, DeltaOverlayConfig, OldConfig),
     StateData#data{config = NewConfig}.
 
 determine_delta_config(NewOverlayConfig, OldOverlayConfig) ->

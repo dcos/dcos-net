@@ -16,6 +16,7 @@
 -include_lib("mesos_state/include/mesos_state_overlay_pb.hrl").
 
 -type config() :: #{key := term(), value := term()}.
+-type mesos_state_agentoverlayinfo() :: #mesos_state_agentoverlayinfo{}.
 
 -spec(start_link(config()) -> pid()).
 start_link(Config) ->
@@ -42,7 +43,7 @@ maybe_configure(Config, MyPid) ->
     lager:debug("Done applying config ~p for overlays ~p~n", [Config, KnownOverlays]),
     reply(MyPid, {dcos_overlay_configure, applied_config, Config}).
 
--spec(try_configure_overlay(Pid :: pid(), config(), #mesos_state_agentoverlayinfo{}) -> term()).
+-spec(try_configure_overlay(Pid :: pid(), config(), mesos_state_agentoverlayinfo()) -> term()).
 try_configure_overlay(Pid, Config, Overlay) ->
     #mesos_state_agentoverlayinfo{info = #mesos_state_overlayinfo{subnet = Subnet}} = Overlay,
     ParsedSubnet = parse_subnet(Subnet),
@@ -103,7 +104,7 @@ configure_overlay_entry(Pid, Overlay, _VTEPIPPrefix = {VTEPIP, _PrefixLen}, Lash
 maybe_print_parameters(Parameters) ->
     {ok, PrivDir} = application:get_env(dcos_overlay, outputdir),
     File = filename:join(PrivDir, node()),
-    ok = file:write_file(File, io_lib:fwrite("~p.\n",[Parameters]), [append]).
+    ok = file:write_file(File, io_lib:fwrite("~p.\n", [Parameters]), [append]).
 
 -else.
 maybe_print_parameters(_) ->
