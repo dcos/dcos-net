@@ -4,7 +4,7 @@ BASE_DIR         = $(shell pwd)
 ERLANG_BIN       = $(shell dirname $(shell which erl))
 REBAR            = $(shell pwd)/rebar3
 
-.PHONY: rel deps test eqc
+.PHONY: rel deps test
 
 all: compile
 
@@ -29,8 +29,11 @@ test: ct eunit
 lint:
 	${REBAR} as lint lint
 
-eqc:
-	${REBAR} as test eqc
+xref:
+	${REBAR} as test xref
+
+dialyzer:
+	${REBAR} dialyzer
 
 eunit:
 	${REBAR} as test eunit
@@ -39,10 +42,10 @@ ct:
 	${REBAR} as test ct -v
 
 cover:
-	./rebar3 as test cover
+	${REBAR} as test cover
 
 edoc:
-	./rebar3 edoc
+	${REBAR} edoc
 
 ##
 ## Release targets
@@ -56,7 +59,3 @@ stage:
 
 shell:
 	${REBAR} shell --apps spartan
-
-DIALYZER_APPS = kernel stdlib erts sasl eunit syntax_tools compiler crypto
-
-include tools.mk
