@@ -19,7 +19,8 @@
     http_enabled/0, http_port/0,
     bind_interface/0, bind_ips/0,
     forward_zones/0,
-    handler_limit/0
+    handler_limit/0,
+    mesos_resolvers/0, mesos_resolvers/1
 ]).
 
 exhibitor_timeout() ->
@@ -93,3 +94,11 @@ get_ip_interfaces() ->
 fold_over_if({IfName, IfOpts}, Acc) ->
     IfAddresses = [{IfName, Address} || {addr, Address = {_, _, _, _}} <- IfOpts],
     ordsets:union(ordsets:from_list(IfAddresses), Acc).
+
+-spec(mesos_resolvers() -> [upstream()]).
+mesos_resolvers() ->
+    application:get_env(?APP, mesos_resolvers, []).
+
+-spec(mesos_resolvers([upstream()]) -> ok).
+mesos_resolvers(Upstreams) ->
+    application:set_env(?APP, mesos_resolvers, Upstreams).

@@ -61,7 +61,7 @@ handle_cast(Msg, State) ->
     {noreply, State}.
 
 handle_info(?REFRESH_MESSAGE, State) ->
-    case application:get_env(?APP, mesos_resolvers, []) of
+    case dcos_dns_config:mesos_resolvers() of
         [] ->
             ok;
         ResolversWithPorts ->
