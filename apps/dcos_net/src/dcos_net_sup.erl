@@ -1,36 +1,13 @@
-%%%-------------------------------------------------------------------
-%% @doc navstar top level supervisor.
-%% @end
-%%%-------------------------------------------------------------------
-
 -module(dcos_net_sup).
-
 -behaviour(supervisor).
+-export([start_link/0, init/1]).
 
-%% API
--export([start_link/0]).
-
-%% Supervisor callbacks
--export([init/1]).
-
--define(CHILD(I, Type), {I, {I, start_link, []}, permanent, 5000, Type, [I]}).
--define(SERVER, ?MODULE).
-
-%%====================================================================
-%% API functions
-%%====================================================================
+-define(CHILD(Module), #{id => Module, start => {Module, start_link, []}}).
 
 start_link() ->
-    supervisor:start_link({local, ?SERVER}, ?MODULE, []).
+    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
-%%====================================================================
-%% Supervisor callbacks
-%%====================================================================
-
-%% Child :: {Id,StartFunc,Restart,Shutdown,Type,Modules}
 init([]) ->
-    {ok, { {one_for_all, 0, 1}, []} }.
-
-%%====================================================================
-%% Internal functions
-%%====================================================================
+    {ok, {#{}, [
+        ?CHILD(dcos_net_masters)
+    ]}}.

@@ -90,8 +90,7 @@ code_change(_OldVsn, State, _Extra) ->
 maybe_load_masters() ->
     case get_masters() of
         {ok, Masters} ->
-            application:set_env(?APP, mesos_resolvers, Masters),
-            ok;
+            ok = dcos_dns_config:mesos_resolvers(Masters);
         {error, _} ->
             error
     end.
