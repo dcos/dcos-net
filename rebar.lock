@@ -67,7 +67,7 @@
  {<<"lager">>,{pkg,<<"lager">>,<<"3.5.1">>},0},
  {<<"lashup">>,
   {git,"https://github.com/dcos/lashup.git",
-       {ref,"24b1841f087f8c4c62f79e60eb6f6c595869fb4d"}},
+       {ref,"eec6350ea628d9a57bf4e3c427556dc138c5196b"}},
   0},
  {<<"meck">>,
   {git,"git://github.com/eproxus/meck.git",
@@ -119,7 +119,7 @@
   0},
  {<<"telemetry">>,
   {git,"https://github.com/dcos/telemetry-net.git",
-       {ref,"31b7a478ccfd2c0789360bb84a4cad4972d16897"}},
+       {ref,"8826af4681d3cd7d4509123fe3d5aa2f2a66cdfc"}},
   0}]}.
 [
 {pkg_hash,[

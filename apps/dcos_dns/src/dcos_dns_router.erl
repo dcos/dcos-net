@@ -25,11 +25,6 @@ upstreams_from_questions([Question|Others]) ->
 validate_upstream({{_, _, _, _}, Port} = Upstream) when is_integer(Port) ->
     Upstream.
 
-%% @private
--spec(mesos_resolvers() -> [upstream()]).
-mesos_resolvers() ->
-    application:get_env(?APP, mesos_resolvers, []).
-
 %% This one is a little bit more complicated...
 %% @private
 -spec(erldns_resolvers() -> [upstream()]).
@@ -65,7 +60,7 @@ default_resolvers() ->
 %% @private
 -spec(find_upstream(Name :: binary(), Labels :: [binary()]) -> [upstream()]).
 find_upstream(_Name, [<<"mesos">>|_]) ->
-    mesos_resolvers();
+    dcos_dns_config:mesos_resolvers();
 find_upstream(_Name, [<<"zk">>|_]) ->
     erldns_resolvers();
 find_upstream(_Name, [<<"spartan">>|_]) ->
