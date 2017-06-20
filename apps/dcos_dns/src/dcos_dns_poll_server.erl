@@ -98,7 +98,7 @@ handle_cast(_Request, State) ->
 
 is_leader() ->
     {ok, IFAddrs} = inet:getifaddrs(),
-    case inet:getaddr("leader.mesos", inet) of
+    case dcos_dns:get_leader_addr() of
         {ok, Addr} ->
             is_leader(IFAddrs, Addr);
         _ ->
@@ -123,13 +123,13 @@ scheme() ->
 
 %% Gotta query the leader for all the tasks
 mesos_master_uri() ->
-    case inet:getaddr("leader.mesos", inet) of
-        {ok, _} ->
-            lists:flatten(scheme() ++ "://leader.mesos:5050/state");
-        _ ->
-            IP = inet:ntoa(mesos_state:ip()),
-            lists:flatten(io_lib:format("~s://~s:5050/state", [scheme(), IP]))
-    end.
+    MesosMasterIP =
+        case dcos_dns:get_leader_addr() of
+            {ok, IP} -> IP;
+            _Error -> mesos_state:ip()
+        end,
+    Host = inet:ntoa(MesosMasterIP),
+    lists:flatten([scheme(), "://", Host, ":5050/state"]).
 
 %% We should only ever poll mesos dns on the masters
 poll() ->
@@ -431,8 +431,6 @@ push_zone_to_lashup(ZoneName, NewRecords) ->
 delete_op(Record, Acc0) ->
     Op = {update, ?RECORDS_FIELD, {remove, Record}},
     [Op|Acc0].
-
-
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").

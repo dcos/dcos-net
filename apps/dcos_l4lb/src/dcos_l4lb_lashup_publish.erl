@@ -119,10 +119,9 @@ infer_ip() ->
   Address.
 
 get_foreign_ip() ->
-  case inet:gethostbyname("leader.mesos") of
-    {ok, Hostent} ->
-      [Addr | _] = Hostent#hostent.h_addr_list,
-      Addr;
+  case dcos_dns:get_leader_addr() of
+    {ok, IPAddr} ->
+      IPAddr;
     _ ->
       {192, 88, 99, 0}
   end.
