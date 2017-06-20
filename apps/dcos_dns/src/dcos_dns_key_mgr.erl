@@ -123,7 +123,8 @@ maybe_zk() ->
     end.
 
 create_zk_key() ->
-    case erlzk:connect(?ZOOKEEPERS, ?ZOOKEEPER_TIMEOUT) of
+    ZooKeepers = get_zookeepers(),
+    case erlzk:connect(ZooKeepers, ?ZOOKEEPER_TIMEOUT) of
         {ok, Pid} ->
             Ret = create_zk_key(Pid),
             erlzk:close(Pid),
@@ -139,7 +140,10 @@ create_zk_key(Pid) ->
             KeyPair = decode(Data),
             push_data_to_lashup(KeyPair);
         {error, no_node} ->
-            do_create_zk_key(Pid)
+            do_create_zk_key(Pid);
+        {error, closed} ->
+            lager:warning("Unable to get data from zk: closed"),
+            false
     end.
 
 do_create_zk_key(Pid) ->
@@ -180,6 +184,15 @@ push_data_to_lashup(#{public := Pk, secret := Sk}) ->
             ]}),
     true.
 
+get_zookeepers() ->
+    lists:map(fun ({Host, Port}) ->
+        case dcos_dns:resolve_mesos(Host) of
+            {ok, IPAddr} ->
+                {inet:ntoa(IPAddr), Port};
+            {error, _} ->
+                {Host, Port}
+        end
+    end, ?ZOOKEEPERS).
 
 -ifdef(TEST).
 
