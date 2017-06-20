@@ -10,7 +10,13 @@
 -author("sdhillon").
 
 %% API
--export([masters/0, is_master/0, key/0]).
+-export([
+    masters/0,
+    is_master/0,
+    key/0,
+    get_leader_addr/0,
+    resolve_mesos/1
+]).
 -define(MASTERS_KEY, {masters, riak_dt_orswot}).
 
 
@@ -36,4 +42,24 @@ key() ->
             #{public_key => PublicKey, secret_key => SecretKey};
         _ ->
             false
+    end.
+
+-spec(get_leader_addr() -> {ok, inet:ip_address()} | {error, term()}).
+get_leader_addr() ->
+    resolve_mesos("leader.mesos").
+
+-spec(resolve_mesos(inet_res:dns_name()) ->
+    {ok, inet:ip_address()} | {error, term()}).
+resolve_mesos(DNSName) ->
+    Opts = [{nameservers, dcos_dns_config:mesos_resolvers()}],
+    case inet_res:resolve(DNSName, in, a, Opts, 1000) of
+        {ok, DnsMsg} ->
+            case inet_dns:msg(DnsMsg, anlist) of
+                [DnsRecord] ->
+                    {ok, inet_dns:rr(DnsRecord, data)};
+                _DnsRecords ->
+                    {error, not_found}
+            end;
+        Error ->
+            Error
     end.
