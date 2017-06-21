@@ -1,6 +1,6 @@
 -module(dcos_dns_sup).
 -behaviour(supervisor).
--export([start_link/0, init/1]).
+-export([start_link/1, init/1]).
 
 -include_lib("dns/include/dns_terms.hrl").
 -include_lib("dns/include/dns_records.hrl").
@@ -8,10 +8,12 @@
 -define(CHILD(Module), #{id => Module, start => {Module, start_link, []}}).
 -define(CHILD(Module, Custom), maps:merge(?CHILD(Module), Custom)).
 
-start_link() ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+start_link(Enabled) ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, [Enabled]).
 
-init([]) ->
+init([false]) ->
+    {ok, {#{}, []}};
+init([true]) ->
     %% Configure metrics.
     dcos_dns_metrics:setup(),
 
