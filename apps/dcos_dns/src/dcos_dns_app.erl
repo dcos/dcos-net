@@ -32,7 +32,12 @@
 start(_StartType, _StartArgs) ->
     dcos_net_app:load_config_files(dcos_dns),
     maybe_load_json_config(), %% Maybe load the relevant DCOS configuration
-    Ret = dcos_dns_sup:start_link(),
+    maybe_start_dcos_dns(application:get_env(dcos_dns, enable_dns, true)).
+
+maybe_start_dcos_dns(false) ->
+    dcos_dns_sup:start_link(false);
+maybe_start_dcos_dns(true) ->
+    Ret = dcos_dns_sup:start_link(true),
     maybe_start_tcp_listener(),
     maybe_start_http_listener(),
     Ret.
