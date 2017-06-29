@@ -16,7 +16,8 @@ setup_cowboy() ->
         {'_', [
             {"/lashup/kv/[...]", dcos_rest_lashup_handler, []},
             {"/lashup/key", dcos_rest_key_handler, []},
-            {"/v1/vips", dcos_rest_vips_handler, []}
+            {"/v1/vips", dcos_rest_vips_handler, []},
+            {"/status", dcos_rest_status_handler, []}
         ]}
     ]),
     Ip = application:get_env(navstar, ip, {127, 0, 0, 1}),
