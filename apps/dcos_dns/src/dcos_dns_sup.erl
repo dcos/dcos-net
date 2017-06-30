@@ -25,7 +25,6 @@ init([true]) ->
     Children = [
         ?CHILD(dcos_dns_zk_record_server),
         ?CHILD(dcos_dns_config_loader_server),
-        ?CHILD(dcos_dns_watchdog),
         ?CHILD(dcos_dns_key_mgr, #{restart => transient}),
         ?CHILD(dcos_dns_poll_server),
         ?CHILD(dcos_dns_listener)
