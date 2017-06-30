@@ -38,8 +38,7 @@ init_per_suite(_Config) ->
     Workers = [
         dcos_dns_key_mgr,
         dcos_dns_poll_server,
-        dcos_dns_listener,
-        dcos_dns_watchdog
+        dcos_dns_listener
     ],
     meck_mods(Workers),
     {ok, _} = application:ensure_all_started(dcos_dns),
