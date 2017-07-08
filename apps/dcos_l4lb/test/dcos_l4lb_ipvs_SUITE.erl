@@ -12,17 +12,13 @@
 -include_lib("common_test/include/ct.hrl").
 -include("dcos_l4lb.hrl").
 
-%% These tests rely on some commands that circle ci does automatically
-%% Look at circle.yml for more
--export([all/0]).
-
--export([test_basic/1]).
-
--export([init_per_testcase/2, end_per_testcase/2]).
+-export([
+    all/0,
+    init_per_testcase/2, end_per_testcase/2,
+    test_basic/1
+]).
 
 all() -> all(os:cmd("id -u"), os:getenv("CIRCLECI")).
-
--compile(export_all).
 
 %% root tests
 all("0\n", false) ->

@@ -1,8 +1,18 @@
 -module(dcos_l4lb_lashup_vip_listener_SUITE).
--compile(export_all).
 
 -include_lib("common_test/include/ct.hrl").
 -include("dcos_l4lb.hrl").
+
+-export([
+    all/0,
+    init_per_suite/1, end_per_suite/1,
+    init_per_testcase/2, end_per_testcase/2,
+    test_uninitalized_table/1,
+    lookup_vip/1,
+    lookup_failure/1,
+    lookup_failure2/1,
+    lookup_failure3/1
+]).
 
 
 %% root tests
