@@ -1,7 +1,12 @@
 -module(dcos_l4lb_mgr_SUITE).
--compile(export_all).
 
 -include_lib("common_test/include/ct.hrl").
+
+-export([
+    all/0,
+    init_per_suite/1, end_per_suite/1,
+    test_normalize/1
+]).
 
 all() -> [test_normalize].
 

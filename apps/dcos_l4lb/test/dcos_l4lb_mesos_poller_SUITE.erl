@@ -1,8 +1,15 @@
 -module(dcos_l4lb_mesos_poller_SUITE).
--compile(export_all).
 
 -include_lib("common_test/include/ct.hrl").
 -include("dcos_l4lb.hrl").
+
+-export([
+    all/0,
+    init_per_suite/1, end_per_suite/1,
+    init_per_testcase/2, end_per_testcase/2,
+    test_gen_server/1,
+    test_handle_poll_state/1
+]).
 
 
 %% root tests

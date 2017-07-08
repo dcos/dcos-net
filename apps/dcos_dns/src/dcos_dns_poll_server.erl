@@ -13,7 +13,6 @@
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
--compile(export_all).
 -endif.
 
 -include("dcos_dns.hrl").
@@ -48,20 +47,12 @@
 %%% API
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Creates a gen_fsm process which calls Module:init/1 to
-%% initialize. To ensure a synchronized start-up procedure, this
-%% function does not return until Module:init/1 has returned.
-%%
-%% @end
-%%--------------------------------------------------------------------
 -spec(start_link() -> {ok, pid()} | ignore | {error, Reason :: term()}).
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 %%%===================================================================
-%%% gen_fsm callbacks
+%%% gen_server callbacks
 %%%===================================================================
 
 init([]) ->
