@@ -1,17 +1,32 @@
 -module(dcos_l4lb_metrics_SUITE).
--compile(export_all).
 
 -include_lib("common_test/include/ct.hrl").
 -include("dcos_l4lb.hrl").
 
-all() -> [test_init,
-          test_reorder,
-          test_push_metrics,
-          test_named_vip,
-          test_wait_metrics,
-          test_new_data,
-          test_one_conn,
-          test_gen_server].
+-export([
+    all/0,
+    init_per_suite/1, end_per_suite/1,
+    init_per_testcase/2, end_per_testcase/2,
+    test_init/1,
+    test_reorder/1,
+    test_push_metrics/1,
+    test_named_vip/1,
+    test_wait_metrics/1,
+    test_new_data/1,
+    test_one_conn/1,
+    test_gen_server/1
+]).
+
+all() -> [
+    test_init,
+    test_reorder,
+    test_push_metrics,
+    test_named_vip,
+    test_wait_metrics,
+    test_new_data,
+    test_one_conn,
+    test_gen_server
+].
 
 init_per_suite(Config) ->
     Config.

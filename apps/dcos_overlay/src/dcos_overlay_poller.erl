@@ -126,6 +126,7 @@ update_poll_period(_) ->
 
 poll(State0) ->
     Options = [
+        {ssl, [{server_name_indication, disable}]},
         {timeout, application:get_env(?APP, timeout, ?DEFAULT_TIMEOUT)},
         {connect_timeout, application:get_env(?APP, connect_timeout, ?DEFAULT_CONNECT_TIMEOUT)}
     ],
