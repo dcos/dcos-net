@@ -104,4 +104,7 @@ RELEASE_ROOT_DIR="$(cd `dirname "${SCRIPT_DIR}"` && pwd -P)"
 ERTS_DIR="$RELEASE_ROOT_DIR/erts-$ERTS_VSN"
 check_epmd
 
+## Set application name
+export ESCRIPT_NAME=$(dirname $SCRIPT_DIR)
+
 NAME=${NAME} RELX_REPLACE_OS_VARS=true RELX_OUT_FILE_PATH=/tmp ${RELNAME} $@
