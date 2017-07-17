@@ -8,6 +8,6 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-    {ok, {#{}, [
+    {ok, {#{intensity => 10000, period => 1}, [
         ?CHILD(dcos_net_masters)
     ]}}.

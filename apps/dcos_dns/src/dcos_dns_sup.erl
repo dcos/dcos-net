@@ -36,7 +36,7 @@ init([true]) ->
         dcos_dns_config:handler_limit()),
 
     %% The top level sup should never die.
-    {ok, {#{strategy => one_for_all, intensity => 10000, period => 1}, Children1}}.
+    {ok, {#{intensity => 10000, period => 1}, Children1}}.
 
 %%====================================================================
 %% Internal functions
