@@ -6,10 +6,6 @@
   {applications,
    [kernel,
     stdlib,
-    dcos_rest,
-    dcos_dns,
-    dcos_overlay,
-    dcos_l4lb,
     lashup,
     lager
    ]},
