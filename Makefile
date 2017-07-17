@@ -56,6 +56,3 @@ rel:
 
 stage:
 	${REBAR} release -d
-
-shell:
-	${REBAR} shell --apps spartan
