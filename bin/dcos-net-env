@@ -24,6 +24,18 @@ function check_epmd() {
         echo "EPMD is not reachable at port \"${ERL_EPMD_PORT}\"" >&2
         exit 1;
     fi
+    APP_PORT=$(${ERTS_DIR}/bin/epmd -port ${ERL_EPMD_PORT} -names | awk "/${APP_NAME}/{print \$5}")
+    if [ "${APP_PORT}" ]; then
+        read -r -d '' EVALCODE <<- EOM
+            case gen_tcp:connect({127, 0, 0, 1}, ${APP_PORT}, [], 1000) of
+                {ok, S} -> gen_tcp:close(S), halt(1);
+                {error, Error} -> halt(0)
+            end.
+EOM
+        if ${ERTS_DIR}/bin/erl -boot start_clean -noinput -eval "${EVALCODE}"; then
+            ${ERTS_DIR}/bin/epmd -port ${ERL_EPMD_PORT} -stop ${APP_NAME}
+        fi
+    fi
 }
 
 ENV_FILE="/opt/mesosphere/etc/${APP_NAME}.env"
