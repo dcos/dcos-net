@@ -17,11 +17,14 @@ setup_cowboy() ->
             {"/lashup/kv/[...]", dcos_rest_lashup_handler, []},
             {"/lashup/key", dcos_rest_key_handler, []},
             {"/v1/vips", dcos_rest_vips_handler, []},
-            {"/status", dcos_rest_status_handler, []}
+            {"/status", dcos_rest_status_handler, []},
+            {"/sfs/v1/object/[...]", dcos_rest_sfs_handler, [object]},
+            {"/sfs/v1/stream", dcos_rest_sfs_handler, [stream]}
         ]}
     ]),
-    Ip = application:get_env(navstar, ip, {127, 0, 0, 1}),
-    Port = application:get_env(navstar, port, 62080),
-    {ok, _} = cowboy:start_http(http, 100, [{ip, Ip}, {port, Port}], [
-        {env, [{dispatch, Dispatch}]}
-    ]).
+    lists:foreach(fun (IP) ->
+        {ok, _} = cowboy:start_http(
+            {dcos_rest, IP}, 100,
+            [{ip, IP}, {port, dcos_rest_app:port()}],
+            [{env, [{dispatch, Dispatch}]}])
+    end, dcos_dns_config:bind_ips()).

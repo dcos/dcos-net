@@ -24,6 +24,8 @@ dcos-net is responsible for the following:
 * Distributed [Layer 4](http://www.linuxvirtualserver.org/software/ipvs.html)
   virtual IP load balancing
 
+* DC/OS Simple File Service (or DC/OS SFS)
+
 * Network metrics ([Enterprise DC/OS](https://mesosphere.com/product/) only)
 
 For more information please see DC/OS [documentation](https://dcos.io/docs/latest/networking/).

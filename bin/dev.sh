@@ -151,4 +151,4 @@ check_epmd
 
 ### Run
 exec ./rebar3 shell --config config/sys.config --name ${NAME} --setcookie minuteman \
-    --apps mnesia,dcos_dns,dcos_l4lb,dcos_overlay,dcos_rest,dcos_net,recon
+    --apps mnesia,dcos_dns,dcos_l4lb,dcos_overlay,dcos_rest,dcos_sfs,dcos_net,recon

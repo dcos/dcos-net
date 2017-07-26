@@ -1,0 +1,12 @@
+{application, dcos_sfs, [
+    {description, "DC/OS Simple File System"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {mod, {dcos_sfs_app, []}},
+    {applications, [
+        kernel,
+        stdlib
+    ]},
+    {env,[]},
+    {modules, []}
+]}.
