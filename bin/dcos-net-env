@@ -25,6 +25,8 @@ function check_epmd() {
         exit 1;
     fi
     APP_PORT=$(${ERTS_DIR}/bin/epmd -port ${ERL_EPMD_PORT} -names | awk "/${APP_NAME}/{print \$5}")
+    APP_PORT=$(${ERTS_DIR}/bin/epmd -port ${ERL_EPMD_PORT} -names | \
+             awk "{if (\$2 == \"${APP_NAME}\") print \$5}")
     if [ "${APP_PORT}" ]; then
         read -r -d '' EVALCODE <<- EOM
             case gen_tcp:connect({127, 0, 0, 1}, ${APP_PORT}, [], 1000) of
