@@ -273,6 +273,9 @@ task_ip_by_network_infos(Task, Label) ->
 task_ip_autoip(Task = #task{container = #container{type = docker, docker = #docker{port_mappings = PortMappings}}}) when
         PortMappings == [] orelse PortMappings == undefined ->
     task_ip_by_network_infos(Task, <<"autoip">>);
+task_ip_autoip(Task = #task{container = #container{type = mesos, network_infos = NetworkInfos}}) when 
+        NetworkInfos == [] orelse NetworkInfos == undefined ->
+    task_ip_by_network_infos(Task, <<"autoip">>);
 task_ip_autoip(Task = #task{container = #container{type = mesos,
       network_infos = []}}) ->
     task_ip_by_network_infos(Task, <<"autoip">>);
@@ -499,6 +502,28 @@ expected_autoip_list() ->
     {<<"autoip">>, {1, 2, 3, 11}},
     {<<"autoip">>, {1, 2, 3, 11}},
     {<<"autoip">>, {1, 2, 3, 11}}].
+
+zone_records_ucr_autoip_test() ->
+    DataDir = code:priv_dir(dcos_dns),
+    Filename = filename:join(DataDir, "ucr-bridge-mode-net-info.json"),
+    {ok, Data} = file:read_file(Filename),
+    {ok, ParsedBody} = mesos_state_client:parse_response(Data),
+    Tasks = mesos_state_client:tasks(ParsedBody),
+    [A|_T] = Tasks,
+    Result = task_ip_autoip(A),
+    ExpectedResult = {<<"autoip">>, {10,0,2,5}},
+    ?assertEqual(ExpectedResult, Result).
+
+zone_records_ucr_autoip2_test() ->
+    DataDir = code:priv_dir(dcos_dns),
+    Filename = filename:join(DataDir, "ucr-bridge-mode-no-net-info.json"),
+    {ok, Data} = file:read_file(Filename),
+    {ok, ParsedBody} = mesos_state_client:parse_response(Data),
+    Tasks = mesos_state_client:tasks(ParsedBody),
+    [A|_T] = Tasks,
+    Result = task_ip_autoip(A),
+    ExpectedResult = {<<"autoip">>, {172,31,254,2}},
+    ?assertEqual(ExpectedResult, Result).
 
 zone_records_state3_test() ->
     DataDir = code:priv_dir(dcos_dns),
