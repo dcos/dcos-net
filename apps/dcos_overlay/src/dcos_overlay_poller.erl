@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, ip/0, overlays/0, netlink/0]).
+-export([start_link/0, ip/0, overlays/0]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -78,9 +78,8 @@ handle_call(ip, _From, State = #state{ip = IP}) ->
     {reply, IP, State};
 handle_call(overlays, _From, State = #state{known_overlays = KnownOverlays}) ->
     {reply, KnownOverlays, State};
-handle_call(netlink, _From, State = #state{netlink = NETLINK}) ->
-    {reply, NETLINK, State};
 handle_call(_Request, _From, State) ->
+    lager:warning("Unexpected request: ~p", [_Request]),
     {reply, ok, State}.
 
 handle_cast(_Request, State) ->
@@ -170,8 +169,8 @@ process_ip(IPBin0) ->
 
 
 add_overlay(
-    Overlay = #mesos_state_agentoverlayinfo{state = #'mesos_state_agentoverlayinfo.state'{status = 'STATUS_OK'}},
-    State0 = #state{known_overlays = KnownOverlays0}) ->
+  Overlay = #mesos_state_agentoverlayinfo{state = #'mesos_state_agentoverlayinfo.state'{status = 'STATUS_OK'}},
+  State0 = #state{known_overlays = KnownOverlays0}) ->
     KnownOverlays1 = ordsets:add_element(Overlay, KnownOverlays0),
     State1 = State0#state{known_overlays = KnownOverlays1},
     config_overlay(Overlay, State1),
@@ -185,34 +184,36 @@ config_overlay(Overlay, State) ->
     maybe_create_vtep(Overlay, State),
     maybe_add_ip_rule(Overlay, State).
 
-maybe_create_vtep(_Overlay = #mesos_state_agentoverlayinfo{backend = Backend}, #state{netlink = Pid}) ->
+maybe_create_vtep(_Overlay = #mesos_state_agentoverlayinfo{backend = Backend},
+  #state{netlink = Pid}) ->
     #mesos_state_backendinfo{vxlan = VXLan} = Backend,
     #mesos_state_vxlaninfo{
         vni = VNI,
         vtep_ip = VTEPIP,
+        vtep_ip6 = VTEPIP6,
         vtep_mac = VTEPMAC,
         vtep_name = VTEPName
     } = VXLan,
     VTEPNameStr = binary_to_list(VTEPName),
     ParsedVTEPMAC = list_to_tuple(parse_vtep_mac(VTEPMAC)),
     {ParsedVTEPIP, PrefixLen} = parse_subnet(VTEPIP),
+    {ParsedVTEPIP6, PrefixLen6} = parse_subnet(VTEPIP6),
     dcos_overlay_netlink:iplink_add(Pid, VTEPNameStr, "vxlan", VNI, 64000),
     {ok, _} = dcos_overlay_netlink:iplink_set(Pid, ParsedVTEPMAC, VTEPNameStr),
-    {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, ParsedVTEPIP, PrefixLen, VTEPNameStr).
+    {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, inet, ParsedVTEPIP, PrefixLen, VTEPNameStr),
+    {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, inet6, ParsedVTEPIP6, PrefixLen6, VTEPNameStr).
 
 maybe_add_ip_rule(_Overlay = #mesos_state_agentoverlayinfo{info = #mesos_state_overlayinfo{subnet = Subnet}},
  #state{netlink = Pid}) ->
     {ParsedSubnetIP, PrefixLen} = parse_subnet(Subnet),
-    {ok, Rules} = dcos_overlay_netlink:iprule_show(Pid),
-    Rule = dcos_overlay_netlink:make_iprule(ParsedSubnetIP, PrefixLen, ?TABLE),
+    {ok, Rules} = dcos_overlay_netlink:iprule_show(Pid, inet),
+    Rule = dcos_overlay_netlink:make_iprule(inet, ParsedSubnetIP, PrefixLen, ?TABLE),
     case dcos_overlay_netlink:is_iprule_present(Rules, Rule) of
         false ->
-            {ok, _} = dcos_overlay_netlink:iprule_add(Pid, ParsedSubnetIP, PrefixLen, ?TABLE);
+            {ok, _} = dcos_overlay_netlink:iprule_add(Pid, inet, ParsedSubnetIP, PrefixLen, ?TABLE);
         _ ->
             ok
     end.
-
-
 
 %% Always return an ordered set of masters
 -spec(masters() -> [node()]).
@@ -225,13 +226,32 @@ masters() ->
             ordsets:from_list(Value)
     end.
 
-maybe_add_overlay_to_lashup(Overlay = #mesos_state_agentoverlayinfo{info = #mesos_state_overlayinfo{subnet = Subnet}},
-    State) ->
-    ParsedSubnet = parse_subnet(Subnet),
+maybe_add_overlay_to_lashup(Overlay, State) ->
+    #mesos_state_agentoverlayinfo{
+      backend = #mesos_state_backendinfo{vxlan = VXLan},
+      subnet = AgentSubnet,
+      subnet6 = AgentSubnet6,
+      info = #mesos_state_overlayinfo{
+        subnet = OverlaySubnet,
+        subnet6 = OverlaySubnet6
+      }
+    } = Overlay,
+    #mesos_state_vxlaninfo{
+        vtep_ip = VTEPIPStr,
+        vtep_ip6 = VTEPIP6Str,
+        vtep_mac = VTEPMac
+    } = VXLan,
+    lager:warning("~p, ~p, ~p", [VTEPIPStr, VTEPIP6Str, VTEPMac]),
+    maybe_add_overlay_to_lashup(VTEPIPStr, VTEPMac, AgentSubnet, OverlaySubnet, State),
+    maybe_add_overlay_to_lashup(VTEPIP6Str, VTEPMac, AgentSubnet6, OverlaySubnet6, State).
+
+maybe_add_overlay_to_lashup(_VTEPIPStr, _VTEPMac, _AgentSubnet, undefined, _State) ->
+    ok;
+maybe_add_overlay_to_lashup(VTEPIPStr, VTEPMac, AgentSubnet, OverlaySubnet, State) ->
+    ParsedSubnet = parse_subnet(OverlaySubnet),
     Key = [navstar, overlay, ParsedSubnet],
     LashupValue = lashup_kv:value(Key),
-    Now = erlang:system_time(nano_seconds),
-    case check_subnet(Overlay, State, LashupValue, Now) of
+    case check_subnet(VTEPIPStr, VTEPMac, AgentSubnet, LashupValue, State) of
         ok ->
             ok;
         Updates ->
@@ -239,26 +259,20 @@ maybe_add_overlay_to_lashup(Overlay = #mesos_state_agentoverlayinfo{info = #meso
             {ok, _} = lashup_kv:request_op(Key, {update, [Updates]})
     end.
 
--type prefix_len() :: 0..32.
--spec(parse_subnet(Subnet :: binary()) -> {inet:ipv4_address(), prefix_len()}).
+-type prefix_len() :: 0..32 | 0..128.
+-spec(parse_subnet(Subnet :: binary()) -> {inet:ip_address(), prefix_len()}).
 parse_subnet(Subnet) ->
     [IPBin, PrefixLenBin] = binary:split(Subnet, <<"/">>),
-    {ok, IP} = inet:parse_ipv4_address(binary_to_list(IPBin)),
+    {ok, IP} = inet:parse_address(binary_to_list(IPBin)),
     PrefixLen = erlang:binary_to_integer(PrefixLenBin),
     true = is_integer(PrefixLen),
-    true = 0 =< PrefixLen andalso PrefixLen =< 32,
+    true = 0 =< PrefixLen andalso PrefixLen =< 128,
     {IP, PrefixLen}.
 
-check_subnet(
-    #mesos_state_agentoverlayinfo{backend = Backend, subnet = LocalSubnet},
-    _State = #state{ip = AgentIP}, LashupValue, Now) ->
+check_subnet(VTEPIPStr, VTEPMac, AgentSubnet, LashupValue,
+  _State = #state{ip = AgentIP}) ->
 
-    #mesos_state_backendinfo{vxlan = VXLan} = Backend,
-    #mesos_state_vxlaninfo{
-        vtep_ip = VTEPIPStr,
-        vtep_mac = VTEPMac
-    } = VXLan,
-    ParsedLocalSubnet = parse_subnet(LocalSubnet),
+    ParsedSubnet = parse_subnet(AgentSubnet),
     ParsedVTEPMac = parse_vtep_mac(VTEPMac),
 
     ParsedVTEPIP = parse_subnet(VTEPIPStr),
@@ -266,12 +280,13 @@ check_subnet(
         {{ParsedVTEPIP, riak_dt_map}, _Value} ->
             ok;
         false ->
+            Now = erlang:system_time(nano_seconds),
             {update,
                 {ParsedVTEPIP, riak_dt_map},
                 {update, [
                     {update, {mac, riak_dt_lwwreg}, {assign, ParsedVTEPMac, Now}},
                     {update, {agent_ip, riak_dt_lwwreg}, {assign, AgentIP, Now}},
-                    {update, {subnet, riak_dt_lwwreg}, {assign, ParsedLocalSubnet, Now}}
+                    {update, {subnet, riak_dt_lwwreg}, {assign, ParsedSubnet, Now}}
                     ]
                 }
             }

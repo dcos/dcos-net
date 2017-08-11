@@ -5,10 +5,10 @@
 -module(dcos_overlay_netlink).
 
 %% Application callbacks
--export([start_link/0, stop/1, ipneigh_replace/4, iproute_replace/5, bridge_fdb_replace/4,
-        iplink_show/2, iplink_add/5, iplink_set/3, iprule_show/1,
-        iprule_add/4, make_iprule/3, match_iprules/2, is_iprule_present/2,
-        ipaddr_replace/4, if_nametoindex/1]).
+-export([start_link/0, stop/1, ipneigh_replace/5, iproute_replace/6, bridge_fdb_replace/4,
+        iplink_show/2, iplink_add/5, iplink_set/3, iprule_show/2,
+        iprule_add/5, make_iprule/4, match_iprules/2, is_iprule_present/2,
+        ipaddr_replace/5, if_nametoindex/1]).
 
 -include_lib("gen_netlink/include/netlink.hrl").
 
@@ -28,12 +28,12 @@ stop(Pid) ->
     unlink(Pid),
     exit(Pid, kill).
 
-%% eg. ipneigh_replace(Pid, {44,128,0,1}, {16#70,16#b3,16#d5,16#80,16#00,16#03}, "vtep1024").
-ipneigh_replace(Pid, Dst, Lladdr, Ifname) ->
+%% eg. ipneigh_replace(Pid, inet, {44,128,0,1}, {16#70,16#b3,16#d5,16#80,16#00,16#03}, "vtep1024").
+ipneigh_replace(Pid, Family, Dst, Lladdr, Ifname) ->
   Attr = [{dst, Dst}, {lladdr, Lladdr}],
   Ifindex = if_nametoindex(Ifname),
   Neigh = {
-    _Family = inet,
+    _Family = Family,
     _Ifindex = Ifindex,
     _State = ?NUD_PERMANENT,
     _Flags = 0,
@@ -41,11 +41,11 @@ ipneigh_replace(Pid, Dst, Lladdr, Ifname) ->
     Attr},
   netlink_request(Pid, newneigh, [create, replace], Neigh).
 
-%% eg. iproute_replace(Pid, {192,168,65,91}, 32, {44,128,0,1}, 42).
-iproute_replace(Pid, Dst, DstPrefixLen, Src, Table) ->
+%% eg. iproute_replace(Pid, inet, {192,168,65,91}, 32, {44,128,0,1}, 42).
+iproute_replace(Pid, Family, Dst, DstPrefixLen, Src, Table) ->
   Attr = [{dst, Dst}, {gateway, Src}],
   Route = {
-    _Family = inet,
+    _Family = Family,
     _DstPrefixLen = DstPrefixLen,
     _SrcPrefixLen = 0,
     _Tos = 0,
@@ -72,9 +72,9 @@ bridge_fdb_replace(Pid, Dst, Lladdr, Ifname) ->
   netlink_request(Pid, newneigh, [create, replace], Neigh).
 
 %% eg. iplink_show(Pid, "vtep1024") ->
-%%        [{rtnetlink,newlink,[],3,31030,
-%%          {unspec,arphrd_ether,8, [lower_up,multicast,running,broadcast,up],
-%%           [], [{ifname,"vtep1024"}, ...]}}]
+%%        [{rtnetlink, newlink, [], 3, 31030,
+%%          {unspec, arphrd_ether, 8, [lower_up, multicast, running, broadcast, up],
+%%           [], [{ifname, "vtep1024"}, ...]}}]
 iplink_show(Pid, Ifname) ->
   Attr = [{ifname, Ifname}, {ext_mask, 1}],
   Link = {packet, arphrd_netrom, 0, [], [], Attr},
@@ -114,16 +114,16 @@ iplink_set(Pid, Lladdr, Ifname) ->
 %%   [...., {rtnetlink,newrule,[multi],6,31030,
 %%       {inet,0,8,0,42,unspec,universe,unicast,[],
 %%          [{table,42},{priority,32765},{src,{9,0,0,0}}]}}, ....]
-iprule_show(Pid) ->
+iprule_show(Pid, Family) ->
  Attr = [{29, <<1:32/native-integer>>}], %% [{ext_mask, 1}]
- Rule = {inet, 0, 0, 0, 0, 0, 0, 0, [], Attr},
+ Rule = {Family, 0, 0, 0, 0, 0, 0, 0, [], Attr},
  netlink_request(Pid, getrule, [root, match], Rule).
 
-%% iprule_add(Pid, {9,0,0,0}, 8, 42).
-iprule_add(Pid, Src, SrcPrefixLen, Table) ->
+%% iprule_add(Pid, inet, {9,0,0,0}, 8, 42).
+iprule_add(Pid, Family, Src, SrcPrefixLen, Table) ->
  Attr = [{src, Src}],
  Rule = {
-   _Family = inet,
+   _Family = Family,
    _DstPrefixLen = 0,
    _SrcPrefixLen = SrcPrefixLen,
    _Tos = 0,
@@ -135,8 +135,8 @@ iprule_add(Pid, Src, SrcPrefixLen, Table) ->
    Attr},
  netlink_request(Pid, newrule, [create, excl], Rule).
 
-make_iprule(Src, SrcPrefixLen, Table) ->
-    {inet, 0, SrcPrefixLen, 0, Table, unspec, universe, unicast, [], [{src, Src}]}.
+make_iprule(Family, Src, SrcPrefixLen, Table) ->
+    {Family, 0, SrcPrefixLen, 0, Table, unspec, universe, unicast, [], [{src, Src}]}.
 
 is_iprule_present([], _) ->
   false;
@@ -146,8 +146,8 @@ is_iprule_present([{rtnetlink, newrule, _, _, _, ParsedRule}|Rules], Rule) ->
       not_matched -> is_iprule_present(Rules, Rule)
   end.
 
-match_iprules({inet, 0, SrcPrefixLen, 0, Table, unspec, universe, unicast, [], [{src, Src}]},
-  {inet, 0, SrcPrefixLen, 0, Table, unspec, universe, unicast, [], Prop}) ->
+match_iprules({Family, 0, SrcPrefixLen, 0, Table, unspec, universe, unicast, [], [{src, Src}]},
+  {Family, 0, SrcPrefixLen, 0, Table, unspec, universe, unicast, [], Prop}) ->
   case proplists:get_value(src, Prop) of
       Src -> matched;
       _ -> not_matched
@@ -155,12 +155,12 @@ match_iprules({inet, 0, SrcPrefixLen, 0, Table, unspec, universe, unicast, [], [
 match_iprules(_, _) ->
   not_matched.
 
-%% ipaddr_add(Pid, {44,128,0,1}, 32, "vtep1024").
-ipaddr_replace(Pid, IP, PrefixLen, Ifname) ->
- Attr = [{local, IP}, {address, IP}],
+%% ipaddr_add(Pid, inet, {44,128,0,1}, 32, "vtep1024").
+ipaddr_replace(Pid, Family, IP, PrefixLen, Ifname) ->
+ Attr = [{local, IP},{address, IP}],
  Ifindex = if_nametoindex(Ifname),
  Msg = {
-   _Family = inet,
+   _Family = Family,
    _PrefixLen = PrefixLen,
    _Flags = 0,
    _Scope = 0,
