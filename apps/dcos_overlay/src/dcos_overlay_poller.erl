@@ -56,9 +56,6 @@ ip() ->
 overlays() ->
     gen_server:call(?SERVER, overlays).
 
-netlink() ->
-    gen_server:call(?SERVER, netlink).
-
 %% @doc Starts the server
 -spec(start_link() ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
@@ -197,14 +194,28 @@ maybe_create_vtep(_Overlay = #mesos_state_agentoverlayinfo{backend = Backend},
     VTEPNameStr = binary_to_list(VTEPName),
     ParsedVTEPMAC = list_to_tuple(parse_vtep_mac(VTEPMAC)),
     {ParsedVTEPIP, PrefixLen} = parse_subnet(VTEPIP),
-    {ParsedVTEPIP6, PrefixLen6} = parse_subnet(VTEPIP6),
     dcos_overlay_netlink:iplink_add(Pid, VTEPNameStr, "vxlan", VNI, 64000),
     {ok, _} = dcos_overlay_netlink:iplink_set(Pid, ParsedVTEPMAC, VTEPNameStr),
     {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, inet, ParsedVTEPIP, PrefixLen, VTEPNameStr),
-    {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, inet6, ParsedVTEPIP6, PrefixLen6, VTEPNameStr).
+    case VTEPIP6 of
+      undefined ->
+          ok;
+      _ ->
+          {ParsedVTEPIP6, PrefixLen6} = parse_subnet(VTEPIP6),
+          {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, inet6, ParsedVTEPIP6, PrefixLen6, VTEPNameStr)
+    end.
 
-maybe_add_ip_rule(_Overlay = #mesos_state_agentoverlayinfo{info = #mesos_state_overlayinfo{subnet = Subnet}},
- #state{netlink = Pid}) ->
+maybe_add_ip_rule(Overlay, #state{netlink = Pid}) ->
+    #mesos_state_agentoverlayinfo{
+      info = #mesos_state_overlayinfo{
+        subnet = Subnet
+      }
+    } = Overlay,
+    maybe_add_ip_rule2(Pid, Subnet).
+
+maybe_add_ip_rule2(_, undefined) ->
+    ok;
+maybe_add_ip_rule2(Pid, Subnet) ->
     {ParsedSubnetIP, PrefixLen} = parse_subnet(Subnet),
     {ok, Rules} = dcos_overlay_netlink:iprule_show(Pid, inet),
     Rule = dcos_overlay_netlink:make_iprule(inet, ParsedSubnetIP, PrefixLen, ?TABLE),
@@ -241,7 +252,6 @@ maybe_add_overlay_to_lashup(Overlay, State) ->
         vtep_ip6 = VTEPIP6Str,
         vtep_mac = VTEPMac
     } = VXLan,
-    lager:warning("~p, ~p, ~p", [VTEPIPStr, VTEPIP6Str, VTEPMac]),
     maybe_add_overlay_to_lashup(VTEPIPStr, VTEPMac, AgentSubnet, OverlaySubnet, State),
     maybe_add_overlay_to_lashup(VTEPIP6Str, VTEPMac, AgentSubnet6, OverlaySubnet6, State).
 

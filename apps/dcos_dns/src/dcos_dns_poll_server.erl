@@ -273,7 +273,7 @@ task_ip_by_network_infos(Task, Label) ->
 task_ip_autoip(Task = #task{container = #container{type = docker, docker = #docker{port_mappings = PortMappings}}}) when
         PortMappings == [] orelse PortMappings == undefined ->
     task_ip_by_network_infos(Task, <<"autoip">>);
-task_ip_autoip(Task = #task{container = #container{type = mesos, network_infos = NetworkInfos}}) when 
+task_ip_autoip(Task = #task{container = #container{type = mesos, network_infos = NetworkInfos}}) when
         NetworkInfos == [] orelse NetworkInfos == undefined ->
     task_ip_by_network_infos(Task, <<"autoip">>);
 task_ip_autoip(Task = #task{container = #container{type = mesos,
@@ -511,7 +511,7 @@ zone_records_ucr_autoip_test() ->
     Tasks = mesos_state_client:tasks(ParsedBody),
     [A|_T] = Tasks,
     Result = task_ip_autoip(A),
-    ExpectedResult = {<<"autoip">>, {10,0,2,5}},
+    ExpectedResult = {<<"autoip">>, {10, 0, 2, 5}},
     ?assertEqual(ExpectedResult, Result).
 
 zone_records_ucr_autoip2_test() ->
@@ -522,7 +522,7 @@ zone_records_ucr_autoip2_test() ->
     Tasks = mesos_state_client:tasks(ParsedBody),
     [A|_T] = Tasks,
     Result = task_ip_autoip(A),
-    ExpectedResult = {<<"autoip">>, {172,31,254,2}},
+    ExpectedResult = {<<"autoip">>, {172, 31, 254, 2}},
     ?assertEqual(ExpectedResult, Result).
 
 zone_records_state3_test() ->
