@@ -347,6 +347,9 @@ task_ip_autoip(Task = #task{container = #container{type = docker, docker = #dock
         PortMappings == [] orelse PortMappings == undefined ->
     task_ip_by_network_infos(Task, <<"autoip">>);
 task_ip_autoip(Task = #task{container = #container{type = mesos,
+      network_infos = []}}) ->
+    task_ip_by_network_infos(Task, <<"autoip">>);
+task_ip_autoip(Task = #task{container = #container{type = mesos,
       network_infos = [#network_info{port_mappings = PortMappings}|_]}}) when
       PortMappings == [] orelse PortMappings == undefined ->
     task_ip_by_network_infos(Task, <<"autoip">>);
