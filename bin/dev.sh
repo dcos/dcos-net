@@ -1,6 +1,46 @@
-#!/bin/bash
+#!/bin/sh
 
-APP_NAME=spartan
+if ! hostname | grep dcos-docker > /dev/null; then
+    HOST=${1:-dcos-docker-master1}
+    exec docker exec -it ${HOST} /bin/sh -c "cd $(pwd) && exec ./bin/dev.sh"
+fi
+
+
+### EnvironmentFile
+eval $(
+    systemctl cat dcos-net | \
+        sed -nre 's/EnvironmentFile=-?//p' | \
+        xargs sed -nre '/^[^# ]/s/^/export /p' 2> /dev/null | \
+        sed -re 's/=([^"])/="\1/;s/([^"])$/\1"/'
+)
+
+### Environment
+eval $(
+    systemctl cat dcos-net | sed -nre 's/Environment=/export /p'
+)
+
+
+### Pre-Build
+if ! which gcc g++ make dig ip ipvsadm > /dev/null 2> /dev/null; then
+    yum install -y make gcc gcc-c++ bind-utils iproute2 ipvsadm || exit 2
+fi
+export CFLAGS="-I/opt/mesosphere/include -I/opt/mesosphere/active/libsodium/include"
+export LDFLAGS="-L/opt/mesosphere/lib -L/opt/mesosphere/active/libsodium/lib -Wl,-rpath=/opt/mesosphere/active/libsodium/lib"
+./rebar3 get-deps || exit 3
+
+### Prepare to start
+systemctl stop dcos-net.service dcos-net-watchdog.timer dcos-net-watchdog.service
+
+### ExecStartPre
+systemctl cat dcos-net | \
+    sed -nre 's/ExecStartPre=-?//p' | \
+    xargs -n 1 -I {} bash -c '{} | true'
+
+
+### See dcos-net-env
+
+APP_NAME=dcos-net
+NODE_NAME=navstar
 
 function valid_ip()
 {
@@ -20,9 +60,21 @@ function valid_ip()
 }
 
 function check_epmd() {
-    if ! ${ERTS_DIR}/bin/epmd -port ${ERL_EPMD_PORT} -names > /dev/null; then
+    if ! epmd -port ${ERL_EPMD_PORT} -names > /dev/null; then
         echo "EPMD is not reachable at port \"${ERL_EPMD_PORT}\"" >&2
         exit 1;
+    fi
+    APP_PORT=$(epmd -port ${ERL_EPMD_PORT} -names | awk "/${NODE_NAME}/{print \$5}")
+    if [ "${APP_PORT}" ]; then
+        read -r -d '' EVALCODE <<- EOM
+            case gen_tcp:connect({127, 0, 0, 1}, ${APP_PORT}, [], 1000) of
+                {ok, S} -> gen_tcp:close(S), halt(1);
+                {error, Error} -> halt(0)
+            end.
+EOM
+        if erl -boot start_clean -noinput -eval "${EVALCODE}"; then
+            epmd -port ${ERL_EPMD_PORT} -stop ${NODE_NAME}
+        fi
     fi
 }
 
@@ -43,11 +95,7 @@ if [ -x /opt/mesosphere/bin/detect_ip ]; then
 else
     IP=$(ip r g 192.88.99.0 | grep -Po 'src \K[\d.]+')
 fi
-NAME=${APP_NAME}@${IP}
-SCRIPT=$(readlink -f $0 || true)
-[ -z $SCRIPT ] && SCRIPT=$0
-SCRIPT_DIR="$(cd `dirname "$SCRIPT"` && pwd -P)"
-RELNAME="${SCRIPT_DIR}/${APP_NAME}"
+NAME=${NODE_NAME}@${IP}
 
 ## If ERLANG_DISTRIBUTION is unset, then set it to inet_tcp
 ERLANG_DISTRIBUTION=${ERLANG_DISTRIBUTION:=inet_tcp}
@@ -99,9 +147,8 @@ export ERL_FLAGS="${ERL_FLAGS} -mesos_state ssl ${MESOS_STATE_SSL_ENABLED}"
 
 ### EPMD
 export ERL_EPMD_PORT=61420
-ERTS_VSN="{{ erts_vsn }}"
-RELEASE_ROOT_DIR="$(cd `dirname "${SCRIPT_DIR}"` && pwd -P)"
-ERTS_DIR="$RELEASE_ROOT_DIR/erts-$ERTS_VSN"
 check_epmd
 
-NAME=${NAME} RELX_REPLACE_OS_VARS=true RELX_OUT_FILE_PATH=/tmp ${RELNAME} $@
+### Run
+exec ./rebar3 shell --config config/sys.config --name ${NAME} --setcookie minuteman \
+    --apps mnesia,dcos_dns,dcos_l4lb,dcos_overlay,dcos_rest,dcos_net,recon

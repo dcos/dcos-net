@@ -11,37 +11,30 @@
 
 -include("dcos_rest.hrl").
 %% API
--export([init/2]).
+-export([init/3]).
 -export([content_types_provided/2, allowed_methods/2]).
 -export([to_json/2]).
 
-
-init(Req, Opts) ->
-    {cowboy_rest, Req, Opts}.
-
+init(_Transport, Req, Opts) ->
+    {upgrade, protocol, cowboy_rest, Req, Opts}.
 
 content_types_provided(Req, State) ->
     {[
-        {<<"application/json">>, to_json}
+        {{<<"application">>, <<"json">>, []}, to_json}
     ], Req, State}.
-
-
 
 allowed_methods(Req, State) ->
     {[<<"GET">>], Req, State}.
 
-
-to_json(Req0, State) ->
-    Req1 =
-        case keys() of
-            notfound ->
-                Body = <<"Cluster keys not found in Lashup">>,
-                cowboy_req:reply(404, _Headers = [], Body, Req0);
-            Body0 ->
-                Body1 = jsx:encode(Body0),
-                cowboy_req:reply(200, [], Body1, Req0)
-    end,
-    {<<>>, Req1, State}.
+to_json(Req, State) ->
+    case keys() of
+        notfound ->
+            Body = <<"Cluster keys not found in Lashup">>,
+            {ok, Req0} = cowboy_req:reply(404, _Headers = [], Body, Req),
+            {halt, Req0, State};
+        Keys ->
+            {jsx:encode(Keys), Req, State}
+    end.
 
 keys() ->
     MaybeNavstarKey = lashup_kv:value([navstar, key]),

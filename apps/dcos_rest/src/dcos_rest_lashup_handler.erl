@@ -11,40 +11,34 @@
 
 -include("dcos_rest.hrl").
 %% API
--export([init/2]).
+-export([init/3]).
 -export([content_types_provided/2, allowed_methods/2, content_types_accepted/2]).
 -export([to_json/2, perform_op/2]).
 
-
-init(Req, Opts) ->
-    {cowboy_rest, Req, Opts}.
-
+init(_Transport, Req, Opts) ->
+    {upgrade, protocol, cowboy_rest, Req, Opts}.
 
 content_types_provided(Req, State) ->
     {[
-        {<<"application/json">>, to_json}
+        {{<<"application">>, <<"json">>, []}, to_json}
     ], Req, State}.
-
 
 allowed_methods(Req, State) ->
     {[<<"GET">>, <<"POST">>], Req, State}.
 
 content_types_accepted(Req, State) ->
     {[
-        {<<"text/plain">>, perform_op}
+        {{<<"text">>, <<"plain">>, []}, perform_op}
     ], Req, State}.
 
 perform_op(Req, State) ->
-    <<"POST">> = cowboy_req:method(Req),
-    Key = key(Req),
-    _ = Key,
-    true = cowboy_req:has_body(Req),
-    case cowboy_req:header(<<"clock">>, Req, <<>>) of
-        <<>> ->
-            {{false, <<"Missing clock">>}, Req, State};
-        Clock0 ->
+    {Key, Req0} = key(Req),
+    case cowboy_req:header(<<"clock">>, Req0, <<>>) of
+        {<<>>, Req1} ->
+            {{false, <<"Missing clock">>}, Req1, State};
+        {Clock0, Req1} ->
             Clock1 = binary_to_term(base64:decode(Clock0)),
-            {ok, Body0, Req2} = cowboy_req:body(Req),
+            {ok, Body0, Req2} = cowboy_req:body(Req1),
             Body1 = binary_to_list(Body0),
             {ok, Scanned, _} = erl_scan:string(Body1),
             {ok, Parsed} = erl_parse:parse_exprs(Scanned),
@@ -54,11 +48,9 @@ perform_op(Req, State) ->
 
 perform_op(Key, Update, Clock, Req, State) ->
     case lashup_kv:request_op(Key, Clock, Update) of
-        {ok, Value0} ->
-            Value1 = lists:map(fun encode_key/1, Value0),
-            Body = jsx:encode(Value1),
-            Req2 = cowboy_req:reply(200, [], Body, Req),
-            {<<>>, Req2, State};
+        {ok, Value} ->
+            Value0 = lists:map(fun encode_key/1, Value),
+            {jsx:encode(Value0), Req, State};
         {error, concurrency} ->
             {{false, <<"Concurrent update">>}, Req, State}
     end.
@@ -67,23 +59,20 @@ perform_op(Key, Update, Clock, Req, State) ->
 
 
 to_json(Req, State) ->
-    Key = key(Req),
-    fetch_key(Key, Req, State).
+    {Key, Req0} = key(Req),
+    fetch_key(Key, Req0, State).
 
 fetch_key(Key, Req, State) ->
-    {Value0, Clock} = lashup_kv:value2(Key),
-    Value1 = lists:map(fun encode_key/1, Value0),
-    Body = jsx:encode(Value1),
-    Req2 = cowboy_req:reply(200, [
-        {<<"clock">>, base64:encode(term_to_binary(Clock))}
-    ], Body, Req),
-    io:format("Req2: ~p~n", [Req2]),
-    {<<>>, Req2, State}.
+    {Value, Clock} = lashup_kv:value2(Key),
+    Value0 = lists:map(fun encode_key/1, Value),
+    ClockBin = base64:encode(term_to_binary(Clock)),
+    Req0 = cowboy_req:set_resp_header(<<"clock">>, ClockBin, Req),
+    {jsx:encode(Value0), Req0, State}.
 
 key(Req) ->
-    KeyHandler = cowboy_req:header(<<"key-handler">>, Req),
-    KeyData = cowboy_req:path_info(Req),
-    key(KeyData, KeyHandler).
+    {KeyHandler, Req0} = cowboy_req:header(<<"key-handler">>, Req),
+    {KeyData, Req1} = cowboy_req:path_info(Req0),
+    {key(KeyData, KeyHandler), Req1}.
 
 key([], _) ->
     erlang:throw(invalid_key);

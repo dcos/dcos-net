@@ -24,36 +24,21 @@
     lookup_vips/1,
     code_change/3]).
 
--ifdef(TEST).
--export([setup_monitor/0]).
--endif.
-
--include_lib("telemetry/include/telemetry.hrl").
-
--define(SERVER, ?MODULE).
--define(RPC_TIMEOUT, 5000).
--define(MON_CALLBACK_TIME, 5000).
--define(RPC_RETRY_TIME, 15000).
-
 -include_lib("stdlib/include/ms_transform.hrl").
 -include("dcos_l4lb.hrl").
 -include_lib("mesos_state/include/mesos_state.hrl").
 -include_lib("dns/include/dns.hrl").
-
 
 -ifdef(TEST).
 -include_lib("proper/include/proper.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
-
 -type ip4_num() :: 0..16#ffffffff.
 -record(state, {
     ref = erlang:error() :: reference(),
     min_ip_num = erlang:error(no_min_ip_num) :: ip4_num(),
     max_ip_num = erlang:error(no_max_ip_num) :: ip4_num(),
-    retry_timer :: undefined | reference(),
-    monitorRef :: reference(),
     vips
     }).
 -type state() :: #state{}.
@@ -67,146 +52,49 @@
 %%% API
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Starts the server
-%%
-%% @end
-%%--------------------------------------------------------------------
+%% @doc Starts the server
 -spec(start_link() ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link() ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Initializes the server
-%%
-%% @spec init(Args) -> {ok, State} |
-%%                     {ok, State, Timeout} |
-%%                     ignore |
-%%                     {stop, Reason}
-%% @end
-%%--------------------------------------------------------------------
--spec(init(Args :: term()) ->
-    {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
-    {stop, Reason :: term()} | ignore).
 init([]) ->
     ets_restart(name_to_ip),
     ets_restart(ip_to_name),
     MinIP = ip_to_integer(dcos_l4lb_config:min_named_ip()),
     MaxIP = ip_to_integer(dcos_l4lb_config:max_named_ip()),
-    MonitorRef = setup_monitor(),
     {ok, Ref} = lashup_kv_events_helper:start_link(ets:fun2ms(fun({?VIPS_KEY2}) -> true end)),
-    State = #state{ref = Ref, max_ip_num = MaxIP, min_ip_num = MinIP, monitorRef = MonitorRef},
+    State = #state{ref = Ref, max_ip_num = MaxIP, min_ip_num = MinIP},
     {ok, State}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Handling call messages
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec(handle_call(Request :: term(), From :: {pid(), Tag :: term()},
-    State :: state()) ->
-    {reply, Reply :: term(), NewState :: state()} |
-    {reply, Reply :: term(), NewState :: state(), timeout() | hibernate} |
-    {noreply, NewState :: state()} |
-    {noreply, NewState :: state(), timeout() | hibernate} |
-    {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
-    {stop, Reason :: term(), NewState :: state()}).
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Handling cast messages
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec(handle_cast(Request :: term(), State :: state()) ->
-    {noreply, NewState :: state()} |
-    {noreply, NewState :: state(), timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: state()}).
 handle_cast(push_vips, State) ->
     {noreply, State};
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Handling all non call/cast messages
-%%
-%% @spec handle_info(Info, State) -> {noreply, State} |
-%%                                   {noreply, State, Timeout} |
-%%                                   {stop, Reason, State}
-%% @end
-%%--------------------------------------------------------------------
--spec(handle_info(Info :: timeout() | term(), State :: state()) ->
-    {noreply, NewState :: state()} |
-    {noreply, NewState :: state(), timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: state()}).
 handle_info({lashup_kv_events, Event = #{ref := Reference}}, State0 = #state{ref = Reference}) ->
     State1 = handle_event(Event, State0),
-    {noreply, State1};
-handle_info({'DOWN', MonitorRef, process, _, _}, State = #state{monitorRef = MonitorRef}) ->
-   lager:debug("Spartan monitor went off, maybe it got restarted"),
-   erlang:send_after(?MON_CALLBACK_TIME, self(), retry_monitor),
-   {noreply, State};
-handle_info(retry_monitor, State = #state{retry_timer = Timer}) ->
-   lager:debug("Setting retry due to monitor went off"),
-   cancel_retry_timer(Timer),
-   MonitorRef = setup_monitor(),
-   NewTimer = erlang:send_after(?RPC_RETRY_TIME, self(), retry_spartan),
-   {noreply, State#state{monitorRef = MonitorRef, retry_timer = NewTimer}};
-handle_info(retry_spartan, State0) ->
-    lager:debug("Retrying to push the DNS config"),
-    State1 = retry_spartan(State0),
     {noreply, State1};
 handle_info(_Info, State) ->
     {noreply, State}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% This function is called by a gen_server when it is about to
-%% terminate. It should be the opposite of Module:init/1 and do any
-%% necessary cleaning up. When it returns, the gen_server terminates
-%% with Reason. The return value is ignored.
-%%
-%% @spec terminate(Reason, State) -> void()
-%% @end
-%%--------------------------------------------------------------------
--spec(terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
-    State :: state()) -> term()).
 terminate(_Reason, _State) ->
     ok.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Convert process state when code is changed
-%%
-%% @spec code_change(OldVsn, State, Extra) -> {ok, NewState}
-%% @end
-%%--------------------------------------------------------------------
--spec(code_change(OldVsn :: term() | {down, term()}, State :: state(),
-    Extra :: term()) ->
-    {ok, NewState :: state()} | {error, Reason :: term()}).
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
 -spec(lookup_vips([{ip, inet:ip4_address()}|{name, binary()}]) ->
                   [{name, binary()}|{ip, inet:ip4_address()}|{badmatch, term()}]).
 lookup_vips(Names) ->
@@ -232,18 +120,12 @@ handle_lookup_vip(Arg)  -> {badmatch, Arg}.
 handle_event(_Event = #{value := VIPs}, State) ->
     handle_value(VIPs, State).
 
-handle_value(VIPs0, State0 = #state{retry_timer = Timer}) ->
-    cancel_retry_timer(Timer),
+handle_value(VIPs0, State0) ->
     VIPs1 = process_vips(VIPs0, State0),
     State1 = State0#state{vips = VIPs1},
-    State2 = push_state_to_spartan(State1),
+    ok = push_state_to_dcos_dns(State1),
     dcos_l4lb_mgr:push_vips(VIPs1),
-    State2.
-
-cancel_retry_timer(Timer) when is_reference(Timer) ->
-    erlang:cancel_timer(Timer);
-cancel_retry_timer(_) ->
-    ok.
+    State1.
 
 process_vips(VIPs0, State) ->
     VIPs1 = lists:map(fun rewrite_keys/1, VIPs0),
@@ -270,50 +152,14 @@ rewrite_name({{Protocol, {name, {Name, FWName}}, PortNum}, BEs}) ->
 rewrite_name(Else) ->
     Else.
 
-setup_monitor() ->
-    monitor(process, {erldns_zone_cache, spartan_name()}).
-
-retry_spartan(State) ->
-    push_state_to_spartan(State).
-
-push_state_to_spartan(State) ->
+push_state_to_dcos_dns(State) ->
     ZoneNames = ?ZONE_NAMES,
-    Zones = lists:map(fun(ZoneName) -> zone(ZoneName, State) end, ZoneNames),
-    case push_zones(Zones) of
-        ok ->
-            State;
-        error ->
-            Timer = erlang:send_after(?RPC_RETRY_TIME, self(), retry_spartan),
-            State#state{retry_timer = Timer}
-    end.
+    lists:foreach(fun (ZoneName) ->
+        Zone = zone(ZoneName, State),
+        ok = erldns_zone_cache:put_zone(Zone)
+    end, ZoneNames).
 
-push_zones([]) ->
-    ok;
-push_zones([Zone|Zones]) ->
-    case push_zone(Zone) of
-        ok ->
-            push_zones(Zones);
-        {error, Reason} ->
-            lager:warning("Aborting pushing zones to Spartan: ~p", [Reason]),
-            error
-    end.
-
-%% TODO(sargun): Based on the response to https://github.com/aetrion/erl-dns/issues/46 -- we might have to handle
-%% returns from rpc which are errors
-push_zone(Zone) ->
-    case rpc:call(spartan_name(), erldns_zone_cache, put_zone, [Zone], ?RPC_TIMEOUT) of
-        Reason = {badrpc, _} ->
-            {error, Reason};
-        ok ->
-            ok
-    end.
-
-spartan_name() ->
-    [_Node, Host] = binary:split(atom_to_binary(node(), utf8), <<"@">>),
-    SpartanBinName = <<"spartan@", Host/binary>>,
-    binary_to_atom(SpartanBinName, utf8).
-
--spec(zone([binary()], state()) -> {Name :: binary(), Sha :: binary(), [#dns_rr{}]}).
+-spec(zone([binary()], state()) -> {Name :: binary(), Sha :: binary(), [dns:rr()]}).
 zone(ZoneComponents, State) ->
     Now = timeish(),
     zone(Now, ZoneComponents, State).
@@ -329,24 +175,11 @@ timeish() ->
             Time + erlang:unique_integer([positive, monotonic])
     end.
 
--spec(zone(Now :: 0..4294967295, [binary()], state()) -> {Name :: binary(), Sha :: binary(), [#dns_rr{}]}).
+-spec(zone(Now :: 0..4294967295, [binary()], state()) -> {Name :: binary(), Sha :: binary(), [dns:rr()]}).
 zone(Now, ZoneComponents, _State) ->
     ZoneName = binary_to_name(ZoneComponents),
     Records0 = [
-        #dns_rr{
-            name = ZoneName,
-            type = ?DNS_TYPE_SOA,
-            ttl = 5,
-            data = #dns_rrdata_soa{
-                mname = binary_to_name([<<"ns">>|ZoneComponents]), %% Nameserver
-                rname = <<"support.mesosphere.com">>,
-                serial = Now, %% Hopefully there is not more than 1 update/sec :)
-                refresh = 5,
-                retry = 5,
-                expire = 5,
-                minimum = 1
-            }
-        },
+        zone_soa_record(Now, ZoneName, ZoneComponents),
         #dns_rr{
             name = binary_to_name(ZoneComponents),
             type = ?DNS_TYPE_NS,
@@ -360,13 +193,29 @@ zone(Now, ZoneComponents, _State) ->
             type = ?DNS_TYPE_A,
             ttl = 3600,
             data = #dns_rrdata_a{
-                ip = {198, 51, 100, 1} %% Default Spartan IP
+                ip = {198, 51, 100, 1} %% Default dcos-dns IP
             }
         }
     ],
     {_, Records1} = ets:foldl(fun add_record_fold/2, {ZoneComponents, Records0}, name_to_ip),
     Sha = crypto:hash(sha, term_to_binary(Records1)),
     {ZoneName, Sha, Records1}.
+
+zone_soa_record(Now, ZoneName, ZoneComponents) ->
+    #dns_rr{
+        name = ZoneName,
+        type = ?DNS_TYPE_SOA,
+        ttl = 5,
+        data = #dns_rrdata_soa{
+            mname = binary_to_name([<<"ns">>|ZoneComponents]), %% Nameserver
+            rname = <<"support.mesosphere.com">>,
+            serial = Now, %% Hopefully there is not more than 1 update/sec :)
+            refresh = 5,
+            retry = 5,
+            expire = 5,
+            minimum = 1
+        }
+    }.
 
 add_record_fold({Name, IPInt}, {ZoneComponents, Records0}) ->
     Record = #dns_rr{

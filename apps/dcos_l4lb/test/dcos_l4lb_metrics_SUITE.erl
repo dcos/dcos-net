@@ -1,48 +1,54 @@
 -module(dcos_l4lb_metrics_SUITE).
--compile(export_all).
 
 -include_lib("common_test/include/ct.hrl").
 -include("dcos_l4lb.hrl").
 
-all() -> [test_init,
-          test_reorder,
-          test_push_metrics,
-          test_named_vip,
-          test_wait_metrics,
-          test_new_data,
-          test_one_conn,
-          test_gen_server].
+-export([
+    all/0,
+    init_per_suite/1, end_per_suite/1,
+    init_per_testcase/2, end_per_testcase/2,
+    test_init/1,
+    test_reorder/1,
+    test_push_metrics/1,
+    test_named_vip/1,
+    test_wait_metrics/1,
+    test_new_data/1,
+    test_one_conn/1,
+    test_gen_server/1
+]).
+
+all() -> [
+    test_init,
+    test_reorder,
+    test_push_metrics,
+    test_named_vip,
+    test_wait_metrics,
+    test_new_data,
+    test_one_conn,
+    test_gen_server
+].
 
 init_per_suite(Config) ->
-  %% this might help, might not...
-  os:cmd(os:find_executable("epmd") ++ " -daemon"),
-  {ok, Hostname} = inet:gethostname(),
-  case net_kernel:start([list_to_atom("runner@" ++ Hostname), shortnames]) of
-    {ok, _} -> ok;
-    {error, {already_started, _}} -> ok
-  end,
-  Config.
+    Config.
 
 end_per_suite(Config) ->
-  net_kernel:stop(),
-  Config.
+    Config.
 
 init_per_testcase(Test, Config) ->
+    application:load(ip_vs_conn),
     application:set_env(ip_vs_conn, proc_file, proc_file(Config, Test)),
-    case os:cmd("id -u") of
-        "0\n" ->
-            ok;
-        _ ->
-            application:set_env(dcos_l4lb, enable_networking, false)
-    end,
     set_interval(Test),
     {ok, _} = application:ensure_all_started(dcos_l4lb),
     Config.
 
 end_per_testcase(_, _Config) ->
-  ok = application:stop(dcos_l4lb),
-  ok = application:stop(lashup),
-  ok = application:stop(mnesia).
+    [ begin
+        ok = application:stop(App),
+        ok = application:unload(App)
+    end || {App, _, _} <- application:which_applications(),
+    not lists:member(App, [stdlib, kernel]) ],
+    os:cmd("rm -rf Mnesia.*"),
+    ok.
 
 test_init(_Config) -> ok.
 test_gen_server(_Config) ->
@@ -110,10 +116,10 @@ proc_file(Config, test_one_conn) ->
     DataDir = ?config(data_dir, Config),
     DataDir ++ "/proc_ip_vs_conn1";
 proc_file(Config, _) ->
-    DataDir = ?config(data_dir, Config),
-    DataDir ++ "/proc_ip_vs_conn2".
+    DataDir = ?config(data_dir, Config), DataDir ++ "/proc_ip_vs_conn2".
 
 set_interval(test_wait_metrics) ->
+    application:load(dcos_l4lb),
     application:set_env(dcos_l4lb, metrics_interval_seconds, 1),
     application:set_env(dcos_l4lb, metrics_splay_seconds, 1);
 set_interval(_) -> ok.

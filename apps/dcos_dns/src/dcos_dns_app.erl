@@ -30,8 +30,14 @@
 %%====================================================================
 
 start(_StartType, _StartArgs) ->
+    dcos_net_app:load_config_files(dcos_dns),
     maybe_load_json_config(), %% Maybe load the relevant DCOS configuration
-    Ret = dcos_dns_sup:start_link(),
+    maybe_start_dcos_dns(application:get_env(dcos_dns, enable_dns, true)).
+
+maybe_start_dcos_dns(false) ->
+    dcos_dns_sup:start_link(false);
+maybe_start_dcos_dns(true) ->
+    Ret = dcos_dns_sup:start_link(true),
     maybe_start_tcp_listener(),
     maybe_start_http_listener(),
     Ret.
@@ -71,6 +77,11 @@ parse_ipv4_address_with_port(Value, DefaultPort) ->
         [IP, Port] -> {parse_ipv4_address(IP), parse_port(Port)};
         [IP] -> {parse_ipv4_address(IP), DefaultPort}
     end.
+
+%% @doc Same as parse_ipv4_address_with_port(Value, 53).
+-spec(parse_ipv4_address_with_port(binary()|list()) -> upstream()).
+parse_ipv4_address_with_port(Value) ->
+    parse_ipv4_address_with_port(Value, 53).
 
 -spec(parse_upstream_name(dns:dname()) -> [dns:label()]).
 parse_upstream_name(Name) when is_binary(Name) ->
@@ -151,7 +162,7 @@ start_http_listener(IP) ->
 %                                         ["4.4.4.4", 53]]]]
 %  }
 maybe_load_json_config() ->
-    case file:read_file("/opt/mesosphere/etc/spartan.json") of
+    case file:read_file("/opt/mesosphere/etc/dcos-dns.json") of
         {ok, FileBin} ->
             load_json_config(FileBin);
         _ ->
@@ -164,7 +175,7 @@ load_json_config(FileBin) ->
     lists:foreach(fun process_config_tuple/1, ConfigTuples).
 
 process_config_tuple({<<"upstream_resolvers">>, UpstreamResolvers}) ->
-    UpstreamIPsAndPorts = lists:map(fun (Resolver) -> parse_ipv4_address_with_port(Resolver, 53) end, UpstreamResolvers),
+    UpstreamIPsAndPorts = lists:map(fun parse_ipv4_address_with_port/1, UpstreamResolvers),
     application:set_env(?APP, upstream_resolvers, UpstreamIPsAndPorts);
 process_config_tuple({<<"forward_zones">>, Upstreams0}) ->
     Upstreams1 = lists:foldl(fun parse_upstream/2, maps:new(), Upstreams0),

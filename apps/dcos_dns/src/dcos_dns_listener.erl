@@ -29,9 +29,7 @@
 -endif.
 
 -record(state, {
-    ref = erlang:error() :: reference(),
-    retry_timer :: undefined | timer:tref(),
-    monitorRef :: reference()
+    ref = erlang:error() :: reference()
 }).
 -define(RPC_TIMEOUT, 5000).
 -define(MON_CALLBACK_TIME, 5000).
@@ -46,12 +44,7 @@
 %%% API
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Starts the server
-%%
-%% @end
-%%--------------------------------------------------------------------
+%% @doc Starts the server
 -spec(start_link() ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link() ->
@@ -61,118 +54,27 @@ start_link() ->
 %%% gen_server callbacks
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Initializes the server
-%%
-%% @spec init(Args) -> {ok, State} |
-%%                     {ok, State, Timeout} |
-%%                     ignore |
-%%                     {stop, Reason}
-%% @end
-%%--------------------------------------------------------------------
--spec(init(Args :: term()) ->
-    {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
-    {stop, Reason :: term()} | ignore).
 init([]) ->
-    MonitorRef = setup_monitor(),
-    {ok, Ref} = lashup_kv_events_helper:start_link(ets:fun2ms(fun({[navstar, dns, zones, '_']}) -> true end)),
-    {ok, #state{ref = Ref, monitorRef = MonitorRef}}.
+    MatchSpec = ets:fun2ms(fun({[navstar, dns, zones, '_']}) -> true end),
+    {ok, Ref} = lashup_kv_events_helper:start_link(MatchSpec),
+    {ok, #state{ref = Ref}}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Handling call messages
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec(handle_call(Request :: term(), From :: {pid(), Tag :: term()},
-    State :: #state{}) ->
-    {reply, Reply :: term(), NewState :: #state{}} |
-    {reply, Reply :: term(), NewState :: #state{}, timeout() | hibernate} |
-    {noreply, NewState :: #state{}} |
-    {noreply, NewState :: #state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
-    {stop, Reason :: term(), NewState :: #state{}}).
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Handling cast messages
-%%
-%% @end
-%%--------------------------------------------------------------------
--spec(handle_cast(Request :: term(), State :: #state{}) ->
-    {noreply, NewState :: #state{}} |
-    {noreply, NewState :: #state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: #state{}}).
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Handling all non call/cast messages
-%%
-%% @spec handle_info(Info, State) -> {noreply, State} |
-%%                                   {noreply, State, Timeout} |
-%%                                   {stop, Reason, State}
-%% @end
-%%--------------------------------------------------------------------
--spec(handle_info(Info :: timeout() | term(), State :: #state{}) ->
-    {noreply, NewState :: #state{}} |
-    {noreply, NewState :: #state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: #state{}}).
-handle_info({lashup_kv_events, Event = #{ref := Reference}}, State0 = #state{ref = Ref}) when Ref == Reference ->
+handle_info({lashup_kv_events, Event = #{ref := Reference}},
+            State0 = #state{ref = Ref}) when Ref == Reference ->
     State1 = handle_event(Event, State0),
-    {noreply, State1};
-handle_info({'DOWN', MonitorRef, process, _, _}, State = #state{monitorRef = MonitorRef}) ->
-    lager:debug("Spartan monitor went off, maybe it got restarted"),
-    timer:send_after(?MON_CALLBACK_TIME, retry_monitor),
-    {noreply, State};
-handle_info(retry_monitor, State = #state{retry_timer = Timer}) ->
-    lager:debug("Setting retry timer as monitor went off"),
-    timer:cancel(Timer),
-    MonitorRef = setup_monitor(),
-    {ok, NewTimer} = setup_retry(),
-    {noreply, State#state{monitorRef = MonitorRef, retry_timer = NewTimer}};
-handle_info({retry_spartan, Keys}, State0) ->
-    lager:debug("Retry to push DNS config"),
-    State1 = retry_spartan(Keys, State0),
     {noreply, State1};
 handle_info(_Info, State) ->
     {noreply, State}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% This function is called by a gen_server when it is about to
-%% terminate. It should be the opposite of Module:init/1 and do any
-%% necessary cleaning up. When it returns, the gen_server terminates
-%% with Reason. The return value is ignored.
-%%
-%% @spec terminate(Reason, State) -> void()
-%% @end
-%%--------------------------------------------------------------------
--spec(terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
-    State :: #state{}) -> term()).
 terminate(_Reason, _State) ->
     ok.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Convert process state when code is changed
-%%
-%% @spec code_change(OldVsn, State, Extra) -> {ok, NewState}
-%% @end
-%%--------------------------------------------------------------------
--spec(code_change(OldVsn :: term() | {down, term()}, State :: #state{},
-    Extra :: term()) ->
-    {ok, NewState :: #state{}} | {error, Reason :: term()}).
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
@@ -180,91 +82,33 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-setup_monitor() ->
-    monitor(process, {erldns_zone_cache, spartan_name()}).
-
-spartan_name() ->
-    [_Node, Host] = binary:split(atom_to_binary(node(), utf8), <<"@">>),
-    SpartanBinName = <<"spartan@", Host/binary>>,
-    binary_to_atom(SpartanBinName, utf8).
-
-zone2spartan(ZoneName, LashupValue) ->
+zone(ZoneName, LashupValue) ->
     {_, Records} = lists:keyfind(?RECORDS_FIELD, 1, LashupValue),
     Sha = crypto:hash(sha, term_to_binary(Records)),
     {ZoneName, Sha, Records}.
 
-handle_event(_Event = #{key := [navstar, dns, zones, ZoneName] = Key, value := Value},
-              State = #state{retry_timer = Timer}) ->
-    timer:cancel(Timer),
-    Zone = zone2spartan(ZoneName, Value),
-    case spartan_push(Zone) of
-        {error, _} ->
-            {ok, NewTimer} = timer:send_after(?RPC_RETRY_TIME, {retry_spartan, [Key]}),
-            State#state{retry_timer = NewTimer};
-        ok ->
-            State
+handle_event(_Event = #{key := [navstar, dns, zones, ZoneName] = _Key, value := Value}, State) ->
+    Zone = zone(ZoneName, Value),
+    ok = push_zone(Zone),
+    State.
+
+push_zone(Zone) ->
+    ok = erldns_zone_cache:put_zone(Zone),
+    case sign_zone(Zone) of
+        {no_key, _Zone} -> ok;
+        {ok, SignedZone} ->
+            ok = erldns_zone_cache:put_zone(SignedZone)
     end.
 
-retry_spartan(Keys, State) ->
-    case push_zones(Keys) of
-        error ->
-            {ok, Timer} = timer:send_after(?RPC_RETRY_TIME, {retry_spartan, Keys}),
-            State#state{retry_timer = Timer};
-        ok ->
-            State
-    end.
-
-push_zones([]) ->
-    ok;
-push_zones([Key = [navstar, dns, zones, ZoneName]|Keys]) ->
-    Value = lashup_kv:value(Key),
-    Zone = zone2spartan(ZoneName, Value),
-    case spartan_push(Zone) of
-        ok ->
-            push_zones(Keys);
-        {error, Reason} ->
-            lager:warning("Aborting pushing zones to Spartan: ~p", [Reason]),
-            error
-    end.
-
-spartan_push(Zone) ->
-    case rpc:call(spartan_name(), erldns_zone_cache, put_zone, [Zone], ?RPC_TIMEOUT) of
-        Reason = {badrpc, _} ->
-            lager:warning("Unable to push records to spartan: ~p", [Reason]),
-            {error, Reason};
-        ok ->
-            maybe_push_signed_zone(Zone),
-            ok
-    end.
-
-setup_retry() ->
-    MatchSpec = mk_key_matchspec(),
-    ZoneKeys = lashup_kv:keys(MatchSpec),
-    timer:send_after(?RPC_RETRY_TIME, {retry_spartan, ZoneKeys}).
-
-mk_key_matchspec() ->
-    ets:fun2ms(fun({[navstar, dns, zones, '_']}) -> true end).
-
-maybe_push_signed_zone(Zone) ->
+sign_zone(Zone = {ZoneName, _ZoneSha, Records}) ->
     case dcos_dns:key() of
         false ->
-            ok;
+            {no_key, Zone};
         #{public_key := PublicKey} ->
-            push_signed_zone(PublicKey, Zone)
+            {ZoneName0, Records0} = convert_zone(PublicKey, ZoneName, Records),
+            Sha = crypto:hash(sha, term_to_binary(Records0)),
+            {ok, {ZoneName0, Sha, Records0}}
     end.
-
-push_signed_zone(PublicKey, _Zone0 = {ZoneName0, _ZoneSha, Records0}) ->
-    {ZoneName1, Records1} = convert_zone(PublicKey, ZoneName0, Records0),
-    Sha = crypto:hash(sha, term_to_binary(Records1)),
-    Zone1 = {ZoneName1, Sha, Records1},
-    case rpc:call(spartan_name(), erldns_zone_cache, put_zone, [Zone1], ?RPC_TIMEOUT) of
-        Reason = {badrpc, _} ->
-            lager:warning("Unable to push signed records to spartan: ~p", [Reason]),
-            {error, Reason};
-        ok ->
-            ok
-    end.
-
 
 convert_zone(PublicKey, ZoneName0, Records0) ->
     PublicKeyEncoded = zbase32:encode(PublicKey),
@@ -288,8 +132,10 @@ convert_record(Record0 = #dns_rr{type = ?DNS_TYPE_A, name = Name0}, Postfix, New
     Name1 = convert_name(Name0, Postfix, NewPostfix),
     Record1 = Record0#dns_rr{name = Name1},
     {true, Record1};
-convert_record(Record0 = #dns_rr{type = ?DNS_TYPE_SRV, name = Name0, data = Data0 = #dns_rrdata_srv{target = Target0}},
-        Postfix, NewPostfix) ->
+convert_record(#dns_rr{
+            type = ?DNS_TYPE_SRV, name = Name0,
+            data = Data0 = #dns_rrdata_srv{target = Target0}
+        } = Record0, Postfix, NewPostfix) ->
     Name1 = convert_name(Name0, Postfix, NewPostfix),
     Target1 = convert_name(Target0, Postfix, NewPostfix),
     Data1 = Data0#dns_rrdata_srv{target = Target1},

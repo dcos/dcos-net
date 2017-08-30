@@ -1,64 +1,19 @@
 -module(dcos_dns_sup).
 -behaviour(supervisor).
--export([start_link/0, init/1]).
-
--include("dcos_dns.hrl").
+-export([start_link/1, init/1]).
 
 -include_lib("dns/include/dns_terms.hrl").
 -include_lib("dns/include/dns_records.hrl").
 
-start_link() ->
-    supervisor:start_link({local, ?SERVER}, ?MODULE, []).
+-define(CHILD(Module), #{id => Module, start => {Module, start_link, []}}).
+-define(CHILD(Module, Custom), maps:merge(?CHILD(Module), Custom)).
 
-init([]) ->
-    ZkRecordServer = {dcos_dns_zk_record_server,
-                      {dcos_dns_zk_record_server, start_link, []},
-                       permanent, 5000, worker,
-                       [dcos_dns_zk_record_server]},
-    ConfigLoaderServer =
-        #{
-            id => dcos_dns_config_loader_server,
-            start => {dcos_dns_config_loader_server, start_link, []},
-            restart => permanent,
-            shutdown => 5000,
-            type => worker,
-            modules => [dcos_dns_config_loader_server]
-        },
+start_link(Enabled) ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, [Enabled]).
 
-    WatchdogSup = #{
-        id => dcos_dns_watchdog,
-        start => {dcos_dns_watchdog, start_link, []},
-        restart => permanent,
-        shutdown => 5000,
-        type => worker,
-        modules => [dcos_dns_watchdog]
-    },
-
-    KeyMgr = #{
-        id => dcos_dns_key_mgr,
-        start => {dcos_dns_key_mgr, start_link, []},
-        restart => transient,
-        modules => [dcos_dns_key_mgr],
-        type => worker,
-        shutdown => 5000
-    },
-    PollSrv = #{
-        id => dcos_dns_poll_server,
-        start => {dcos_dns_poll_server, start_link, []},
-        restart => permanent,
-        shutdown => 5000,
-        type => worker,
-        modules => [dcos_dns_poll_server]
-    },
-    ListenerSrv = #{
-        id => dcos_dns_listener,
-        start => {dcos_dns_listener, start_link, []},
-        restart => permanent,
-        shutdown => 5000,
-        type => worker,
-        modules => [dcos_dns_listener]
-    },
-
+init([false]) ->
+    {ok, {#{}, []}};
+init([true]) ->
     %% Configure metrics.
     dcos_dns_metrics:setup(),
 
@@ -67,7 +22,13 @@ init([]) ->
     ok = localhost_zone_setup(),
 
     %% Systemd Sup intentionally goes last
-    Children = [ZkRecordServer, ConfigLoaderServer, WatchdogSup, KeyMgr, PollSrv, ListenerSrv],
+    Children = [
+        ?CHILD(dcos_dns_zk_record_server),
+        ?CHILD(dcos_dns_config_loader_server),
+        ?CHILD(dcos_dns_key_mgr, #{restart => transient}),
+        ?CHILD(dcos_dns_poll_server),
+        ?CHILD(dcos_dns_listener)
+    ],
     Children1 = maybe_add_udp_servers(Children),
 
     sidejob:new_resource(
@@ -75,12 +36,11 @@ init([]) ->
         dcos_dns_config:handler_limit()),
 
     %% The top level sup should never die.
-    {ok, { {one_for_all, 10000, 1}, Children1} }.
+    {ok, {#{intensity => 10000, period => 1}, Children1}}.
 
 %%====================================================================
 %% Internal functions
 %%====================================================================
-
 
 %% @private
 maybe_add_udp_servers(Children) ->
@@ -95,35 +55,32 @@ udp_servers() ->
     Addresses = dcos_dns_config:bind_ips(),
     lists:map(fun udp_server/1, Addresses).
 
-
-
 udp_server(Address) ->
     #{
         id => {dcos_dns_udp_server, Address},
-        start => {dcos_dns_udp_server, start_link, [Address]},
-        restart => permanent,
-        shutdown => 5000,
-        type => worker,
-        modules => [dcos_dns_udp_server]
+        start => {dcos_dns_udp_server, start_link, [Address]}
     }.
 
 
+soa_record(Name) ->
+    #dns_rr{
+        name = Name,
+        type = ?DNS_TYPE_SOA,
+        ttl = 5,
+        data = #dns_rrdata_soa{
+            mname = <<"ns.spartan">>, %% Nameserver
+            rname = <<"support.mesosphere.com">>,
+            serial = 1,
+            refresh = 60,
+            retry = 180,
+            expire = 86400,
+            minimum = 1
+        }
+    }.
+
 localhost_zone_setup() ->
     Records = [
-        #dns_rr{
-            name = <<"localhost">>,
-            type = ?DNS_TYPE_SOA,
-            ttl = 5,
-            data = #dns_rrdata_soa{
-                mname = <<"ns.spartan">>, %% Nameserver
-                rname = <<"support.mesosphere.com">>,
-                serial = 1,
-                refresh = 60,
-                retry = 180,
-                expire = 86400,
-                minimum = 1
-            }
-        },
+        soa_record(<<"localhost">>),
         #dns_rr{
             name = <<"localhost">>,
             type = ?DNS_TYPE_A,
@@ -140,29 +97,11 @@ localhost_zone_setup() ->
         }
     ],
     Sha = crypto:hash(sha, term_to_binary(Records)),
-    case catch erldns_zone_cache:put_zone({<<"localhost">>, Sha, Records}) of
-        ok ->
-            ok;
-        Else ->
-            {error, Else}
-    end.
+    erldns_zone_cache:put_zone({<<"localhost">>, Sha, Records}).
 
 dcos_dns_zone_setup() ->
     Records = [
-        #dns_rr{
-            name = <<"spartan">>,
-            type = ?DNS_TYPE_SOA,
-            ttl = 5,
-            data = #dns_rrdata_soa{
-                mname = <<"ns.spartan">>, %% Nameserver
-                rname = <<"support.mesosphere.com">>,
-                serial = 0,
-                refresh = 60,
-                retry = 180,
-                expire = 86400,
-                minimum = 1
-            }
-        },
+        soa_record(<<"spartan">>),
         #dns_rr{
             name = <<"ready.spartan">>,
             type = ?DNS_TYPE_A,
@@ -187,9 +126,4 @@ dcos_dns_zone_setup() ->
         }
     ],
     Sha = crypto:hash(sha, term_to_binary(Records)),
-    case catch erldns_zone_cache:put_zone({<<"spartan">>, Sha, Records}) of
-        ok ->
-            ok;
-        Else ->
-            {error, Else}
-    end.
+    erldns_zone_cache:put_zone({<<"spartan">>, Sha, Records}).

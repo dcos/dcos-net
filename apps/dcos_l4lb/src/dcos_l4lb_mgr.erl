@@ -130,12 +130,12 @@ maintain(info, {lashup_gm_route_events, #{ref := Ref, tree := Tree}}, State0 = #
 maintain(info, {lashup_kv_events, Event = #{ref := Ref}}, State0 = #state{kv_ref = Ref}) ->
     State1 = handle_ip_event(Event, State0),
     {keep_state, State1};
-maintain(cast, {netns_event, Ref, reconcile_netns, EventContent}, 
+maintain(cast, {netns_event, Ref, reconcile_netns, EventContent},
          State0 = #state{last_configured_vips = VIPs, netns_event_ref = Ref}) ->
     State1 = update_netns(reconcile_netns, EventContent, State0),
     State2 = do_reconcile(VIPs, State1),
     {keep_state, State2};
-maintain(cast, {netns_event, Ref, EventType, EventContent}, State0 = #state{netns_event_ref = Ref}) -> 
+maintain(cast, {netns_event, Ref, EventType, EventContent}, State0 = #state{netns_event_ref = Ref}) ->
     State1 = update_netns(EventType, EventContent, State0),
     {keep_state, State1}.
 
@@ -144,23 +144,26 @@ handle_ip_event(_Event = #{value := Value}, State0) ->
     IPMapping = maps:from_list(IPToNodeName),
     State0#state{ip_mapping = IPMapping}.
 
-update_netns(add_netns, UpdateValue, State = #state{ns = Namespaces0, ipvs_mgr = IPVSMgr, route_mgr = RouteMgr}) ->
+update_netns(add_netns, UpdateValue, State = #state{
+        ns = Namespaces0, ipvs_mgr = IPVSMgr, route_mgr = RouteMgr}) ->
     Namespaces1 = dcos_l4lb_route_mgr:add_netns(RouteMgr, UpdateValue),
     Namespaces1 = dcos_l4lb_ipvs_mgr:add_netns(IPVSMgr, UpdateValue),
     lists:foreach(fun(Ns) -> push_config(Ns, State) end, Namespaces1),
     Namespaces2 = ordsets:union(ordsets:from_list(Namespaces1), Namespaces0),
     State#state{ns = Namespaces2};
-update_netns(remove_netns, UpdateValue, State = #state{ns = Namespaces0, ipvs_mgr = IPVSMgr, route_mgr = RouteMgr}) ->
+update_netns(remove_netns, UpdateValue, State = #state{
+        ns = Namespaces0, ipvs_mgr = IPVSMgr, route_mgr = RouteMgr}) ->
     Namespaces1 = dcos_l4lb_route_mgr:remove_netns(RouteMgr, UpdateValue),
     Namespaces1 = dcos_l4lb_route_mgr:remove_netns(IPVSMgr, UpdateValue),
     Namespaces2 = ordsets:subtract(Namespaces0, ordsets:from_list(Namespaces1)),
     State#state{ns = Namespaces2};
-update_netns(reconcile_netns, UpdateValue, State = #state{ns = Namespaces0, ipvs_mgr = IPVSMgr, route_mgr = RouteMgr}) ->
+update_netns(reconcile_netns, UpdateValue, State = #state{
+        ns = Namespaces0, ipvs_mgr = IPVSMgr, route_mgr = RouteMgr}) ->
     Namespaces1 = dcos_l4lb_route_mgr:add_netns(RouteMgr, UpdateValue),
     Namespaces1 = dcos_l4lb_ipvs_mgr:add_netns(IPVSMgr, UpdateValue),
     Namespaces2 = ordsets:union(ordsets:from_list(Namespaces1), Namespaces0),
     State#state{ns = Namespaces2}.
-                      
+
 push_config(Namespace, State) ->
     push_routes(Namespace, State),
     push_services(Namespace, State).
@@ -175,7 +178,7 @@ do_reconcile(VIPs0, State0 = #state{ns = Namespaces}) ->
     VIPs1 = process_reachability(VIPs0, State0),
     Routes = ordsets:from_list([VIP || {{_Proto, VIP, _Port}, _Backends} <- VIPs1]),
     State1 = State0#state{last_received_vips = VIPs0, last_configured_vips = VIPs1, routes = Routes},
-    lists:foreach(fun(Ns) -> 
+    lists:foreach(fun(Ns) ->
                      do_reconcile_routes(Ns, State1),
                      do_reconcile_services(Ns, State1)
                   end, Namespaces),
@@ -188,13 +191,13 @@ do_reconcile_routes(Namespace, State = #state{routes = Routes}) ->
 installed_routes(Namespace, #state{route_mgr = RouteMgr}) ->
     dcos_l4lb_route_mgr:get_routes(RouteMgr, Namespace).
 
-do_update_routes(NewRoutes, OldRoutes, Namespace, #state{route_mgr = RouteMgr}) -> 
+do_update_routes(NewRoutes, OldRoutes, Namespace, #state{route_mgr = RouteMgr}) ->
     RoutesToAdd = ordsets:subtract(NewRoutes, OldRoutes),
     RoutesToDel = ordsets:subtract(OldRoutes, NewRoutes),
     dcos_l4lb_route_mgr:add_routes(RouteMgr, RoutesToAdd, Namespace),
     dcos_l4lb_route_mgr:remove_routes(RouteMgr, RoutesToDel, Namespace).
 
-do_reconcile_services(Namespace, State = #state{last_configured_vips = VIPs1}) -> 
+do_reconcile_services(Namespace, State = #state{last_configured_vips = VIPs1}) ->
     InstalledState = installed_state(Namespace, State),
     VIPs2 = lists:map(fun do_transform/1, VIPs1),
     Diff = generate_diff(InstalledState, VIPs2),
@@ -219,7 +222,9 @@ normalize_services_and_dests({Service0, Destinations0}) ->
 apply_diff({ServicesToAdd, ServicesToRemove, ServicesToModify}, Namespace, State) ->
     lists:foreach(fun({VIP, _BEs}) -> remove_service(VIP, Namespace, State) end, ServicesToRemove),
     lists:foreach(fun({VIP, BEs}) -> add_service(VIP, BEs, Namespace, State) end, ServicesToAdd),
-    lists:foreach(fun({VIP, BEAdd, BERemove}) -> modify_service(VIP, BEAdd, BERemove, Namespace, State) end, ServicesToModify).
+    lists:foreach(fun({VIP, BEAdd, BERemove}) ->
+        modify_service(VIP, BEAdd, BERemove, Namespace, State)
+    end, ServicesToModify).
 
 modify_service({Protocol, IP, Port}, BEAdd, BERemove, Namespace, #state{ipvs_mgr = IPVSMgr}) ->
     lists:foreach(fun
@@ -256,11 +261,11 @@ process_reachability(VIPs0, State) ->
 maintain(VIPs0, State = #state{ns = Namespaces, routes = Routes, last_configured_vips = LastConfigured}) ->
     VIPs1 = process_reachability(VIPs0, State),
     Diff = generate_diff(LastConfigured, VIPs1),
-    NewRoutes = ordsets:from_list([VIP || {{_Proto, VIP, _Port}, _Backends} <- VIPs1]), 
+    NewRoutes = ordsets:from_list([VIP || {{_Proto, VIP, _Port}, _Backends} <- VIPs1]),
     lager:debug("Last Configured: ~p, VIPs: ~p, NewRoutes ~p, Diff ~p", [LastConfigured, VIPs1, NewRoutes, Diff]),
-    lists:foreach(fun(Namespace) -> 
+    lists:foreach(fun(Namespace) ->
                     do_update_routes(NewRoutes, Routes, Namespace, State),
-                    apply_diff(Diff, Namespace, State) 
+                    apply_diff(Diff, Namespace, State)
                   end, Namespaces),
     State#state{last_configured_vips = VIPs1, last_received_vips = VIPs0, routes = NewRoutes}.
 
@@ -312,7 +317,7 @@ reachable_backends([BE = {IP, {_BEIP, _BEPort}}|Rest], OB, CB, State = #state{ip
             reachable_backends(Rest, OB, [BE|CB], State)
     end.
 
-   
+
 -ifdef(TEST).
 
 generate_diffs_test() ->

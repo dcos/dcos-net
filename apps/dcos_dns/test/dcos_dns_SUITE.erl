@@ -2,8 +2,7 @@
 -author("Christopher Meiklejohn <christopher.meiklejohn@gmail.com>").
 
 %% common_test callbacks
--export([%% suite/0,
-         init_per_suite/1,
+-export([init_per_suite/1,
          end_per_suite/1,
          init_per_testcase/2,
          end_per_testcase/2,
@@ -36,25 +35,28 @@
 %% ===================================================================
 
 init_per_suite(_Config) ->
-    application:load(erldns),
-    {ok, [Terms]} = file:consult(?CONFIG),
-    lists:foreach(fun({App, Environment}) ->
-                        lists:foreach(fun({Par, Val}) ->
-                                            ok = application:set_env(App, Par, Val)
-                        end, Environment)
-                  end, Terms),
-    ok = application:set_env(dcos_dns, handler_limit, 16),
-    ok = application:set_env(dcos_dns, mesos_resolvers, [{{127, 0, 0, 1}, 62053}]),
+    Workers = [
+        dcos_dns_key_mgr,
+        dcos_dns_poll_server,
+        dcos_dns_listener
+    ],
+    meck_mods(Workers),
     {ok, _} = application:ensure_all_started(dcos_dns),
+    meck:unload(Workers),
     generate_fixture_mesos_zone(),
     generate_thisdcos_directory_zone(),
     _Config.
 
-end_per_suite(_Config) ->
-    _Config.
+end_per_suite(Config) ->
+    [ begin
+        ok = application:stop(App),
+        ok = application:unload(App)
+    end || {App, _, _} <- application:which_applications(),
+    not lists:member(App, [stdlib, kernel]) ],
+    Config.
 
-init_per_testcase(_Case, _Config) ->
-    _Config.
+init_per_testcase(_Case, Config) ->
+    Config.
 
 end_per_testcase(_, _Config) ->
     ok.
@@ -71,22 +73,15 @@ all() ->
      overload_test
     ].
 
+meck_mods(Mods) when is_list(Mods) ->
+    lists:foreach(fun meck_mods/1, Mods);
+meck_mods(Mod) ->
+    meck:new(Mod, [non_strict]),
+    meck:expect(Mod, start_link, fun () -> {ok, self()} end).
+
 generate_fixture_mesos_zone() ->
     Records = [
-        #dns_rr{
-            name = <<"mesos">>,
-            type = ?DNS_TYPE_SOA,
-            ttl = 5,
-            data = #dns_rrdata_soa{
-                mname = <<"ns.spartan">>, %% Nameserver
-                rname = <<"support.mesosphere.com">>,
-                serial = 0,
-                refresh = 60,
-                retry = 180,
-                expire = 86400,
-                minimum = 1
-            }
-        },
+        generate_soa_ns(<<"mesos">>),
         #dns_rr{
             name = <<"master.mesos">>,
             type = ?DNS_TYPE_A,
@@ -107,20 +102,16 @@ generate_fixture_mesos_zone() ->
 
 generate_thisdcos_directory_zone() ->
     Records = [
-        #dns_rr{
-            name = <<"thisdcos.directory">>,
-            type = ?DNS_TYPE_SOA,
-            ttl = 5,
-            data = #dns_rrdata_soa{
-                mname = <<"ns.spartan">>, %% Nameserver
-                rname = <<"support.mesosphere.com">>,
-                serial = 0,
-                refresh = 60,
-                retry = 180,
-                expire = 86400,
-                minimum = 1
-            }
-        },
+        generate_soa_ns(<<"thisdcos.directory">>),
+        generate_thisdcos_directory_records(),
+        generate_thisdcos_directory_srv_records()
+    ],
+    Records0 = lists:flatten(Records),
+    Sha = crypto:hash(sha, term_to_binary(Records0)),
+    ok = erldns_zone_cache:put_zone({<<"thisdcos.directory">>, Sha, Records0}).
+
+generate_thisdcos_directory_records() ->
+    [
         #dns_rr{
             name = <<"commontest.thisdcos.directory">>,
             type = ?DNS_TYPE_A,
@@ -134,7 +125,11 @@ generate_thisdcos_directory_zone() ->
             data = #dns_rrdata_ns{
                 dname = <<"ns.spartan">>
             }
-        },
+        }
+    ].
+
+generate_thisdcos_directory_srv_records() ->
+    [
         #dns_rr{
             name = <<"_service._tcp.commontest.thisdcos.directory">>,
             type = ?DNS_TYPE_SRV,
@@ -157,9 +152,23 @@ generate_thisdcos_directory_zone() ->
                 target = <<"commontest.thisdcos.directory">>
             }
         }
-    ],
-    Sha = crypto:hash(sha, term_to_binary(Records)),
-    ok = erldns_zone_cache:put_zone({<<"thisdcos.directory">>, Sha, Records}).
+    ].
+
+generate_soa_ns(Name) ->
+    #dns_rr{
+        name = Name,
+        type = ?DNS_TYPE_SOA,
+        ttl = 5,
+        data = #dns_rrdata_soa{
+            mname = <<"ns.spartan">>, %% Nameserver
+            rname = <<"support.mesosphere.com">>,
+            serial = 0,
+            refresh = 60,
+            retry = 180,
+            expire = 86400,
+            minimum = 1
+        }
+    }.
 
 %% ===================================================================
 %% tests
@@ -198,7 +207,11 @@ zk_test(_Config) ->
 
 multiple_query_test(_Config) ->
     Expected = "1.1.1.1\n2.2.2.2\n127.0.0.1\n",
-    Command = "dig -p 8053 @127.0.0.1 +keepopen +tcp +short spartan1.testing.express spartan2.testing.express master.mesos",
+    Command =
+        "dig -p 8053 @127.0.0.1 +keepopen +tcp +short "
+        "spartan1.testing.express "
+        "spartan2.testing.express "
+        "master.mesos",
     ?assertCmdOutput(Expected, Command).
 
 overload_test(_Config) ->
@@ -210,19 +223,7 @@ overload_test(_Config) ->
                     timer:sleep(500),
                     catch meck:passthrough([From, Data])
                 end),
-        Parent = self(),
-        Pids = lists:map(fun (_) ->
-            proc_lib:spawn_link(fun () ->
-                Host = "master.mesos",
-                Opts = resolver_options(),
-                Result =
-                    case inet_res:resolve(Host, in, a, Opts, 700) of
-                        {ok, _} -> ok;
-                        {error, timeout} -> timeout
-                    end,
-                Parent ! {done, self(), Result}
-            end)
-        end, lists:seq(0, 32)),
+        Pids = lists:map(fun spawn_link_resolve/1, lists:seq(0, 32)),
         Results = lists:map(fun (Pid) ->
             receive
                 {done, Pid, Result} ->
@@ -236,6 +237,19 @@ overload_test(_Config) ->
     after
         ok = meck:unload(dcos_dns_udp_server)
     end.
+
+spawn_link_resolve(_N) ->
+    Parent = self(),
+    proc_lib:spawn_link(fun () ->
+        Host = "master.mesos",
+        Opts = resolver_options(),
+        Result =
+            case inet_res:resolve(Host, in, a, Opts, 700) of
+                {ok, _} -> ok;
+                {error, timeout} -> timeout
+            end,
+        Parent ! {done, self(), Result}
+    end).
 
 %% @private
 %% @doc Use the dcos_dns resolver.

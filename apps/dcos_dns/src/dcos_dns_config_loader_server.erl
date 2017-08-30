@@ -11,7 +11,6 @@
 
 -behaviour(gen_server).
 
-
 %% gen_server callbacks
 -export([init/1,
     handle_call/3,
@@ -30,7 +29,6 @@
 -define(REFRESH_MESSAGE,  refresh).
 -define(MESOS_DNS_PORT, 61053).
 
-
 %% State record.
 -record(state, {}).
 
@@ -48,30 +46,22 @@ start_link() ->
 start_link(Opts) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Opts, []).
 
+%%%===================================================================
+%%% gen_server callbacks
+%%%===================================================================
 
-%% @private
--spec init([]) -> {ok, #state{}}.
 init([]) ->
     timer:send_after(0, ?REFRESH_MESSAGE),
     {ok, #state{}}.
 
-%% @private
--spec handle_call(term(), {pid(), term()}, #state{}) ->
-    {reply, term(), #state{}}.
-
-%% @private
 handle_call(Msg, _From, State) ->
     lager:warning("Unhandled messages: ~p", [Msg]),
     {reply, ok, State}.
 
-%% @private
--spec handle_cast(term(), #state{}) -> {noreply, #state{}}.
 handle_cast(Msg, State) ->
     lager:warning("Unhandled messages: ~p", [Msg]),
     {noreply, State}.
 
-%% @private
--spec handle_info(term(), #state{}) -> {noreply, #state{}}.
 handle_info(?REFRESH_MESSAGE, State) ->
     NormalRefreshInterval = application:get_env(?APP, masters_refresh_interval_normal, ?REFRESH_INTERVAL_NORMAL),
     FailRefreshInterval = application:get_env(?APP, masters_refresh_interval_fail, ?REFRESH_INTERVAL_FAIL),
@@ -86,27 +76,21 @@ handle_info(Msg, State) ->
     lager:warning("Unhandled messages: ~p", [Msg]),
     {noreply, State}.
 
-%% @private
--spec terminate(term(), #state{}) -> term().
 terminate(_Reason, _State) ->
     ok.
 
-%% @private
--spec code_change(term() | {down, term()}, #state{}, term()) -> {ok, #state{}}.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
-
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
 %%%% Algorithm copied from gen_resolv
 maybe_load_masters() ->
     case get_masters() of
         {ok, Masters} ->
-            application:set_env(?APP, mesos_resolvers, Masters),
-            ok;
+            ok = dcos_dns_config:mesos_resolvers(Masters);
         {error, _} ->
             error
     end.

@@ -12,17 +12,13 @@
 -include_lib("common_test/include/ct.hrl").
 -include("dcos_l4lb.hrl").
 
-%% These tests rely on some commands that circle ci does automatically
-%% Look at circle.yml for more
--export([all/0]).
-
--export([test_basic/1]).
-
--export([init_per_testcase/2, end_per_testcase/2]).
+-export([
+    all/0,
+    init_per_testcase/2, end_per_testcase/2,
+    test_basic/1
+]).
 
 all() -> all(os:cmd("id -u"), os:getenv("CIRCLECI")).
-
--compile(export_all).
 
 %% root tests
 all("0\n", false) ->
@@ -32,24 +28,36 @@ all("0\n", false) ->
 all(_, _) -> [].
 
 init_per_testcase(_, Config) ->
-    "" = os:cmd("ipvsadm -C"),
-    os:cmd("ip link del minuteman"),
-    os:cmd("ip link add minuteman type dummy"),
-    os:cmd("ip link del webserver"),
-    os:cmd("ip link add webserver type dummy"),
-    os:cmd("ip link set webserver up"),
-    os:cmd("ip addr add 1.1.1.1/32 dev webserver"),
-    os:cmd("ip addr add 1.1.1.2/32 dev webserver"),
-    os:cmd("ip addr add 1.1.1.3/32 dev webserver"),
-    application:set_env(dcos_l4lb, agent_polling_enabled, false),
-    {ok, _} = application:ensure_all_started(inets),
-    {ok, _} = application:ensure_all_started(dcos_l4lb),
-    Config.
+    case os:cmd("ipvsadm -C") of
+        "" ->
+            os:cmd("ip link del minuteman"),
+            os:cmd("ip link add minuteman type dummy"),
+            os:cmd("ip link del webserver"),
+            os:cmd("ip link add webserver type dummy"),
+            os:cmd("ip link set webserver up"),
+            os:cmd("ip addr add 1.1.1.1/32 dev webserver"),
+            os:cmd("ip addr add 1.1.1.2/32 dev webserver"),
+            os:cmd("ip addr add 1.1.1.3/32 dev webserver"),
+            application:load(dcos_l4lb),
+            application:set_env(dcos_l4lb, enable_networking, true),
+            {ok, _} = application:ensure_all_started(inets),
+            {ok, _} = application:ensure_all_started(dcos_l4lb),
+            Config;
+        Result ->
+            {skip, Result}
+    end.
 
 end_per_testcase(_, _Config) ->
-    ok = application:stop(dcos_l4lb),
-    ok = application:stop(lashup),
-    ok = application:stop(mnesia).
+    "" = os:cmd("ipvsadm -C"),
+    os:cmd("ip link del minuteman"),
+    os:cmd("ip link del webserver"),
+    [ begin
+        ok = application:stop(App),
+        ok = application:unload(App)
+    end || {App, _, _} <- application:which_applications(),
+    not lists:member(App, [stdlib, kernel]) ],
+    os:cmd("rm -rf Mnesia.*"),
+    ok.
 
 make_webserver(Idx) ->
     file:make_dir("/tmp/htdocs"),

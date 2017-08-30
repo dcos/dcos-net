@@ -1,16 +1,6 @@
 -module(dcos_dns_handler_fsm).
--author("sdhillon").
--author("Christopher Meiklejohn <christopher.meiklejohn@gmail.com>").
 
--behaviour(gen_fsm).
-
--ifdef(TEST).
--include_lib("eunit/include/eunit.hrl").
--endif.
-
-%% API
-
--define(SERVER, ?MODULE).
+-behaviour(gen_statem).
 
 -define(TIMEOUT, 5000).
 
@@ -19,24 +9,14 @@
 -include_lib("dns/include/dns_terms.hrl").
 -include_lib("dns/include/dns_records.hrl").
 
-%% State callbacks
--export([execute/2,
-         wait_for_reply/2,
-         waiting_for_rest_replies/2]).
-
-%% Private utility functions
--export([resolve/3]).
-
 %% API
 -export([start/2]).
 
-%% gen_fsm callbacks
--export([init/1,
-         handle_event/3,
-         handle_sync_event/4,
-         handle_info/3,
-         terminate/3,
-         code_change/4]).
+%% gen_statem callbacks
+-export([init/1, callback_mode/0, handle_event/4, terminate/3, code_change/4]).
+
+%% Private utility functions
+-export([resolve/3]).
 
 -export_type([from/0]).
 
@@ -55,7 +35,7 @@
 -spec(start(from(), binary() | dns:message()) -> {ok, pid()} | {error, overload}).
 start(From, Data) ->
     case sidejob_supervisor:start_child(dcos_dns_handler_fsm_sj,
-                                        gen_fsm, start_link,
+                                        gen_statem, start_link,
                                         [?MODULE, [From, Data], []]) of
         {error, overload} ->
             {error, overload};
@@ -79,28 +59,28 @@ init([From, Data]) ->
     %% between now, and execute. This is also okay, because timeout = 0, so we should immediately transition
     %% to execute
     Now = erlang:monotonic_time(),
-    {ok, execute, #state{from=From, data=Data, send_query_time = Now}, 0}.
+    gen_statem:cast(self(), init),
+    {ok, execute, #state{from=From, data=Data, send_query_time = Now}}.
+
+callback_mode() ->
+    handle_event_function.
 
 %% @private
-handle_event(_Event, StateName, State) ->
-    {next_state, StateName, State}.
-
-%% @private
-handle_sync_event(_Event, _From, StateName, State) ->
-    Reply = ok,
-    {reply, Reply, StateName, State}.
-
-%% @private
-handle_info(timeout, wait_for_reply, State) ->
+handle_event(cast, init, execute, State) ->
+    execute(State);
+handle_event(cast, Msg, wait_for_reply, State) ->
+    wait_for_reply(Msg, State);
+handle_event(cast, Msg, waiting_for_rest_replies, State) ->
+    waiting_for_rest_replies(Msg, State);
+handle_event(timeout, _, wait_for_reply, State) ->
     reply_fail(State),
+    {next_state, waiting_for_rest_replies, State, 0};
+handle_event(timeout, _, waiting_for_rest_replies, State) ->
     mark_rest_as_failed(State),
     {stop, normal, State};
-handle_info(timeout, waiting_for_rest_replies, State) ->
-    mark_rest_as_failed(State),
-    {stop, normal, State};
-handle_info({'DOWN', _MonRef, process, _Pid, normal}, StateName, State) ->
-    {next_state, StateName, State};
-handle_info({'DOWN', _MonRef, process, Pid, Reason}, StateName,
+handle_event(info, {'DOWN', _MonRef, process, _Pid, normal}, _StateName, State) ->
+    {keep_state, State};
+handle_event(info, {'DOWN', _MonRef, process, Pid, Reason}, _StateName,
             #state{outstanding_upstreams=OutstandingUpstreams0}=State) ->
     OutstandingUpstreams =
         case lists:keyfind(Pid, 2, OutstandingUpstreams0) of
@@ -111,10 +91,10 @@ handle_info({'DOWN', _MonRef, process, Pid, Reason}, StateName,
                 dcos_dns_metrics:update([?MODULE, Upstream, failures], 1, ?SPIRAL),
                 lists:keydelete(Upstream, 1, OutstandingUpstreams0)
         end,
-    {next_state, StateName, State#state{outstanding_upstreams=OutstandingUpstreams}, ?TIMEOUT};
-handle_info(Info, StateName, State) ->
-    lager:debug("Got info: ~p", [Info]),
-    {next_state, StateName, State, ?TIMEOUT}.
+    {keep_state, State#state{outstanding_upstreams=OutstandingUpstreams}, ?TIMEOUT};
+handle_event(Type, Info, _StateName, State) ->
+    lager:warning("Got [~p] ~p", [Type, Info]),
+    {keep_state, State, ?TIMEOUT}.
 
 %% @private
 terminate(_Reason, _StateName, _State) ->
@@ -124,7 +104,7 @@ terminate(_Reason, _StateName, _State) ->
 code_change(_OldVsn, StateName, State, _Extra) ->
     {ok, StateName, State}.
 
-execute(timeout, State = #state{data = Data}) ->
+execute(State = #state{data = Data}) ->
     %% The purpose of this pattern match is to bail as soon as possible,
     %% in case the data we've received is 'corrupt'
     DNSMessage = #dns_message{} = dns:decode_message(Data),
@@ -157,13 +137,7 @@ wait_for_reply({upstream_reply, Upstream, ReplyData},
     TimeDiff = timer:now_diff(Timestamp, StartTimestamp),
     dcos_dns_metrics:update([?MODULE, Upstream, latency], TimeDiff, ?HISTOGRAM),
 
-    maybe_done(Upstream, State);
-%% Timeout waiting for messages, assume all upstreams have timed out.
-wait_for_reply(timeout, State) ->
-    reply_fail(State),
-    dcos_dns_metrics:update([?APP, upstreams_failed], 1, ?SPIRAL),
-    mark_rest_as_failed(State),
-    {stop, normal, State}.
+    maybe_done(Upstream, State).
 
 waiting_for_rest_replies({upstream_reply, Upstream, _ReplyData},
                          #state{start_timestamp=StartTimestamp}=State) ->
@@ -173,13 +147,7 @@ waiting_for_rest_replies({upstream_reply, Upstream, _ReplyData},
     dcos_dns_metrics:update([?MODULE, Upstream, latency], TimeDiff, ?HISTOGRAM),
 
     %% Ignore reply data.
-    maybe_done(Upstream, State);
-waiting_for_rest_replies(timeout,
-                         #state{outstanding_upstreams=Upstreams}=State) ->
-    lists:foreach(fun({Upstream, _Pid}) ->
-                        dcos_dns_metrics:update([?MODULE, Upstream, failures], 1, ?SPIRAL)
-                  end, Upstreams),
-    {stop, normal, State}.
+    maybe_done(Upstream, State).
 
 
 %% Internal API
@@ -227,7 +195,12 @@ resolve(Parent, Upstream, State) ->
             erlang:raise(Class, Reason, StackTrace)
     end.
 
-do_resolve(Parent, Upstream = {UpstreamIP, UpstreamPort}, #state{data = Data, from = {dcos_dns_udp_server, _}}) ->
+do_resolve(Parent, Upstream, #state{data = Data, from = {dcos_dns_udp_server, _}}) ->
+    do_udp_resolve(Parent, Upstream, Data);
+do_resolve(Parent, Upstream, #state{data = Data, from = {dcos_dns_tcp_handler, _}}) ->
+    do_tcp_resolve(Parent, Upstream, Data).
+
+do_udp_resolve(Parent, Upstream = {UpstreamIP, UpstreamPort}, Data) ->
     {ok, Socket} = gen_udp:open(0, [{reuseaddr, true}, {active, once}, binary]),
     gen_udp:send(Socket, UpstreamIP, UpstreamPort, Data),
     MonRef = erlang:monitor(process, Parent),
@@ -236,16 +209,15 @@ do_resolve(Parent, Upstream = {UpstreamIP, UpstreamPort}, #state{data = Data, fr
             {'DOWN', MonRef, process, _Pid, Reason} ->
                 exit(Reason);
             {udp, Socket, UpstreamIP, UpstreamPort, ReplyData} ->
-                gen_fsm:send_event(Parent, {upstream_reply, Upstream, ReplyData})
+                gen_statem:cast(Parent, {upstream_reply, Upstream, ReplyData})
         after ?TIMEOUT ->
             ok
         end
     after
         gen_udp:close(Socket)
-    end;
+    end.
 
-%% @private
-do_resolve(Parent, Upstream = {UpstreamIP, UpstreamPort}, #state{data = Data, from = {dcos_dns_tcp_handler, _}}) ->
+do_tcp_resolve(Parent, Upstream = {UpstreamIP, UpstreamPort}, Data) ->
     TCPOptions = [{active, once}, binary, {packet, 2}, {send_timeout, 1000}],
     {ok, Socket} = gen_tcp:connect(UpstreamIP, UpstreamPort, TCPOptions, ?TIMEOUT),
     ok = gen_tcp:send(Socket, Data),
@@ -255,7 +227,7 @@ do_resolve(Parent, Upstream = {UpstreamIP, UpstreamPort}, #state{data = Data, fr
             {'DOWN', MonRef, process, _Pid, Reason} ->
                 exit(Reason);
             {tcp, Socket, ReplyData} ->
-                gen_fsm:send_event(Parent, {upstream_reply, Upstream, ReplyData});
+                gen_statem:cast(Parent, {upstream_reply, Upstream, ReplyData});
             {tcp_closed, Socket} ->
                 exit(closed);
             {tcp_error, Socket, Reason} ->
@@ -334,7 +306,7 @@ mark_rest_as_failed(#state{outstanding_upstreams=Upstreams}) ->
 mark_rest_as_failed(Upstreams) ->
     lists:foreach(fun({Upstream, _Pid}) ->
         dcos_dns_metrics:update([?MODULE, Upstream, failures], 1, ?SPIRAL)
-                  end, Upstreams).
+    end, Upstreams).
 
 start_workers([Upstream], State) ->
     _ = resolve(self(), Upstream, State),

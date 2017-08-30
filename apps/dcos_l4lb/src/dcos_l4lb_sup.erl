@@ -32,5 +32,5 @@ get_children(true) ->
     ].
 
 init([Enabled]) ->
-    {ok, { {one_for_one, 5, 10}, get_children(Enabled)} }.
+    {ok, {#{intensity => 10000, period => 1}, get_children(Enabled)}}.
 

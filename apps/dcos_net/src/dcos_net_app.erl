@@ -7,7 +7,7 @@
 
 -behaviour(application).
 
--define(DEFAULT_CONFIG_DIR, "/opt/mesosphere/etc/navstar.config.d").
+-define(DEFAULT_CONFIG_DIR, "/opt/mesosphere/etc/dcos-net.config.d").
 -define(MASTERS_KEY, {masters, riak_dt_orswot}).
 
 %% Application callbacks
@@ -23,10 +23,10 @@
 
 start(_StartType, _StartArgs) ->
     load_config_files(),
+    load_plugins(),
     maybe_add_master(),
     dcos_net_sup:start_link().
 
-%%--------------------------------------------------------------------
 stop(_State) ->
     ok.
 
@@ -35,7 +35,7 @@ stop(_State) ->
 %%====================================================================
 
 maybe_add_master() ->
-    case application:get_env(navstar, is_master, false) of
+    case application:get_env(dcos_net, is_master, false) of
         false ->
             ok;
         true ->
@@ -107,3 +107,30 @@ load_app_config(App, {App, Options}) ->
     end, Options);
 load_app_config(_App, _AppOptions) ->
     ok.
+
+%%====================================================================
+%% Plugins
+%%====================================================================
+
+load_plugins() ->
+    Plugins = application:get_env(dcos_net, plugins, []),
+    lists:foreach(fun load_plugin/1, Plugins).
+
+load_plugin({App, AppPath}) ->
+    case code:add_pathz(AppPath) of
+        true ->
+            load_modules(App, AppPath),
+            case application:start(App) of
+                {error, Error} ->
+                    lager:error("Plugin ~p: ~p", [App, Error]);
+                ok -> ok
+            end;
+        {error, bad_directory} ->
+            lager:error("Plugin ~p: bad_directory", [App])
+    end.
+
+load_modules(App, AppPath) ->
+    AppFile = filename:join(AppPath, [App, ".app"]),
+    {ok, [{application, App, AppData}]} = file:consult(AppFile),
+    {modules, Modules} = lists:keyfind(modules, 1, AppData),
+    lists:foreach(fun code:load_file/1, Modules).
