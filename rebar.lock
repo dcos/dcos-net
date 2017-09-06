@@ -73,7 +73,7 @@
   1},
  {<<"mesos_state">>,
   {git,"https://github.com/dcos/mesos_state.git",
-       {ref,"fcebc9eb5b80256ed65f45533fa51d18ca5c9c02"}},
+       {ref,"8e552bfb9f521f3ebb4fd7a2085d2d03ff7829b5"}},
   0},
  {<<"parse_trans">>,
   {git,"https://github.com/uwiger/parse_trans.git",

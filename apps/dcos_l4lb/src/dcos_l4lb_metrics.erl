@@ -24,7 +24,7 @@
 -define(SERVER, ?MODULE).
 
 -type ip_vs_conn() :: #ip_vs_conn{}.
--type backend_conns() :: #{inet:ip4_address() => [ip_vs_conn()]}.
+-type backend_conns() :: #{inet:ip_address() => [ip_vs_conn()]}.
 -type metrics() :: []. %% netlink record
 
 -record(state, {

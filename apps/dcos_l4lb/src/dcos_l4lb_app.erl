@@ -3,7 +3,10 @@
 -behaviour(application).
 
 %% Application callbacks
--export([start/2, stop/1]).
+-export([start/2, 
+         stop/1,
+         family/1,
+         prefix_len/1]).
 
 %% ===================================================================
 %% Application callbacks
@@ -15,3 +18,11 @@ start(_StartType, _StartArgs) ->
 
 stop(_State) ->
     ok.
+
+family(IP) when size(IP) == 4 ->
+    inet;
+family(IP) when size(IP) == 8 ->
+    inet6.
+
+prefix_len(inet) -> 32;
+prefix_len(inet6) -> 128.

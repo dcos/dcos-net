@@ -45,16 +45,16 @@
 
 -record(vip_be2, {
     protocol = erlang:error() :: protocol(),
-    vip_ip = erlang:error() :: inet:ip4_address(),
+    vip_ip = erlang:error() :: inet:ip_address(),
     vip_port = erlang:error() :: inet:port_number(),
     agent_ip = erlang:error() :: inet:ip4_address(),
-    backend_ip = erlang:error() :: inet:ip4_address(),
+    backend_ip = erlang:error() :: inet:ip_address(),
     backend_port = erlang:error() :: inet:port_number()
 }).
 
 -type vip_be2() :: #vip_be2{}.
 
--type protocol_vip() :: {protocol(), Host :: inet:ip4_address() | string(), inet:port_number()}.
+-type protocol_vip() :: {protocol(), Host :: inet:ip_address() | string(), inet:port_number()}.
 -type protocol_vip_orswot() :: {protocol_vip(), riak_dt_orswot}.
 -type vip_string() :: <<_:48, _:_*1>>.
 
@@ -295,7 +295,7 @@ collect_vips_from_discovery_info([Port = #mesos_port{labels = PortLabels}| Ports
     collect_vips_from_discovery_info(Ports, Task, BEs ++ Acc).
 
 
--type name_or_ip() :: inet:ip4_address() | {name, Hostname :: binary(), FrameworkName :: framework_name()}.
+-type name_or_ip() :: inet:ip_address() | {name, Hostname :: binary(), FrameworkName :: framework_name()}.
 -type vips() :: {name_or_ip(), inet:port_number()}.
 -spec(collect_vips_from_discovery_info_fold(LabelBin :: map(), [vips()], mesos_port(), task()) -> [vip_be2()]).
 collect_vips_from_discovery_info_fold(_PortLabels, [], _Port, _Task) ->
@@ -309,10 +309,11 @@ collect_vips_from_discovery_info_fold(#{<<"network-scope">> := <<"container">>},
     Slave = Task#task.slave,
     #libprocess_pid{ip = AgentIP} = Slave#slave.pid,
     #task{statuses = [#task_status{container_status = #container_status{
-          network_infos = [#network_info{ip_addresses = [#ip_address{
-          ip_address = IPAddress}|_]}|_]}}|_]} = Task,
-    [#vip_be2{vip_ip = VIPIP, vip_port = VIPPort, protocol = Protocol, backend_port = PortNum,
-        backend_ip =  IPAddress, agent_ip = AgentIP} || {VIPIP, VIPPort} <- VIPs];
+          network_infos = [#network_info{ip_addresses = IPAddresses}|_]}}|_]} = Task,
+    [#vip_be2{vip_ip = VIPIP, vip_port = VIPPort, protocol = Protocol, 
+              backend_port = PortNum, backend_ip =  IPAddress, 
+              agent_ip = AgentIP} || {VIPIP, VIPPort} <- VIPs, 
+              #ip_address{ip_address = IPAddress} <- IPAddresses];
 collect_vips_from_discovery_info_fold(_PortLabels, VIPs,
     #mesos_port{protocol = Protocol, number = PortNum}, Task) ->
     Slave = Task#task.slave,
@@ -328,7 +329,7 @@ parse_vip({LabelBin, Task = #task{}}) ->
     [HostBin, PortBin] = binary:split(LabelBin, <<":">>),
     HostStr = binary_to_list(HostBin),
     Host =
-        case inet:parse_ipv4_address(HostStr) of
+        case inet:parse_address(HostStr) of
             {ok, HostIP} ->
                 HostIP;
             _ ->
@@ -413,7 +414,7 @@ parse_host_port(Proto, Rest) ->
     end.
 
 parse_host_port(Proto, HostStr, PortStr) ->
-    case inet:parse_ipv4_address(HostStr) of
+    case inet:parse_address(HostStr) of
         {ok, Host} ->
             parse_host_port_2(Proto, Host, PortStr);
         {error, einval} ->
@@ -535,6 +536,21 @@ state5_test() ->
     ],
     ?assertEqual(Expected, VIPBes).
 
+ipv6_vip_test() ->
+    {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/state_ipv6.json"),
+    {ok, MesosState} = mesos_state_client:parse_response(Data),
+    VIPBes = collect_vips(MesosState, fake_state()),
+    Expected = [
+        {
+            {tcp, {name, {<<"/foo">>, <<"marathon">>}}, 80},
+            [
+              {{10, 0, 2, 74}, {{12, 0, 1, 4}, 80}},
+              {{10, 0, 2, 74}, {{16#fd01, 16#0, 16#0, 16#0, 16#0, 16#1, 16#8000, 16#4}, 80}}
+            ]
+        }
+    ],
+    ?assertEqual(Expected, VIPBes).
+ 
 di_state_test() ->
     {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/state_di.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
@@ -563,6 +579,7 @@ named_vips_test() ->
         }
     ],
     ?assertEqual(Expected, VIPBes).
+
 
 missing_port_test() ->
     {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/missing-port.json"),

@@ -15,14 +15,14 @@
 -export([
     all/0,
     init_per_testcase/2, end_per_testcase/2,
-    test_basic/1
+    test_v4/1, test_v6/1
 ]).
 
 all() -> all(os:cmd("id -u"), os:getenv("CIRCLECI")).
 
 %% root tests
 all("0\n", false) ->
-    [test_basic];
+    [test_v4, test_v6];
 
 %% non root tests
 all(_, _) -> [].
@@ -38,6 +38,7 @@ init_per_testcase(_, Config) ->
             os:cmd("ip addr add 1.1.1.1/32 dev webserver"),
             os:cmd("ip addr add 1.1.1.2/32 dev webserver"),
             os:cmd("ip addr add 1.1.1.3/32 dev webserver"),
+            os:cmd("ip addr add fc01::1/128 dev webserver"),
             application:load(dcos_l4lb),
             application:set_env(dcos_l4lb, enable_networking, true),
             {ok, _} = application:ensure_all_started(inets),
@@ -59,14 +60,20 @@ end_per_testcase(_, _Config) ->
     os:cmd("rm -rf Mnesia.*"),
     ok.
 
-make_webserver(Idx) ->
+make_v4_webserver(Idx) ->
+    make_webserver({1, 1, 1, Idx}).
+
+make_v6_webserver() ->
+    make_webserver({16#fc01, 16#0, 16#0, 16#0, 16#0, 16#0, 16#0, 16#1}).
+    
+make_webserver(IP) ->
     file:make_dir("/tmp/htdocs"),
     {ok, Pid} = inets:start(httpd, [
         {port, 0},
         {server_name, "httpd_test"},
         {server_root, "/tmp"},
         {document_root, "/tmp/htdocs"},
-        {bind_address, {1, 1, 1, Idx}}
+        {bind_address, IP}
     ]),
     Pid.
 
@@ -91,16 +98,16 @@ remove_vip(VIP) ->
     {ok, _} = lashup_kv:request_op(?VIPS_KEY2, {update, [{remove, {VIP, riak_dt_orswot}}]}).
 
 
-test_vip(VIP) ->
+test_vip(Family, VIP) ->
     %% Wait for lashup state to take effect
     timer:sleep(1000),
-    test_vip(3, VIP).
+    test_vip(3, Family, VIP).
 
-test_vip(0, _) ->
+test_vip(0, _, _) ->
     error;
-test_vip(Tries, VIP = {tcp, IP0, Port}) ->
+test_vip(Tries, Family, VIP = {tcp, IP0, Port}) ->
     IP1 = inet:ntoa(IP0),
-    URI = lists:flatten(io_lib:format("http://~s:~b/", [IP1, Port])),
+    URI = uri(Family, IP1, Port),
     case httpc:request(get, {URI, _Headers = []}, [{timeout, 500}, {connect_timeout, 500}], []) of
         {ok, _} ->
             ok;
@@ -108,18 +115,36 @@ test_vip(Tries, VIP = {tcp, IP0, Port}) ->
             test_vip(Tries - 1, VIP)
     end.
 
-test_basic(_Config) ->
+uri(inet, IP, Port) ->
+    lists:flatten(io_lib:format("http://~s:~b/", [IP, Port]));
+uri(inet6, IP, Port) ->
+    lists:flatten(io_lib:format("http://[~s]:~b/", [IP, Port])).
+
+test_v4(_Config) ->
+    Family = inet,
     timer:sleep(1000),
-    W1 = make_webserver(1),
-    W2 = make_webserver(2),
-    VIP1 = {tcp, {11, 0, 0, 1}, 8080},
-    add_webserver(VIP1, webserver(W1)),
-    ok = test_vip(VIP1),
-    remove_webserver(VIP1, webserver(W1)),
+    W1 = make_v4_webserver(1),
+    W2 = make_v4_webserver(2),
+    VIP = {tcp, {11, 0, 0, 1}, 8080},
+    add_webserver(VIP, webserver(W1)),
+    ok = test_vip(Family, VIP),
+    remove_webserver(VIP, webserver(W1)),
     inets:stop(stand_alone, W1),
-    add_webserver(VIP1, webserver(W2)),
-    ok = test_vip(VIP1),
-    remove_webserver(VIP1, webserver(W2)),
-    error = test_vip(VIP1),
-    remove_vip(VIP1),
-    error = test_vip(VIP1).
+    add_webserver(VIP, webserver(W2)),
+    ok = test_vip(Family, VIP),
+    remove_webserver(VIP, webserver(W2)),
+    error = test_vip(Family, VIP),
+    remove_vip(VIP),
+    error = test_vip(Family, VIP).
+
+test_v6(_Config) ->
+    Family = inet6,
+    timer:sleep(1000),
+    W = make_v6_webserver(),
+    VIP = {tcp, {16#fd01, 16#0, 16#0, 16#0, 16#0, 16#0, 16#0, 16#1}, 8080},
+    add_webserver(VIP, webserver(W)),
+    ok = test_vip(Family, VIP),
+    remove_webserver(VIP, webserver(W)),
+    error = test_vip(Family, VIP),
+    remove_vip(VIP),
+    error = test_vip(Family, VIP).

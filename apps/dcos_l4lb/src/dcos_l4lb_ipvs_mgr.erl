@@ -21,7 +21,7 @@
          add_service/5,
          remove_service/5,
          service_address/1,
-         destination_address/1,
+         destination_address/2,
          add_netns/2,
          remove_netns/2]).
 
@@ -68,6 +68,8 @@
 -define(IP_VS_SVC_F_SCHED3,     16#20).          %% scheduler flag 3 */
 
 -define(IPVS_PROTOCOLS, [tcp, udp]). %% protocols to query gen_netlink for
+-define(ADDR_FAMILIES, [inet, inet6]).
+
 
 -type service() :: term().
 -type dest() :: term().
@@ -81,12 +83,12 @@
 get_services(Pid, Namespace) ->
     gen_server:call(Pid, {get_services, Namespace}).
 
--spec(add_service(Pid :: pid(), IP :: inet:ip4_address(), Port :: inet:port_number(),
+-spec(add_service(Pid :: pid(), IP :: inet:ip_address(), Port :: inet:port_number(),
                   Protocol :: protocol(), Namespace :: term()) -> ok | error).
 add_service(Pid, IP, Port, Protocol, Namespace) ->
     gen_server:call(Pid, {add_service, IP, Port, Protocol, Namespace}).
 
--spec(remove_service(Pid :: pid(), IP :: inet:ip4_address(),
+-spec(remove_service(Pid :: pid(), IP :: inet:ip_address(),
                      Port :: inet:port_number(),
                      Protocol :: protocol(), Namespace :: term()) -> ok | error).
 remove_service(Pid, IP, Port, Protocol, Namespace) ->
@@ -96,15 +98,15 @@ remove_service(Pid, IP, Port, Protocol, Namespace) ->
 get_dests(Pid, Service, Namespace) ->
     gen_server:call(Pid, {get_dests, Service, Namespace}).
 
--spec(remove_dest(Pid :: pid(), ServiceIP :: inet:ip4_address(),
+-spec(remove_dest(Pid :: pid(), ServiceIP :: inet:ip_address(),
                   ServicePort :: inet:port_number(),
-                  DestIP :: inet:ip4_address(), DestPort :: inet:port_number(),
+                  DestIP :: inet:ip_address(), DestPort :: inet:port_number(),
                   Protocol :: protocol(), Namespace :: term()) -> ok | error).
 remove_dest(Pid, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace) ->
     gen_server:call(Pid, {remove_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace}).
 
--spec(add_dest(Pid :: pid(), ServiceIP :: inet:ip4_address(), ServicePort :: inet:port_number(),
-               DestIP :: inet:ip4_address(), DestPort :: inet:port_number(),
+-spec(add_dest(Pid :: pid(), ServiceIP :: inet:ip_address(), ServicePort :: inet:port_number(),
+               DestIP :: inet:ip_address(), DestPort :: inet:port_number(),
                Protocol :: protocol(), Namespace :: term()) -> ok | error).
 add_dest(Pid, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace) ->
     gen_server:call(Pid, {add_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace}).
@@ -171,45 +173,32 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
--spec(service_address(service()) -> {protocol(), inet:ip4_address(), inet:port_number()}).
+-spec(service_address(service()) -> {family(), {protocol(), inet:ip_address(), inet:port_number()}}).
 service_address(Service) ->
-    % proactively added default because centos-7.2 3.10.0-514.6.1.el7.x86_64 kernel is
-    % missing this property for destination addresses
-    Inet = netlink_codec:family_to_int(inet),
-    AF = proplists:get_value(address_family, Service, Inet),
+    AF = proplists:get_value(address_family, Service),
     Protocol = netlink_codec:protocol_to_atom(proplists:get_value(protocol, Service)),
     AddressBin = proplists:get_value(address, Service),
-    AddressList = binary:bin_to_list(AddressBin),
     Port = proplists:get_value(port, Service),
-    case netlink_codec:family_to_atom(AF) of
-        inet ->
-            InetAddr = list_to_tuple(lists:sublist(AddressList, 4)),
-            {Protocol, InetAddr, Port}
-    end.
+    Family = netlink_codec:family_to_atom(AF),
+    InetAddr = address_to_ip(Family, AddressBin),
+    {AF, {Protocol, InetAddr, Port}}.
 
--spec(destination_address(Destination :: dest()) -> {inet:ip4_address(), inet:port_number()}).
-destination_address(Destination) ->
-    % centos-7.2 3.10.0-514.6.1.el7.x86_64 kernel is missing this property
-    Inet = netlink_codec:family_to_int(inet),
-    AF = proplists:get_value(address_family, Destination, Inet),
+-spec(destination_address(family(), Destination :: dest()) -> {inet:ip_address(), inet:port_number()}).
+destination_address(AF, Destination) ->
     AddressBin = proplists:get_value(address, Destination),
-    AddressList = binary:bin_to_list(AddressBin),
     Port = proplists:get_value(port, Destination),
-    case netlink_codec:family_to_atom(AF) of
-        inet ->
-            InetAddr = list_to_tuple(lists:sublist(AddressList, 4)),
-            {InetAddr, Port}
-    end.
+    Family = netlink_codec:family_to_atom(AF),
+    InetAddr = address_to_ip(Family, AddressBin),
+    {InetAddr, Port}.
 
 
 -spec(handle_get_services(Namespace :: term(), State :: state()) -> [service()]).
 handle_get_services(Namespace, State = #state{netns = NetnsMap}) ->
     Pid = maps:get(Namespace, NetnsMap),
-    lists:foldl(
-      fun(Protocol, Acc) ->
-              Services = handle_get_services(inet, Protocol, Pid, State),
-              Acc ++ Services
-      end, [], ?IPVS_PROTOCOLS).
+    Services = [handle_get_services(AddressFamily, Protocol, Pid, State)
+                 || Protocol <- ?IPVS_PROTOCOLS, 
+                    AddressFamily <- ?ADDR_FAMILIES],
+    lists:flatten(Services).
 
 -spec(handle_get_services(AddressFamily :: family(), Protocol :: protocol(),
                           Namespace :: term(), State :: state()) -> [service()]).
@@ -227,10 +216,9 @@ handle_get_services(AddressFamily, Protocol, Pid, #state{family = Family}) ->
     {ok, Replies} = gen_netlink_client:request(Pid, Family, ipvs, [root, match], Message),
     [proplists:get_value(service, MaybeService)
      || #netlink{msg = #new_service{request = MaybeService}}
-            <- Replies,
-        proplists:is_defined(service, MaybeService)].
+          <- Replies, proplists:is_defined(service, MaybeService)].
 
--spec(handle_remove_service(IP :: inet:ip4_address(), Port :: inet:port_number(),
+-spec(handle_remove_service(IP :: inet:ip_address(), Port :: inet:port_number(),
                             Protocol :: protocol(), Namespace :: term(),
                             State :: state()) -> ok | error).
 handle_remove_service(IP, Port, Protocol, Namespace, State) ->
@@ -246,7 +234,7 @@ handle_remove_service(Service, Namespace, #state{netns = NetnsMap, family = Fami
         _ -> error
     end.
 
--spec(handle_add_service(IP :: inet:ip4_address(), Port :: inet:port_number(),
+-spec(handle_add_service(IP :: inet:ip_address(), Port :: inet:port_number(),
                          Protocol :: protocol(), Namespace :: term(), State :: state()) -> ok | error).
 handle_add_service(IP, Port, Protocol, Namespace, #state{netns = NetnsMap, family = Family}) ->
     Flags = 0,
@@ -255,7 +243,7 @@ handle_add_service(IP, Port, Protocol, Namespace, #state{netns = NetnsMap, famil
         {protocol, netlink_codec:protocol_to_int(Protocol)},
         {port, Port},
         {sched_name, "wlc"},
-        {netmask, 16#ffffffff},
+        {netmask, netmask_by_addrtype(IP)},
         {flags, Flags, 16#ffffffff},
         {timeout, 0}
     ],
@@ -274,8 +262,8 @@ handle_get_dests(Service, Namespace, #state{netns = NetnsMap, family = Family}) 
     [proplists:get_value(dest, MaybeDest) || #netlink{msg = #new_dest{request = MaybeDest}} <- Replies,
         proplists:is_defined(dest, MaybeDest)].
 
--spec(handle_add_dest(ServiceIP :: inet:ip4_address(), ServicePort :: inet:port_number(),
-                      DestIP :: inet:ip4_address(), DestPort :: inet:port_number(),
+-spec(handle_add_dest(ServiceIP :: inet:ip_address(), ServicePort :: inet:port_number(),
+                      DestIP :: inet:ip_address(), DestPort :: inet:port_number(),
                       Protocol :: protocol(), Namespace :: term(), State :: state()) -> ok | error).
 handle_add_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol,
                 Namespace, #state{netns = NetnsMap, family = Family}) ->
@@ -294,8 +282,8 @@ handle_add_dest(Pid, Service, IP, Port, Family) ->
         _ -> error
     end.
 
--spec(handle_remove_dest(ServiceIP :: inet:ip4_address(), ServicePort :: inet:port_number(),
-                         DestIP :: inet:ip4_address(), DestPort :: inet:port_number(),
+-spec(handle_remove_dest(ServiceIP :: inet:ip_address(), ServicePort :: inet:port_number(),
+                         DestIP :: inet:ip_address(), DestPort :: inet:port_number(),
                          Protocol :: protocol(), Namespace :: term(), State :: state()) -> ok | error).
 handle_remove_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace, State) ->
     Protocol1 = netlink_codec:protocol_to_int(Protocol),
@@ -313,11 +301,23 @@ handle_remove_dest(Service, Dest, Namespace, #state{netns = NetnsMap, family = F
         _ -> error
     end.
 
+netmask_by_addrtype(IP) when size(IP) == 4 ->
+    16#ffffffff;
+netmask_by_addrtype(IP) when size(IP) == 8 ->
+    128.
+
+address_to_ip(inet6, <<A:16, B:16, C:16, D:16, E:16, F:16, G:16, H:16>>) ->
+    {A, B, C, D, E, F, G, H};
+address_to_ip(inet, <<A, B, C, D, _Rest/binary>>) ->
+    {A, B, C, D}. 
+
 ip_to_address(IP0) when size(IP0) == 4 ->
     [{address_family, netlink_codec:family_to_int(inet)}, {address, ip_to_address2(IP0)}];
-ip_to_address(IP0) when size(IP0) == 16 ->
+ip_to_address(IP0) when size(IP0) == 8 ->
     [{address_family, netlink_codec:family_to_int(inet6)}, {address, ip_to_address2(IP0)}].
 
+ip_to_address2({A, B, C, D, E, F, G, H}) ->
+    <<A:16, B:16, C:16, D:16, E:16, F:16, G:16, H:16>>;
 ip_to_address2(IP0) ->
     IP1 = tuple_to_list(IP0),
     IP2 = binary:list_to_bin(IP1),
@@ -362,6 +362,12 @@ maybe_remove_netns(false, _, NetnsMap) ->
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
+ip_to_address2_test() ->
+    IP = {16#fd01, 16#0, 16#0, 16#0, 16#0, 16#0, 16#0, 16#1},
+    IP0 = ip_to_address2(IP),
+    Expected = <<253,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1>>,
+    ?assertEqual(Expected, IP0).
+
 destination_address_test_() ->
     D = [{address, <<10, 10, 0, 83, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>>},
          {port, 9042},
@@ -383,7 +389,8 @@ destination_address_test_() ->
                  {inbps, 0},
                  {outbps, 0}]}],
     DAddr = {{10, 10, 0, 83}, 9042},
-    [?_assertEqual(DAddr, destination_address(D))].
+    AF = netlink_codec:family_to_int(inet), 
+    [?_assertEqual(DAddr, destination_address(AF, D))].
 
 service_address_tcp_test_() ->
     service_address_(tcp).
@@ -392,7 +399,8 @@ service_address_udp_test_() ->
     service_address_(udp).
 
 service_address_(Protocol) ->
-    S = [{address_family, 2},
+    AF = netlink_codec:family_to_int(inet),
+    S = [{address_family, AF},
          {protocol, proto_num(Protocol)},
          {address, <<11, 197, 245, 133, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>>},
          {port, 9042},
@@ -410,7 +418,7 @@ service_address_(Protocol) ->
                  {outpps, 0},
                  {inbps, 0},
                  {outbps, 0}]}],
-    SAddr = {Protocol, {11, 197, 245, 133}, 9042},
+    SAddr = {AF, {Protocol, {11, 197, 245, 133}, 9042}},
     [?_assertEqual(SAddr, service_address(S))].
 
 proto_num(tcp) -> 6;
