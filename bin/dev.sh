@@ -1,10 +1,39 @@
 #!/bin/sh
 
+SCRIPT=$(readlink -f $0 || true)
+echo $SCRIPT
+
 if ! hostname | grep dcos-docker > /dev/null; then
     HOST=${1:-dcos-docker-master1}
-    exec docker exec -it ${HOST} /bin/sh -c "cd $(pwd) && exec ./bin/dev.sh"
+    exec docker exec -it ${HOST} $(pwd)/bin/dev.sh ${@:2}
 fi
 
+exit 0
+
+### Compile configuration
+export CFLAGS="-I/opt/mesosphere/include -I/opt/mesosphere/active/libsodium/include"
+export LDFLAGS="-L/opt/mesosphere/lib -L/opt/mesosphere/active/libsodium/lib -Wl,-rpath=/opt/mesosphere/active/libsodium/lib"
+
+###
+case "$1" in
+    rebar3)
+        exec /opt/mesosphere/bin/dcos-shell ./rebar3 "${@:2}"
+        ;;
+    make)
+        exec /opt/mesosphere/bin/dcos-shell make "${@:2}"
+        ;;
+    systemctl)
+        exec /opt/mesosphere/bin/dcos-shell systemctl "${@:2}"
+        ;;
+    *)
+        if [ -n "$1" ]; then
+            echo "Usage: $0" >&2
+            echo "       $0 dcos-docker-name" >&2
+            echo "       $0 dcos-docker-name rebar3 args" >&2
+            echo "       $0 dcos-docker-name make args" >&2
+            exit 1
+        fi
+esac
 
 ### EnvironmentFile
 eval $(
@@ -24,8 +53,6 @@ eval $(
 if ! which gcc g++ make dig ip ipvsadm > /dev/null 2> /dev/null; then
     yum install -y make gcc gcc-c++ bind-utils iproute2 ipvsadm || exit 2
 fi
-export CFLAGS="-I/opt/mesosphere/include -I/opt/mesosphere/active/libsodium/include"
-export LDFLAGS="-L/opt/mesosphere/lib -L/opt/mesosphere/active/libsodium/lib -Wl,-rpath=/opt/mesosphere/active/libsodium/lib"
 ./rebar3 get-deps || exit 3
 
 ### Prepare to start
@@ -64,7 +91,8 @@ function check_epmd() {
         echo "EPMD is not reachable at port \"${ERL_EPMD_PORT}\"" >&2
         exit 1;
     fi
-    APP_PORT=$(epmd -port ${ERL_EPMD_PORT} -names | awk "/${NODE_NAME}/{print \$5}")
+    APP_PORT=$(${ERTS_DIR}/bin/epmd -port ${ERL_EPMD_PORT} -names | \
+             awk "{if (\$2 == \"${NODE_NAME}\") print \$5}")
     if [ "${APP_PORT}" ]; then
         read -r -d '' EVALCODE <<- EOM
             case gen_tcp:connect({127, 0, 0, 1}, ${APP_PORT}, [], 1000) of
