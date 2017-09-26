@@ -1,14 +1,19 @@
 #!/bin/sh
 
-SCRIPT=$(readlink -f $0 || true)
-echo $SCRIPT
-
 if ! hostname | grep dcos-docker > /dev/null; then
     HOST=${1:-dcos-docker-master1}
     exec docker exec -it ${HOST} $(pwd)/bin/dev.sh ${@:2}
 fi
 
-exit 0
+# Now we are in docker
+
+SCRIPT=$(readlink -f $0 || true)
+cd $(dirname $(dirname $SCRIPT))
+
+### Pre-Build
+if ! which gcc g++ make dig ip ipvsadm > /dev/null 2> /dev/null; then
+    yum install -y make gcc gcc-c++ bind-utils iproute2 ipvsadm || exit 2
+fi
 
 ### Compile configuration
 export CFLAGS="-I/opt/mesosphere/include -I/opt/mesosphere/active/libsodium/include"
@@ -49,10 +54,7 @@ eval $(
 )
 
 
-### Pre-Build
-if ! which gcc g++ make dig ip ipvsadm > /dev/null 2> /dev/null; then
-    yum install -y make gcc gcc-c++ bind-utils iproute2 ipvsadm || exit 2
-fi
+### Fetching dependecies
 ./rebar3 get-deps || exit 3
 
 ### Prepare to start
