@@ -58,7 +58,7 @@ eval $(
 ./rebar3 get-deps || exit 3
 
 ### Prepare to start
-systemctl stop dcos-net.service dcos-net-watchdog.timer dcos-net-watchdog.service
+systemctl stop dcos-net.service dcos-net-watchdog.service
 
 ### ExecStartPre
 systemctl cat dcos-net | \
@@ -93,7 +93,7 @@ function check_epmd() {
         echo "EPMD is not reachable at port \"${ERL_EPMD_PORT}\"" >&2
         exit 1;
     fi
-    APP_PORT=$(${ERTS_DIR}/bin/epmd -port ${ERL_EPMD_PORT} -names | \
+    APP_PORT=$(epmd -port ${ERL_EPMD_PORT} -names | \
              awk "{if (\$2 == \"${NODE_NAME}\") print \$5}")
     if [ "${APP_PORT}" ]; then
         read -r -d '' EVALCODE <<- EOM
