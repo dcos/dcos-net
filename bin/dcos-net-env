@@ -40,6 +40,18 @@ EOM
     fi
 }
 
+function check_certs() {
+    if [ "${ERLANG_DISTRIBUTION}" == "inet_tls" ]; then
+        for FILE in ${CLIENT_CACERTFILE} ${CLIENT_KEYFILE} ${CLIENT_CERTFILE} \
+                    ${SERVER_CACERTFILE} ${SERVER_KEYFILE} ${SERVER_CERTFILE}; do
+            if [ ! -r ${FILE} ]; then
+                echo "${FILE}: doesn't exists or is not readable" >&2
+                exit 1
+            fi
+        done
+    fi
+}
+
 ENV_FILE="/opt/mesosphere/etc/${APP_NAME}.env"
 if [ -f $ENV_FILE ]; then
   . $ENV_FILE
@@ -88,7 +100,7 @@ SERVER_FAIL_IF_NO_PEER_CERT=${SERVER_FAIL_IF_NO_PEER_CERT:=true}
 export SERVER_FAIL_IF_NO_PEER_CERT
 SERVER_DEPTH=${SERVER_DEPTH:=10}
 export SERVER_DEPTH
-
+check_certs
 
 ## By default MESOS_STATE_SSL_ENABLED is false
 MESOS_STATE_SSL_ENABLED=${MESOS_STATE_SSL_ENABLED:=false}
