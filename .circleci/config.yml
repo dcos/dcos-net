@@ -41,8 +41,8 @@ jobs:
           name: Installing libsodium
           command: |
               set -xe
-              curl -LO https://deb.debian.org/debian/pool/main/libs/libsodium/libsodium18_1.0.13-1_amd64.deb
-              curl -LO https://deb.debian.org/debian/pool/main/libs/libsodium/libsodium-dev_1.0.13-1_amd64.deb
+              curl -LO https://launchpad.net/ubuntu/+archive/primary/+files/libsodium18_1.0.13-1_amd64.deb
+              curl -LO https://launchpad.net/ubuntu/+archive/primary/+files/libsodium-dev_1.0.13-1_amd64.deb
               sudo dpkg -i libsodium18_1.0.13-1_amd64.deb
               sudo dpkg -i libsodium-dev_1.0.13-1_amd64.deb
       - restore_cache:
