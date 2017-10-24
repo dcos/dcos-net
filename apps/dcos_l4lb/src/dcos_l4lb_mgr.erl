@@ -216,8 +216,8 @@ installed_state(Namespace, #state{ipvs_mgr = IPVSMgr}) ->
 normalize_services_and_dests({Service0, Destinations0}) ->
     {AddressFamily, Service1} = dcos_l4lb_ipvs_mgr:service_address(Service0),
     Destinations1 = lists:map(
-                      fun(Dest) ->  
-                          dcos_l4lb_ipvs_mgr:destination_address(AddressFamily, Dest) 
+                      fun(Dest) ->
+                          dcos_l4lb_ipvs_mgr:destination_address(AddressFamily, Dest)
                       end, Destinations0),
     Destinations2 = lists:usort(Destinations1),
     {Service1, Destinations2}.

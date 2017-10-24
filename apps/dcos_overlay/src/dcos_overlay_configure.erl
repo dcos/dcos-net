@@ -47,7 +47,7 @@ maybe_configure(Config, MyPid) ->
 try_configure_overlay(Pid, Config, Overlay) ->
     #mesos_state_agentoverlayinfo{
         info = #mesos_state_overlayinfo{
-            subnet = Subnet, 
+            subnet = Subnet,
             subnet6 = Subnet6
         }
     } = Overlay,
@@ -70,7 +70,7 @@ parse_subnet(Subnet) ->
     true = 0 =< PrefixLen andalso PrefixLen =< 128,
     {IP, PrefixLen}.
 
-try_configure_overlay2(Pid, 
+try_configure_overlay2(Pid,
   _Config = #{key := [navstar, overlay, Subnet], value := LashupValue},
   Overlay, ParsedSubnet) when Subnet == ParsedSubnet ->
     lists:map(

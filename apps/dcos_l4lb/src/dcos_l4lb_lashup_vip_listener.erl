@@ -37,8 +37,8 @@
 -type family() :: inet | inet6.
 -type ip4_num() :: 0..16#ffffffff.
 -type ip6_num() :: 0..16#ffff.
--type ip6() :: {ip6_num(), ip6_num(), ip6_num(), ip6_num(), 
-                ip6_num(), ip6_num(), ip6_num(), ip6_num()}. 
+-type ip6() :: {ip6_num(), ip6_num(), ip6_num(), ip6_num(),
+                ip6_num(), ip6_num(), ip6_num(), ip6_num()}.
 -record(state, {
     ref = erlang:error() :: reference(),
     min_ip_num = erlang:error(no_min_ip_num) :: ip4_num(),
@@ -73,7 +73,7 @@ init([]) ->
     ets_restart(ip_to_name),
     MinIP = ip_to_integer(dcos_l4lb_config:min_named_ip()),
     MaxIP = ip_to_integer(dcos_l4lb_config:max_named_ip()),
-    LastIP6 = dcos_l4lb_config:min_named_ip6(), 
+    LastIP6 = dcos_l4lb_config:min_named_ip6(),
     {ok, Ref} = lashup_kv_events_helper:start_link(ets:fun2ms(fun({?VIPS_KEY2}) -> true end)),
     State = #state{ref = Ref, max_ip_num = MaxIP, min_ip_num = MinIP, last_ip6 = LastIP6},
     {ok, State}.
@@ -135,7 +135,7 @@ handle_value(VIPs0, State0) ->
 process_vips(VIPs0, State) ->
     VIPs1 = lists:map(fun rewrite_keys/1, VIPs0),
     CategorizedVIPs = categories_vips(VIPs1),
-    RebindVIPs = [rebind_names(Family, VIPs, State) 
+    RebindVIPs = [rebind_names(Family, VIPs, State)
                      || {Family, VIPs} <- CategorizedVIPs],
     lists:flatten(RebindVIPs).
 
@@ -149,6 +149,7 @@ categories_vips([], V4_VIPs, V6_VIPs) ->
     [{inet, lists:reverse(V4_VIPs)}, {inet6, lists:reverse(V6_VIPs)}];
 categories_vips([VIP|Rest], V4_VIPs, V6_VIPs) ->
     case categories_BE(VIP) of
+        [] -> categories_vips(Rest, V4_VIPs, V6_VIPs);
         [inet] -> categories_vips(Rest, [VIP|V4_VIPs], V6_VIPs);
         [inet6] -> categories_vips(Rest, V4_VIPs, [VIP|V6_VIPs]);
         [inet, inet6] -> categories_vips(Rest, [VIP|V4_VIPs], [VIP|V6_VIPs])
@@ -348,7 +349,7 @@ add_new_name_ipv4(Name, SearchNext, SearchStart,
     end.
 
 add_new_name_ipv6(Name, State = #state{last_ip6 = LastIP6}) ->
-    MinIP6 = dcos_l4lb_config:min_named_ip6(), 
+    MinIP6 = dcos_l4lb_config:min_named_ip6(),
     MaxIP6 = dcos_l4lb_config:max_named_ip6(),
     NextIP6 = next_ip6(LastIP6, MinIP6, MaxIP6),
     case ets:lookup(ip_to_name, NextIP6) of
@@ -391,7 +392,7 @@ state() ->
     ets_restart(name_to_ip),
     ets_restart(name_to_ip6),
     ets_restart(ip_to_name),
-    LastIP6 = {16#fd01,16#c,16#0,16#0,16#0,16#0,16#0,16#0},
+    LastIP6 = {16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#0},
     #state{ref = undefined, min_ip_num = 16#0b000000, max_ip_num = 16#0b0000fe, last_ip6 = LastIP6}.
 
 process_vips_tcp_test() ->
@@ -413,15 +414,15 @@ process_vips(Protocol) ->
         },
         {
             {{Protocol, {name, {<<"/foo">>, <<"marathon">>}}, 80}, riak_dt_orswot},
-            [{{10, 0, 3, 46}, {{16#fe01,16#c,16#0,16#0,16#0,16#0,16#0,16#1}, 25678}}]
+            [{{10, 0, 3, 46}, {{16#fe01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#1}, 25678}}]
         }
     ],
     Out = process_vips(VIPs, State),
     Expected = [
         {{Protocol, {1, 2, 3, 4}, 80}, [{{10, 0, 3, 46}, {{10, 0, 3, 46}, 11778}}]},
         {{Protocol, {11, 0, 0, 36}, 80}, [{{10, 0, 3, 46}, {{10, 0, 3, 46}, 25458}}]},
-        {{Protocol, {16#fd01,16#c,16#0,16#0,16#0,16#0,16#0,16#1}, 80}, 
-           [{{10, 0, 3, 46}, {{16#fe01,16#c,16#0,16#0,16#0,16#0,16#0,16#1}, 25678}}]}
+        {{Protocol, {16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#1}, 80},
+           [{{10, 0, 3, 46}, {{16#fe01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#1}, 25678}}]}
     ],
     ?assertEqual(Expected, Out),
     State.
@@ -432,11 +433,17 @@ update_name_mapping_test() ->
     NTIList = [{N, I} || {I, N} <- ets:tab2list(ip_to_name)],
     SortedList = lists:reverse(lists:usort(NTIList)),
     ?assertEqual(SortedList, ets:tab2list(name_to_ip)),
-    ?assertEqual([{{11,0,0,244}, test1}, {{11,0,0,245}, test2}, {{11,0,0,246}, test3}], lists:usort(ets:tab2list(ip_to_name))),
-    ?assertEqual([{test3, {11,0,0,246}}, {test2, {11,0,0,245}}, {test1, {11,0,0,244}}], ets:tab2list(name_to_ip)),
+    ?assertEqual([{{11, 0, 0, 244}, test1},
+                  {{11, 0, 0, 245}, test2},
+                  {{11, 0, 0, 246}, test3}],
+                  lists:usort(ets:tab2list(ip_to_name))),
+    ?assertEqual([{test3, {11, 0, 0, 246}},
+                  {test2, {11, 0, 0, 245}},
+                  {test1, {11, 0, 0, 244}}],
+                  ets:tab2list(name_to_ip)),
     update_name_mapping(inet, [test1, test3], State0),
-    ?assertEqual([{{11,0,0,246}, test3}, {{11,0,0,244}, test1}], ets:tab2list(ip_to_name)),
-    ?assertEqual([{test3, {11,0,0,246}}, {test1, {11,0,0,244}}], ets:tab2list(name_to_ip)).
+    ?assertEqual([{{11, 0, 0, 246}, test3}, {{11, 0, 0, 244}, test1}], ets:tab2list(ip_to_name)),
+    ?assertEqual([{test3, {11, 0, 0, 246}}, {test1, {11, 0, 0, 244}}], ets:tab2list(name_to_ip)).
 
 update_name_mapping_v6_test() ->
     State0 = state(),
@@ -444,20 +451,20 @@ update_name_mapping_v6_test() ->
     NTIList = [{N, I} || {I, N} <- ets:tab2list(ip_to_name)],
     SortedList = lists:reverse(lists:usort(NTIList)),
     ?assertEqual(SortedList, ets:tab2list(name_to_ip6)),
-    ?assertEqual([{{16#fd01,16#c,16#0,16#0,16#0,16#0,16#0,16#1}, test1}, 
-                  {{16#fd01,16#c,16#0,16#0,16#0,16#0,16#0,16#2}, test2}, 
-                  {{16#fd01,16#c,16#0,16#0,16#0,16#0,16#0,16#3}, test3}], 
+    ?assertEqual([{{16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#1}, test1},
+                  {{16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#2}, test2},
+                  {{16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#3}, test3}],
                   lists:usort(ets:tab2list(ip_to_name))),
-    ?assertEqual([{test3, {16#fd01,16#c,16#0,16#0,16#0,16#0,16#0,16#3}}, 
-                  {test2, {16#fd01,16#c,16#0,16#0,16#0,16#0,16#0,16#2}}, 
-                  {test1, {16#fd01,16#c,16#0,16#0,16#0,16#0,16#0,16#1}}], 
+    ?assertEqual([{test3, {16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#3}},
+                  {test2, {16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#2}},
+                  {test1, {16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#1}}],
                   ets:tab2list(name_to_ip6)),
     update_name_mapping(inet6, [test1, test3], State0),
-    ?assertEqual([{{16#fd01,16#c,16#0,16#0,16#0,16#0,16#0,16#1}, test1}, 
-                  {{16#fd01,16#c,16#0,16#0,16#0,16#0,16#0,16#3}, test3}], 
+    ?assertEqual([{{16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#1}, test1},
+                  {{16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#3}, test3}],
                   ets:tab2list(ip_to_name)),
-    ?assertEqual([{test3, {16#fd01,16#c,16#0,16#0,16#0,16#0,16#0,16#3}}, 
-                  {test1, {16#fd01,16#c,16#0,16#0,16#0,16#0,16#0,16#1}}], 
+    ?assertEqual([{test3, {16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#3}},
+                  {test1, {16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#1}}],
                   ets:tab2list(name_to_ip6)).
 
 

@@ -64,7 +64,7 @@ max_named_ip() ->
 -endif.
 
 min_named_ip6() ->
-  application:get_env(dcos_l4lb, min_named_ip6, {16#fd01,16#c,16#0,16#0,16#0,16#0,16#0,16#0}).
+  application:get_env(dcos_l4lb, min_named_ip6, {16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#0}).
 
 max_named_ip6() ->
-  application:get_env(dcos_l4lb, max_named_ip6, {16#fd01,16#c,16#0,16#0,16#ffff,16#ffff,16#ffff,16#ffff}).
+  application:get_env(dcos_l4lb, max_named_ip6, {16#fd01, 16#c, 16#0, 16#0, 16#ffff, 16#ffff, 16#ffff, 16#ffff}).

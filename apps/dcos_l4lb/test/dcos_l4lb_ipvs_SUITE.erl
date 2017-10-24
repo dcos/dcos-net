@@ -38,7 +38,7 @@ init_per_testcase(_, Config) ->
             os:cmd("ip link add webserver type dummy"),
             os:cmd("ip link set webserver up"),
             os:cmd(lists:flatten(io_lib:format(
-                   "ip addr add ~s/32 dev webserver", [inet:ntoa(AgentIP)]))), 
+                   "ip addr add ~s/32 dev webserver", [inet:ntoa(AgentIP)]))),
             os:cmd("ip addr add 1.1.1.1/32 dev webserver"),
             os:cmd("ip addr add 1.1.1.2/32 dev webserver"),
             os:cmd("ip addr add 1.1.1.3/32 dev webserver"),
@@ -127,7 +127,7 @@ uri(inet6, IP, Port) ->
     lists:flatten(io_lib:format("http://[~s]:~b/", [IP, Port])).
 
 test_v4(Config) ->
-    AgentIP = ?config(agentip, Config), 
+    AgentIP = ?config(agentip, Config),
     Family = inet,
     W1 = make_v4_webserver(1),
     W2 = make_v4_webserver(2),

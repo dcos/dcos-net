@@ -310,9 +310,9 @@ collect_vips_from_discovery_info_fold(#{<<"network-scope">> := <<"container">>},
     #libprocess_pid{ip = AgentIP} = Slave#slave.pid,
     #task{statuses = [#task_status{container_status = #container_status{
           network_infos = [#network_info{ip_addresses = IPAddresses}|_]}}|_]} = Task,
-    [#vip_be2{vip_ip = VIPIP, vip_port = VIPPort, protocol = Protocol, 
-              backend_port = PortNum, backend_ip =  IPAddress, 
-              agent_ip = AgentIP} || {VIPIP, VIPPort} <- VIPs, 
+    [#vip_be2{vip_ip = VIPIP, vip_port = VIPPort, protocol = Protocol,
+              backend_port = PortNum, backend_ip =  IPAddress,
+              agent_ip = AgentIP} || {VIPIP, VIPPort} <- VIPs,
               #ip_address{ip_address = IPAddress} <- IPAddresses];
 collect_vips_from_discovery_info_fold(_PortLabels, VIPs,
     #mesos_port{protocol = Protocol, number = PortNum}, Task) ->
@@ -550,7 +550,7 @@ ipv6_vip_test() ->
         }
     ],
     ?assertEqual(Expected, VIPBes).
- 
+
 di_state_test() ->
     {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/state_di.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),

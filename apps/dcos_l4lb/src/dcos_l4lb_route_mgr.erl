@@ -43,7 +43,7 @@
 -record(params, {
     pid :: pid(),
     iface :: non_neg_integer(),
-    lo_iface :: non_neg_integer()
+    lo_iface :: non_neg_integer() | undefined
 }).
 
 %%%===================================================================
@@ -146,8 +146,8 @@ route_msg_table(Msg) -> proplists:get_value(table, element(10, Msg)).
 update_routes(Routes, Action, Namespace, #state{netns = NetnsMap}) ->
     lager:info("~p ~p ~p", [Action, Namespace, Routes]),
     Params = maps:get(Namespace, NetnsMap),
-    lists:foreach(fun(Route) -> 
-                    perform_action(Route, Action, Namespace, Params) 
+    lists:foreach(fun(Route) ->
+                    perform_action(Route, Action, Namespace, Params)
                   end, Routes).
 
 perform_action(Dst, Action, Namespace, Params = #params{pid = Pid}) ->
@@ -162,9 +162,9 @@ perform_action2(Pid, Action, Flags, Route) ->
     case {Action, Result} of
       {_, {ok, _}} -> ok;
       {delroute, {_, 16#FD, []}} -> ok; %% route doesn't exists
-      {_, {_, Error, []}} -> 
+      {_, {_, Error, []}} ->
          lager:error("Encountered error while ~p ~p ~p", [Action, Route, Error])
-    end.   
+    end.
 
 make_routes(Dst, Namespace, #params{iface = Iface, lo_iface = LoIface}) ->
     Family = dcos_l4lb_app:family(Dst),

@@ -157,7 +157,7 @@ match_iprules(_, _) ->
 
 %% ipaddr_add(Pid, inet, {44,128,0,1}, 32, "vtep1024").
 ipaddr_replace(Pid, Family, IP, PrefixLen, Ifname) ->
- Attr = [{local, IP},{address, IP}],
+ Attr = [{local, IP}, {address, IP}],
  Ifindex = if_nametoindex(Ifname),
  Msg = {
    _Family = Family,

@@ -75,8 +75,8 @@ handle_call(ip, _From, State = #state{ip = IP}) ->
     {reply, IP, State};
 handle_call(overlays, _From, State = #state{known_overlays = KnownOverlays}) ->
     {reply, KnownOverlays, State};
-handle_call(_Request, _From, State) ->
-    lager:warning("Unexpected request: ~p", [_Request]),
+handle_call(Request, _From, State) ->
+    lager:warning("Unexpected request: ~p", [Request]),
     {reply, ok, State}.
 
 handle_cast(_Request, State) ->

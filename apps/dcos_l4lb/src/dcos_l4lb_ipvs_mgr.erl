@@ -196,7 +196,7 @@ destination_address(AF, Destination) ->
 handle_get_services(Namespace, State = #state{netns = NetnsMap}) ->
     Pid = maps:get(Namespace, NetnsMap),
     Services = [handle_get_services(AddressFamily, Protocol, Pid, State)
-                 || Protocol <- ?IPVS_PROTOCOLS, 
+                 || Protocol <- ?IPVS_PROTOCOLS,
                     AddressFamily <- ?ADDR_FAMILIES],
     lists:flatten(Services).
 
@@ -309,7 +309,7 @@ netmask_by_addrtype(IP) when size(IP) == 8 ->
 address_to_ip(inet6, <<A:16, B:16, C:16, D:16, E:16, F:16, G:16, H:16>>) ->
     {A, B, C, D, E, F, G, H};
 address_to_ip(inet, <<A, B, C, D, _Rest/binary>>) ->
-    {A, B, C, D}. 
+    {A, B, C, D}.
 
 ip_to_address(IP0) when size(IP0) == 4 ->
     [{address_family, netlink_codec:family_to_int(inet)}, {address, ip_to_address2(IP0)}];
@@ -365,7 +365,7 @@ maybe_remove_netns(false, _, NetnsMap) ->
 ip_to_address2_test() ->
     IP = {16#fd01, 16#0, 16#0, 16#0, 16#0, 16#0, 16#0, 16#1},
     IP0 = ip_to_address2(IP),
-    Expected = <<253,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1>>,
+    Expected = <<253, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1>>,
     ?assertEqual(Expected, IP0).
 
 destination_address_test_() ->
@@ -389,7 +389,7 @@ destination_address_test_() ->
                  {inbps, 0},
                  {outbps, 0}]}],
     DAddr = {{10, 10, 0, 83}, 9042},
-    AF = netlink_codec:family_to_int(inet), 
+    AF = netlink_codec:family_to_int(inet),
     [?_assertEqual(DAddr, destination_address(AF, D))].
 
 service_address_tcp_test_() ->
