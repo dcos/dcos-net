@@ -25,7 +25,7 @@
 
 -type ip_vs_conn() :: #ip_vs_conn{}.
 -type backend_conns() :: #{inet:ip_address() => [ip_vs_conn()]}.
--type metrics() :: []. %% netlink record
+-type tcp_metrics() :: []. %% netlink record
 
 -record(state, {
           conns = maps:new() :: conn_map(),
@@ -94,7 +94,7 @@ update_connections(OldConns, Conns) ->
     OpenedOrDead = opened_or_dead(PollDelay, Conns),
     {OpenedOrDead, NewBackends}.
 
--spec(update_metrics(conn_map(), metrics()) -> [{ip_vs_conn(), integer(), integer()}]).
+-spec(update_metrics(conn_map(), tcp_metrics()) -> [{ip_vs_conn(), integer(), integer()}]).
 update_metrics(Backends, Metrics) ->
     P99s = get_p99s(Backends, Metrics),
     lists:flatmap(fun apply_p99/1, P99s).
