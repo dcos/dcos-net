@@ -195,10 +195,12 @@ destination_address(AF, Destination) ->
 -spec(handle_get_services(Namespace :: term(), State :: state()) -> [service()]).
 handle_get_services(Namespace, State = #state{netns = NetnsMap}) ->
     Pid = maps:get(Namespace, NetnsMap),
-    Services = [handle_get_services(AddressFamily, Protocol, Pid, State)
-                 || Protocol <- ?IPVS_PROTOCOLS,
-                    AddressFamily <- ?ADDR_FAMILIES],
-    lists:flatten(Services).
+    Params = [{AF, P} || AF <- ?ADDR_FAMILIES, P <- ?IPVS_PROTOCOLS],
+    lists:foldl(
+      fun({AddrFamily, Proto}, Acc) ->
+              Services = handle_get_services(AddrFamily, Proto, Pid, State),
+              Acc ++ Services
+      end, [], Params).
 
 -spec(handle_get_services(AddressFamily :: family(), Protocol :: protocol(),
                           Namespace :: term(), State :: state()) -> [service()]).
