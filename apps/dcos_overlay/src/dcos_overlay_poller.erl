@@ -201,6 +201,8 @@ maybe_create_vtep(_Overlay = #mesos_state_agentoverlayinfo{backend = Backend},
       undefined ->
           ok;
       _ ->
+          Var = lists:flatten(io_lib:format("net.ipv6.conf.~s.disable_ipv6=0", [VTEPNameStr])),
+          os:cmd(lists:flatten(io_lib:format("/sbin/sysctl -w ~s", [Var]))),
           {ParsedVTEPIP6, PrefixLen6} = parse_subnet(VTEPIP6),
           {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, inet6, ParsedVTEPIP6, PrefixLen6, VTEPNameStr)
     end.
