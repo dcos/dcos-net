@@ -14,7 +14,8 @@
 -export([
     start/2,
     stop/1,
-    load_config_files/1
+    load_config_files/1,
+    dist_port/0
 ]).
 
 %%====================================================================
@@ -107,6 +108,71 @@ load_app_config(App, {App, Options}) ->
     end, Options);
 load_app_config(_App, _AppOptions) ->
     ok.
+
+%%====================================================================
+%% dist_port
+%%====================================================================
+
+-spec(dist_port() -> {ok, inet:port_number()} | {error, atom()}).
+dist_port() ->
+    try
+        case erl_prim_loader:list_dir(?DEFAULT_CONFIG_DIR) of
+            {ok, Filenames} ->
+                AbsFilenames = lists:map(fun abs_filename/1, Filenames),
+                dist_port(AbsFilenames);
+            error ->
+                {error, list_dir}
+        end
+    catch _:Err ->
+        {error, Err}
+    end.
+
+-spec(dist_port([file:filename()]) ->
+    {ok, inet:port_number()} | {error, atom()}).
+dist_port([]) ->
+    {error, not_found};
+dist_port([Filename|Filenames]) ->
+    case consult(Filename) of
+        {ok, Data} ->
+            case get_dist_port(Data) of
+                {ok, Port} ->
+                    {ok, Port};
+                {error, _Error} ->
+                    dist_port(Filenames)
+            end;
+        {error, _Error} ->
+            dist_port(Filenames)
+    end.
+
+-spec(get_dist_port([{atom(), [{atom(), term()}]}]) ->
+    {ok, inet:port_number()} | {error, atom()}).
+get_dist_port(Data) ->
+    case lists:keyfind(dcos_net, 1, Data) of
+        {dcos_net, Config} ->
+            case lists:keyfind(dist_port, 1, Config) of
+                {dist_port, Port} ->
+                    {ok, Port};
+                false ->
+                    {error, not_found}
+            end;
+        false ->
+            {error, not_found}
+    end.
+
+-spec(consult(file:filename()) -> {ok, term()} | {error, term()}).
+consult(Filename) ->
+    case prim_file:read_file(Filename) of
+        {ok, Data} ->
+            String = binary_to_list(Data),
+            case erl_scan:string(String) of
+                {ok, Tokens, _Line} ->
+                    erl_parse:parse_term(Tokens);
+                {error, Error, _Line} ->
+                    {error, Error}
+            end;
+        {error, Error} ->
+            {error, Error}
+    end.
 
 %%====================================================================
 %% Plugins

@@ -8,6 +8,23 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
+    case application:get_env(dcos_net, epmd_port) of
+        {ok, Port} -> start_epmd(Port);
+        undefined -> ok
+    end,
     {ok, {#{intensity => 10000, period => 1}, [
         ?CHILD(dcos_net_masters)
     ]}}.
+
+start_epmd(Port) ->
+    [_Name, Host] = string:tokens(atom_to_list(node()), "@"),
+    {ok, IP} = inet:parse_ipv4strict_address(Host),
+    case ranch:start_listener(
+            dcos_net_epmd, 10, ranch_tcp,
+            [{port, Port}, {ip, IP}], dcos_net_epmd, []) of
+        {ok, _Pid} ->
+            ok;
+        {error, Error} ->
+            lager:error("Couldn't start epmd: ~p", [Error]),
+            erlang:halt(1)
+    end.

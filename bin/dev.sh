@@ -54,10 +54,11 @@ source /opt/mesosphere/etc/dns_config || exit 1
   echo $RESOLVERS | sed -re 's/(^|[,])/\nnameserver /g' ) > /etc/resolv.conf
 
 ### ExecStartPre
-export ENABLE_CHECK_TIME="false"
+export ENABLE_CHECK_TIME=false
 systemctl cat dcos-net | sed -nre 's/ExecStartPre=//p' | tr '\n' '\0' | \
     xargs -0 -n 1 /opt/mesosphere/bin/dcos-shell bash -c
 
 ### Run
-export DCOS_NET_ENV_CMD=$SCRIPT
+export DCOS_NET_EBIN="$(pwd)/_build/default/lib/dcos_net/ebin"
+export DCOS_NET_ENV_CMD="${SCRIPT}"
 exec /opt/mesosphere/bin/dcos-net-env console
