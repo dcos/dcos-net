@@ -36,14 +36,12 @@
 
 -type family() :: inet | inet6.
 -type ip4_num() :: 0..16#ffffffff.
--type ip6_num() :: 0..16#ffff.
--type ip6() :: {ip6_num(), ip6_num(), ip6_num(), ip6_num(),
-                ip6_num(), ip6_num(), ip6_num(), ip6_num()}.
+
 -record(state, {
     ref = erlang:error() :: reference(),
     min_ip_num = erlang:error(no_min_ip_num) :: ip4_num(),
     max_ip_num = erlang:error(no_max_ip_num) :: ip4_num(),
-    last_ip6 = undefined :: ip6(),
+    last_ip6 = undefined :: inet:ip6_address(),
     vips
     }).
 -type state() :: #state{}.
@@ -68,9 +66,8 @@ start_link() ->
 %%%===================================================================
 
 init([]) ->
-    ets_restart(name_to_ip),
-    ets_restart(name_to_ip6),
-    ets_restart(ip_to_name),
+    ets_restart(name_to_ip, bag),
+    ets_restart(ip_to_name, set),
     MinIP = ip_to_integer(dcos_l4lb_config:min_named_ip()),
     MaxIP = ip_to_integer(dcos_l4lb_config:max_named_ip()),
     LastIP6 = dcos_l4lb_config:min_named_ip6(),
@@ -116,7 +113,7 @@ handle_lookup_vip({ip, IP}) ->
     _ -> {badmatch, IP}
   end;
 handle_lookup_vip({name, Name}) when is_binary(Name) ->
-  case ets:lookup(name_to_ip, Name) of
+  case name_to_ip(inet, Name) of
     [{_, IP}] -> {ip, IP};
     _ -> {badmatch, Name}
   end;
@@ -172,9 +169,8 @@ rebind_names(Family, VIPs, State) ->
 
 -spec(rewrite_name(family(), vip2()) -> ip_vip()).
 rewrite_name(Family, {{Protocol, {name, {Name, FWName}}, PortNum}, BEs}) ->
-    Table = family_to_table(Family),
     FullName = binary_to_name([Name, FWName]),
-    [{_, IP}] = ets:lookup(Table, FullName),
+    [{_, IP}] = name_to_ip(Family, FullName),
     {{Protocol, IP, PortNum}, BEs};
 rewrite_name(_, Else) ->
     Else.
@@ -224,10 +220,9 @@ zone(Now, ZoneComponents, _State) ->
             }
         }
     ],
-    {_, _, Records1} = ets:foldl(fun add_record_fold/2, {inet, ZoneComponents, Records0}, name_to_ip),
-    {_, _, Records2} = ets:foldl(fun add_record_fold/2, {inet6, ZoneComponents, Records1}, name_to_ip6),
-    Sha = crypto:hash(sha, term_to_binary(Records2)),
-    {ZoneName, Sha, Records2}.
+    {_, Records1} = ets:foldl(fun add_record_fold/2, {ZoneComponents, Records0}, name_to_ip),
+    Sha = crypto:hash(sha, term_to_binary(Records1)),
+    {ZoneName, Sha, Records1}.
 
 zone_soa_record(Now, ZoneName, ZoneComponents) ->
     #dns_rr{
@@ -245,9 +240,9 @@ zone_soa_record(Now, ZoneName, ZoneComponents) ->
         }
     }.
 
-add_record_fold({Name, IP}, {Family, ZoneComponents, Records}) ->
+add_record_fold({Name, IP}, {ZoneComponents, Records}) ->
     RecordName = binary_to_name([Name] ++ ZoneComponents),
-    Record = case Family of
+    Record = case dcos_l4lb_app:family(IP) of
                 inet -> #dns_rr{
                           name = RecordName,
                           ttl = 5,
@@ -259,7 +254,7 @@ add_record_fold({Name, IP}, {Family, ZoneComponents, Records}) ->
                           type = ?DNS_TYPE_AAAA,
                           data = #dns_rrdata_aaaa{ip = IP}}
               end,
-    {Family, ZoneComponents, [Record|Records]}.
+    {ZoneComponents, [Record|Records]}.
 
 -spec(binary_to_name([binary()]) -> binary()).
 binary_to_name(Binaries0) ->
@@ -302,22 +297,21 @@ update_name_mapping(Family, Names, State) ->
 
 %% This can be rewritten as an enumeration over the ets table, and the names passed to it.
 remove_old_names(Family, NewNames) ->
-    Table = family_to_table(Family),
-    OldNames = lists:sort([Name || {Name, _IP} <- ets:tab2list(Table)]),
+    OldNames = lists:sort([Name || {Name, IP} <- ets:tab2list(name_to_ip),
+                                   Family == dcos_l4lb_app:family(IP)]),
     NamesToDelete = ordsets:subtract(OldNames, NewNames),
-    lists:foreach(fun(NameToDelete) -> remove_old_name(Table, NameToDelete) end, NamesToDelete).
+    lists:foreach(fun(NameToDelete) -> remove_old_name(Family, NameToDelete) end, NamesToDelete).
 
-remove_old_name(Table, NameToDelete) ->
-    [{_, IP}] = ets:lookup(Table, NameToDelete),
+remove_old_name(Family, NameToDelete) ->
+    [ObjToDelete = {_, IP}] = name_to_ip(Family, NameToDelete),
     ets:delete(ip_to_name, IP),
-    ets:delete(Table, NameToDelete).
+    ets:delete_object(name_to_ip, ObjToDelete).
 
 add_new_names(Family, Names, State) ->
     lists:foreach(fun(Name) -> maybe_add_new_name(Family, Name, State) end, Names).
 
 maybe_add_new_name(Family, Name, State) ->
-    Table = family_to_table(Family),
-    case ets:lookup(Table, Name) of
+    case name_to_ip(Family, Name) of
         [] ->
             add_new_name(Family, Name, State);
         _ ->
@@ -342,8 +336,8 @@ add_new_name_ipv4(Name, SearchNext, SearchStart,
     IP = integer_to_ip(ActualIPNum),
     case ets:lookup(ip_to_name, IP) of
         [] ->
-            ets:insert(name_to_ip, {Name, IP}),
-            ets:insert(ip_to_name, {IP, Name});
+            ets:insert(ip_to_name, {IP, Name}),
+            ets:insert(name_to_ip, {Name, IP});
         _ ->
             add_new_name_ipv4(Name, SearchNext + 1, SearchStart, State)
     end.
@@ -354,8 +348,8 @@ add_new_name_ipv6(Name, State = #state{last_ip6 = LastIP6}) ->
     NextIP6 = next_ip6(LastIP6, MinIP6, MaxIP6),
     case ets:lookup(ip_to_name, NextIP6) of
         [] ->
-            ets:insert(name_to_ip6, {Name, NextIP6}),
-            ets:insert(ip_to_name, {NextIP6, Name});
+            ets:insert(ip_to_name, {NextIP6, Name}),
+            ets:insert(name_to_ip, {Name, NextIP6});
         _ ->
             add_new_name_ipv6(Name, State#state{last_ip6 = NextIP6})
     end.
@@ -379,19 +373,19 @@ next_ip6({Num0, Num1, Num2, Num3, Num4, Num5, Num6, 16#ffff}, _, _) ->
 next_ip6({Num0, Num1, Num2, Num3, Num4, Num5, Num6, Num7}, _, _) ->
     {Num0, Num1, Num2, Num3, Num4, Num5, Num6, Num7 + 1}.
 
-family_to_table(inet) -> name_to_ip;
-family_to_table(inet6) -> name_to_ip6.
+name_to_ip(Family, Name0) ->
+    [{Name1, IP} || {Name1, IP} <- ets:lookup(name_to_ip, Name0),
+                    Family == dcos_l4lb_app:family(IP)].
 
-ets_restart(Tab) ->
+ets_restart(Tab, Type) ->
     catch ets:delete(Tab),
-    catch ets:new(Tab, [named_table, protected, {read_concurrency, true}]).
+    catch ets:new(Tab, [Type, named_table, protected, {read_concurrency, true}]).
 
 -ifdef(TEST).
 state() ->
     %% 9/8
-    ets_restart(name_to_ip),
-    ets_restart(name_to_ip6),
-    ets_restart(ip_to_name),
+    ets_restart(name_to_ip, bag),
+    ets_restart(ip_to_name, set),
     LastIP6 = {16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#0},
     #state{ref = undefined, min_ip_num = 16#0b000000, max_ip_num = 16#0b0000fe, last_ip6 = LastIP6}.
 
@@ -450,7 +444,7 @@ update_name_mapping_v6_test() ->
     update_name_mapping(inet6, [test1, test2, test3], State0),
     NTIList = [{N, I} || {I, N} <- ets:tab2list(ip_to_name)],
     SortedList = lists:reverse(lists:usort(NTIList)),
-    ?assertEqual(SortedList, ets:tab2list(name_to_ip6)),
+    ?assertEqual(SortedList, ets:tab2list(name_to_ip)),
     ?assertEqual([{{16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#1}, test1},
                   {{16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#2}, test2},
                   {{16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#3}, test3}],
@@ -458,21 +452,20 @@ update_name_mapping_v6_test() ->
     ?assertEqual([{test3, {16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#3}},
                   {test2, {16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#2}},
                   {test1, {16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#1}}],
-                  ets:tab2list(name_to_ip6)),
+                  ets:tab2list(name_to_ip)),
     update_name_mapping(inet6, [test1, test3], State0),
     ?assertEqual([{{16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#1}, test1},
                   {{16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#3}, test3}],
                   ets:tab2list(ip_to_name)),
     ?assertEqual([{test3, {16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#3}},
                   {test1, {16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#1}}],
-                  ets:tab2list(name_to_ip6)).
+                  ets:tab2list(name_to_ip)).
 
 
 zone_test() ->
     State = process_vips(tcp),
     Components = [<<"l4lb">>, <<"thisdcos">>, <<"directory">>],
     Zone = zone(1463878088, Components, State),
-    io:format("Zone ~p", [Zone]),
     Expected =
         {<<"l4lb.thisdcos.directory">>,
            <<158, 253, 241, 209, 102, 111, 218, 254, 243, 141,
