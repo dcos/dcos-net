@@ -389,6 +389,38 @@ state() ->
     LastIP6 = {16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#0},
     #state{ref = undefined, min_ip_num = 16#0b000000, max_ip_num = 16#0b0000fe, last_ip6 = LastIP6}.
 
+check_ip6_test() ->
+    MinIP6 = {16#fd01, 16#ffff, 16#ffff, 16#ffff, 16#ffff, 16#ffff, 16#ffff, 0},  
+    MaxIP6 = {16#fd01, 16#ffff, 16#ffff, 16#ffff, 16#ffff, 16#ffff, 16#ffff, 16#ffff},
+    IP6Actual = getIP6(actual, MinIP6, MaxIP6),
+    IP6Expected = getIP6(expected, MinIP6, MaxIP6),
+    ?assertEqual(IP6Actual, IP6Expected).
+    
+getIP6(Flag, MinIP6, MaxIP6) ->
+    NextIP6 = test_ip6(Flag, MinIP6, MinIP6, MaxIP6),
+    getIP6(Flag, NextIP6, MinIP6, MaxIP6, [NextIP6]).
+
+getIP6(_, _MinIP6, _MinIP6, _, Acc) ->
+    Acc;
+getIP6(Flag, LastIP6, MinIP6, MaxIP6, Acc) ->
+    NextIP6 = test_ip6(Flag, LastIP6, MinIP6, MaxIP6),
+    getIP6(Flag, NextIP6, MinIP6, MaxIP6, [NextIP6|Acc]).
+
+test_ip6(actual, LastIP6, MinIP6, MaxIP6) ->
+    next_ip6(LastIP6, MinIP6, MaxIP6);
+test_ip6(expected, LastIP6, MinIP6, MaxIP6) ->
+    test_ip6(LastIP6, MinIP6, MaxIP6).
+    
+test_ip6(MaxIP6, MinIP6, MaxIP6) ->
+    MinIP6;
+test_ip6(IP6, _, _) ->
+    {0, NextIP6} = lists:foldr(
+        fun (16#ffff, {1, Acc}) -> {1, [0|Acc]};
+            (X, {1, Acc}) -> {0, [X+1|Acc]};
+            (X, {0, Acc}) -> {0, [X|Acc]}
+        end, {1, []}, tuple_to_list(IP6)),
+    list_to_tuple(NextIP6).
+
 process_vips_tcp_test() ->
     process_vips(tcp).
 
