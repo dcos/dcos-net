@@ -18,6 +18,9 @@
 -include_lib("gen_netlink/include/netlink.hrl").
 -include("dcos_l4lb_lashup.hrl").
 -include("dcos_l4lb.hrl").
+
+-define(NOW, 0).
+-define(RECONCILE_TIMEOUT, 30000).
 -define(SERVER, ?MODULE).
 
 -record(state, {
@@ -120,24 +123,26 @@ reconcile(cast, {netns_event, Ref, EventType, EventContent}, State0 = #state{net
 
 maintain(cast, {vips, VIPs}, State0) ->
     State1 = maintain(VIPs, State0),
-    {keep_state, State1};
+    {keep_state, State1, {timeout, ?RECONCILE_TIMEOUT, do_reconcile}};
 maintain(internal, maintain, State0 = #state{last_received_vips = VIPs}) ->
     State1 = maintain(VIPs, State0),
-    {keep_state, State1};
+    {keep_state, State1, {timeout, ?RECONCILE_TIMEOUT, do_reconcile}};
 maintain(info, {lashup_gm_route_events, #{ref := Ref, tree := Tree}}, State0 = #state{route_events_ref = Ref}) ->
     State1 = State0#state{tree = Tree},
     {keep_state, State1, {next_event, internal, maintain}};
 maintain(info, {lashup_kv_events, Event = #{ref := Ref}}, State0 = #state{kv_ref = Ref}) ->
     State1 = handle_ip_event(Event, State0),
-    {keep_state, State1};
+    {keep_state, State1, {timeout, ?RECONCILE_TIMEOUT, do_reconcile}};
 maintain(cast, {netns_event, Ref, reconcile_netns, EventContent},
-         State0 = #state{last_configured_vips = VIPs, netns_event_ref = Ref}) ->
+         State0 = #state{netns_event_ref = Ref}) ->
     State1 = update_netns(reconcile_netns, EventContent, State0),
-    State2 = do_reconcile(VIPs, State1),
-    {keep_state, State2};
+    {keep_state, State1, {timeout, ?NOW, do_reconcile}};
 maintain(cast, {netns_event, Ref, EventType, EventContent}, State0 = #state{netns_event_ref = Ref}) ->
     State1 = update_netns(EventType, EventContent, State0),
-    {keep_state, State1}.
+    {keep_state, State1, {timeout, ?RECONCILE_TIMEOUT, do_reconcile}};
+ maintain(timeout, do_reconcile, State0 = #state{last_received_vips = VIPs}) ->
+    State1 = do_reconcile(VIPs, State0),
+    {keep_state, State1, {timeout, ?RECONCILE_TIMEOUT, do_reconcile}}.
 
 handle_ip_event(_Event = #{value := Value}, State0) ->
     IPToNodeName = [{IP, NodeName} || {?LWW_REG(IP), NodeName} <- Value],
