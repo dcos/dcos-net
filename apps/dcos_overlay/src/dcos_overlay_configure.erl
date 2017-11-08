@@ -45,7 +45,18 @@ maybe_configure(Config, MyPid) ->
 
 -spec(try_configure_overlay(Pid :: pid(), config(), mesos_state_agentoverlayinfo()) -> term()).
 try_configure_overlay(Pid, Config, Overlay) ->
-    #mesos_state_agentoverlayinfo{info = #mesos_state_overlayinfo{subnet = Subnet}} = Overlay,
+    #mesos_state_agentoverlayinfo{
+        info = #mesos_state_overlayinfo{
+            subnet = Subnet,
+            subnet6 = Subnet6
+        }
+    } = Overlay,
+    try_configure_overlay(Pid, Config, Overlay, Subnet),
+    try_configure_overlay(Pid, Config, Overlay, Subnet6).
+
+try_configure_overlay(_Pid, _Config, _Overlay, undefined) ->
+    ok;
+try_configure_overlay(Pid, Config, Overlay, Subnet) ->
     ParsedSubnet = parse_subnet(Subnet),
     try_configure_overlay2(Pid, Config, Overlay, ParsedSubnet).
 
@@ -53,14 +64,15 @@ try_configure_overlay(Pid, Config, Overlay) ->
 -spec(parse_subnet(Subnet :: binary()) -> {inet:ipv4_address(), prefix_len()}).
 parse_subnet(Subnet) ->
     [IPBin, PrefixLenBin] = binary:split(Subnet, <<"/">>),
-    {ok, IP} = inet:parse_ipv4_address(binary_to_list(IPBin)),
+    {ok, IP} = inet:parse_address(binary_to_list(IPBin)),
     PrefixLen = erlang:binary_to_integer(PrefixLenBin),
     true = is_integer(PrefixLen),
-    true = 0 =< PrefixLen andalso PrefixLen =< 32,
+    true = 0 =< PrefixLen andalso PrefixLen =< 128,
     {IP, PrefixLen}.
 
-try_configure_overlay2(Pid, _Config = #{key := [navstar, overlay, Subnet], value := LashupValue},
-    Overlay, ParsedSubnet) when Subnet == ParsedSubnet ->
+try_configure_overlay2(Pid,
+  _Config = #{key := [navstar, overlay, Subnet], value := LashupValue},
+  Overlay, ParsedSubnet) when Subnet == ParsedSubnet ->
     lists:map(
         fun(Value) -> maybe_configure_overlay_entry(Pid, Overlay, Value) end,
         LashupValue
@@ -95,10 +107,22 @@ configure_overlay_entry(Pid, Overlay, _VTEPIPPrefix = {VTEPIP, _PrefixLen}, Lash
 
     VTEPNameStr = binary_to_list(VTEPName),
     MACTuple = list_to_tuple(MAC),
-    {ok, _} = dcos_overlay_netlink:ipneigh_replace(Pid, VTEPIP, MACTuple, VTEPNameStr),
-    {ok, _} = dcos_overlay_netlink:bridge_fdb_replace(Pid, AgentIP, MACTuple, VTEPNameStr),
-    {ok, _} = dcos_overlay_netlink:iproute_replace(Pid, AgentIP, 32, VTEPIP, 42),
-    {ok, _} = dcos_overlay_netlink:iproute_replace(Pid, SubnetIP, SubnetPrefixLen, VTEPIP, main).
+    Family = determine_family(inet:ntoa(SubnetIP)),
+    {ok, _} = dcos_overlay_netlink:ipneigh_replace(Pid, Family, VTEPIP, MACTuple, VTEPNameStr),
+    {ok, _} = dcos_overlay_netlink:iproute_replace(Pid, Family, SubnetIP, SubnetPrefixLen, VTEPIP, main),
+    case Family of
+      inet ->
+        {ok, _} = dcos_overlay_netlink:bridge_fdb_replace(Pid, AgentIP, MACTuple, VTEPNameStr),
+        {ok, _} = dcos_overlay_netlink:iproute_replace(Pid, Family, AgentIP, 32, VTEPIP, 42);
+      _  ->
+         ok
+    end.
+
+determine_family(IP) ->
+    case inet:parse_ipv4_address(IP) of
+      {ok, _} -> inet;
+      _ -> inet6
+    end.
 
 -ifdef(TEST).
 maybe_print_parameters(Parameters) ->

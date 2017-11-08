@@ -17,14 +17,6 @@
 
 -define(TCP_LISTENER_NAME, dcos_dns_tcp_listener).
 
--define(COMPILE_OPTIONS,
-        [verbose,
-         report_errors,
-         report_warnings,
-         no_error_module_mismatch,
-         {source, undefined}]).
-
-
 %%====================================================================
 %% Application Behavior
 %%====================================================================
@@ -114,7 +106,7 @@ start_tcp_listener(IP) ->
     Port = dcos_dns_config:tcp_port(),
     Acceptors = 100,
     SendTimeout = application:get_env(dcos_dns, send_timeout, 3000),
-    Options = [{port, Port}, {ip, IP}, {send_timeout, SendTimeout}],
+    Options = [dcos_dns:family(IP), {ip, IP}, {port, Port}, {send_timeout, SendTimeout}],
     {ok, _} = ranch:start_listener({?TCP_LISTENER_NAME, IP},
         Acceptors,
         ranch_tcp,
@@ -147,7 +139,7 @@ start_http_listener(IP) ->
     Port = dcos_dns_config:http_port(),
     cowboy:start_http(
         IP, 1024,
-        [{port, Port}, {ip, IP}],
+        [dcos_dns:family(IP), {ip, IP}, {port, Port}],
         [{env, [{dispatch, Dispatch}]}]
     ).
 

@@ -14,6 +14,7 @@
     masters/0,
     is_master/0,
     key/0,
+    family/1,
     get_leader_addr/0,
     resolve_mesos/1
 ]).
@@ -43,6 +44,12 @@ key() ->
         _ ->
             false
     end.
+
+-spec family(inet:ip_address()) -> inet | inet6.
+family(IP) when size(IP) == 4 ->
+    inet;
+family(IP) when size(IP) == 8 ->
+    inet6.
 
 -spec(get_leader_addr() -> {ok, inet:ip_address()} | {error, term()}).
 get_leader_addr() ->

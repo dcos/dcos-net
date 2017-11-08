@@ -32,7 +32,9 @@
 -include("dcos_l4lb.hrl").
 
 -define(LOCAL_TABLE, 255). %% local table
+-define(MAIN_TABLE, 254). %% main table
 -define(MINUTEMAN_IFACE, "minuteman").
+-define(LO_IFACE, "lo").
 
 -record(state, {
     netns :: map()
@@ -40,7 +42,8 @@
 
 -record(params, {
     pid :: pid(),
-    iface :: non_neg_integer()
+    iface :: non_neg_integer(),
+    lo_iface :: non_neg_integer() | undefined
 }).
 
 %%%===================================================================
@@ -79,17 +82,18 @@ start_link() ->
 init([]) ->
     {ok, Pid} = gen_netlink_client:start_link(?NETLINK_ROUTE),
     {ok, Iface} = gen_netlink_client:if_nametoindex(?MINUTEMAN_IFACE),
-    Params = #params{pid = Pid, iface = Iface},
+    {ok, LoIface} = gen_netlink_client:if_nametoindex(?LO_IFACE),
+    Params = #params{pid = Pid, iface = Iface, lo_iface = LoIface},
     {ok, #state{netns = #{host => Params}}}.
 
 handle_call({get_routes, Namespace}, _From, State) ->
     Routes = handle_get_routes(Namespace, State),
     {reply, Routes, State};
 handle_call({add_routes, Routes, Namespace}, _From, State) ->
-    handle_add_routes(Routes, Namespace, State),
+    update_routes(Routes, newroute, Namespace, State),
     {reply, ok, State};
 handle_call({remove_routes, Routes, Namespace}, _From, State) ->
-    handle_remove_routes(Routes, Namespace, State),
+    update_routes(Routes, delroute, Namespace, State),
     {reply, ok, State};
 handle_call({add_netns, UpdateValue}, _From, State0) ->
     {Reply, State1} = handle_add_netns(UpdateValue, State0),
@@ -116,54 +120,73 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 handle_get_routes(Namespace, #state{netns = NetnsMap}) ->
-    handle_get_route2(maps:get(Namespace, NetnsMap)).
+    V4_Routes = handle_get_route2(inet, ?LOCAL_TABLE, maps:get(Namespace, NetnsMap)),
+    %% For v6, we add routes both in local and main table. However, the routes
+    %% in local table are on loopback interface. Hence, we do a route lookup on main
+    %% table to filter them based on minuteman interface
+    V6_Routes = handle_get_route2(inet6, ?MAIN_TABLE, maps:get(Namespace, NetnsMap)),
+    ordsets:union(V4_Routes, V6_Routes).
 
-handle_get_route2(#params{pid = Pid, iface = Iface}) ->
-    Req = [{table, ?LOCAL_TABLE}, {oif, Iface}],
+handle_get_route2(Family, Table, #params{pid = Pid, iface = Iface}) ->
+    Req = [{table, Table}, {oif, Iface}],
     {ok, Raw} = gen_netlink_client:rtnl_request(Pid, getroute, [match, root],
-                                                {inet, 0, 0, 0, 0, 0, 0, 0, [], Req}),
+                                                {Family, 0, 0, 0, 0, 0, 0, 0, [], Req}),
     Routes = [route_msg_dst(Msg) || #rtnetlink{msg = Msg} <- Raw,
-                                     Iface == route_msg_oif(Msg)],
-    lager:info("Get routes ~p ~p ~p", [Iface, Routes]),
+                                    dcos_l4lb_app:prefix_len(Family) == element(2, Msg),
+                                    Iface == route_msg_oif(Msg),
+                                    Table == route_msg_table(Msg)],
+    lager:info("Get routes ~p ~p", [Iface, Routes]),
     ordsets:from_list(Routes).
 
 %% see netlink.hrl for the element position
 route_msg_oif(Msg) -> proplists:get_value(oif, element(10, Msg)).
 route_msg_dst(Msg) -> proplists:get_value(dst, element(10, Msg)).
+route_msg_table(Msg) -> proplists:get_value(table, element(10, Msg)).
 
-handle_add_routes(RoutesToAdd, Namespace, State) ->
-    lager:info("Adding routes to Namespace ~p ~p", [Namespace, RoutesToAdd]),
-    lists:foreach(fun(Route) -> add_route(Route, Namespace, State) end, RoutesToAdd).
+update_routes(Routes, Action, Namespace, #state{netns = NetnsMap}) ->
+    lager:info("~p ~p ~p", [Action, Namespace, Routes]),
+    Params = maps:get(Namespace, NetnsMap),
+    lists:foreach(fun(Route) ->
+                    perform_action(Route, Action, Namespace, Params)
+                  end, Routes).
 
-handle_remove_routes(RoutesToDelete, Namespace, State) ->
-    lager:info("Removing routes from Namespace ~p ~p", [Namespace, RoutesToDelete]),
-    lists:foreach(fun(Route) -> remove_route(Route, Namespace, State) end, RoutesToDelete).
+perform_action(Dst, Action, Namespace, Params = #params{pid = Pid}) ->
+    Flags = rt_flags(Action),
+    Routes = make_routes(Dst, Namespace, Params), %% v6 has two routes
+    lists:foreach(fun(Route) ->
+                    perform_action2(Pid, Action, Flags, Route)
+                  end, Routes).
 
-add_route(Dst, Namespace, #state{netns = NetnsMap}) ->
-    add_route2(Dst, Namespace, maps:get(Namespace, NetnsMap)).
+perform_action2(Pid, Action, Flags, Route) ->
+    Result = gen_netlink_client:rtnl_request(Pid, Action, Flags, Route),
+    case {Action, Result} of
+      {_, {ok, _}} -> ok;
+      {delroute, {_, 16#FD, []}} -> ok; %% route doesn't exists
+      {_, {_, Error, []}} ->
+         lager:error("Encountered error while ~p ~p ~p", [Action, Route, Error])
+    end.
 
-add_route2(Dst, Namespace, Params = #params{pid = Pid}) ->
-    Route = get_route2(Dst, Namespace, Params),
-    {ok, _} = gen_netlink_client:rtnl_request(Pid, newroute, [create, replace], Route).
+make_routes(Dst, Namespace, #params{iface = Iface, lo_iface = LoIface}) ->
+    Family = dcos_l4lb_app:family(Dst),
+    Attr = {Dst, Family, Namespace},
+    case Family of
+      inet -> [make_route(Attr, Iface, ?LOCAL_TABLE)];
+      inet6 ->  [make_route(Attr, LoIface, ?LOCAL_TABLE), %% order is important
+                 make_route(Attr, Iface, ?MAIN_TABLE)]
+    end.
 
-remove_route(Dst, Namespace, #state{netns = NetnsMap}) ->
-    remove_route2(Dst, Namespace, maps:get(Namespace, NetnsMap)).
-
-remove_route2(Dst, Namespace, Params = #params{pid = Pid}) ->
-    Route = get_route2(Dst, Namespace, Params),
-    {ok, _} = gen_netlink_client:rtnl_request(Pid, delroute, [], Route).
-
-get_route2(Dst, Namespace, #params{iface = Iface}) ->
-    Msg = [{table, ?LOCAL_TABLE}, {dst, Dst}, {oif, Iface}],
+make_route({Dst, Family, Namespace}, Iface, Table) ->
+    PrefixLen = dcos_l4lb_app:prefix_len(Family),
+    Msg = [{table, Table}, {dst, Dst}, {oif, Iface}],
     {
-        inet,
-        _PrefixLen = 32,
+        Family,
+        _PrefixLen = PrefixLen,
         _SrcPrefixLen = 0,
         _Tos = 0,
-        _Table = ?LOCAL_TABLE,
+        _Table = Table,
         _Protocol = boot,
         _Scope = rt_scope(Namespace),
-        _Type = rt_type(Namespace),
+        _Type = rt_type(Namespace, Table),
         _Flags = [],
         Msg
     }.
@@ -209,5 +232,8 @@ maybe_remove_netns(false, _, NetnsMap) ->
 rt_scope(host) -> host;
 rt_scope(_) -> link.
 
-rt_type(host) -> local;
-rt_type(_) -> unicast.
+rt_type(host, ?LOCAL_TABLE) -> local;
+rt_type(_, _) -> unicast.
+
+rt_flags(newroute) -> [create, replace];
+rt_flags(delroute) -> [].
