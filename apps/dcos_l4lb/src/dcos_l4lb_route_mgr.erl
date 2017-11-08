@@ -90,9 +90,11 @@ handle_call({get_routes, Namespace}, _From, State) ->
     Routes = handle_get_routes(Namespace, State),
     {reply, Routes, State};
 handle_call({add_routes, Routes, Namespace}, _From, State) ->
+    lager:info("Namespace: ~p, Adding Routes: ~p", [Namespace, Routes]),
     update_routes(Routes, newroute, Namespace, State),
     {reply, ok, State};
 handle_call({remove_routes, Routes, Namespace}, _From, State) ->
+    lager:info("Namespace: ~p, Removing Routes: ~p", [Namespace, Routes]),
     update_routes(Routes, delroute, Namespace, State),
     {reply, ok, State};
 handle_call({add_netns, UpdateValue}, _From, State0) ->

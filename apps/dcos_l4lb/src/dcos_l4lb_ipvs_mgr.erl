@@ -230,6 +230,7 @@ handle_remove_service(IP, Port, Protocol, Namespace, State) ->
 
 -spec(handle_remove_service(Service :: service(), Namespace :: term(), State :: state()) -> ok | error).
 handle_remove_service(Service, Namespace, #state{netns = NetnsMap, family = Family}) ->
+    lager:info("Namespace: ~p, Removing Service: ~p", [Namespace, Service]),
     Pid = maps:get(Namespace, NetnsMap),
     case gen_netlink_client:request(Pid, Family, ipvs, [], #del_service{request = [{service, Service}]}) of
         {ok, _} -> ok;
@@ -250,7 +251,7 @@ handle_add_service(IP, Port, Protocol, Namespace, #state{netns = NetnsMap, famil
         {timeout, 0}
     ],
     Service1 = ip_to_address(IP) ++ Service0,
-    lager:info("Adding Service: ~p", [Service1]),
+    lager:info("Namespace: ~p, Adding Service: ~p", [Namespace, Service1]),
     case gen_netlink_client:request(Pid, Family, ipvs, [], #new_service{request = [{service, Service1}]}) of
         {ok, _} -> ok;
         _ -> error
@@ -295,7 +296,7 @@ handle_remove_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace
 
 -spec(handle_remove_dest(Service :: service(), Dest :: dest(), Namespace :: term(), State :: state()) -> ok | error).
 handle_remove_dest(Service, Dest, Namespace, #state{netns = NetnsMap, family = Family}) ->
-    lager:info("Deleting Dest: ~p~n", [Dest]),
+    lager:info("Removing Dest ~p to service ~p~n", [Dest, Service]),
     Pid = maps:get(Namespace, NetnsMap),
     Msg = #del_dest{request = [{dest, Dest}, {service, Service}]},
     case gen_netlink_client:request(Pid, Family, ipvs, [], Msg) of
