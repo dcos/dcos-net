@@ -22,6 +22,7 @@
     handle_info/2,
     terminate/2,
     lookup_vips/1,
+    name_to_ip/2,
     code_change/3]).
 
 -include_lib("stdlib/include/ms_transform.hrl").
