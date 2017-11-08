@@ -391,12 +391,12 @@ state() ->
     #state{ref = undefined, min_ip_num = 16#0b000000, max_ip_num = 16#0b0000fe, last_ip6 = LastIP6}.
 
 check_ip6_test() ->
-    MinIP6 = {16#fd01, 16#ffff, 16#ffff, 16#ffff, 16#ffff, 16#ffff, 16#ffff, 0},  
+    MinIP6 = {16#fd01, 16#ffff, 16#ffff, 16#ffff, 16#ffff, 16#ffff, 16#ffff, 0},
     MaxIP6 = {16#fd01, 16#ffff, 16#ffff, 16#ffff, 16#ffff, 16#ffff, 16#ffff, 16#ffff},
     IP6Actual = getIP6(actual, MinIP6, MaxIP6),
     IP6Expected = getIP6(expected, MinIP6, MaxIP6),
     ?assertEqual(IP6Actual, IP6Expected).
-    
+
 getIP6(Flag, MinIP6, MaxIP6) ->
     NextIP6 = test_ip6(Flag, MinIP6, MinIP6, MaxIP6),
     getIP6(Flag, NextIP6, MinIP6, MaxIP6, [NextIP6]).
@@ -411,7 +411,7 @@ test_ip6(actual, LastIP6, MinIP6, MaxIP6) ->
     next_ip6(LastIP6, MinIP6, MaxIP6);
 test_ip6(expected, LastIP6, MinIP6, MaxIP6) ->
     test_ip6(LastIP6, MinIP6, MaxIP6).
-    
+
 test_ip6(MaxIP6, MinIP6, MaxIP6) ->
     MinIP6;
 test_ip6(IP6, _, _) ->
