@@ -275,20 +275,27 @@ task_ip_autoip(Task = #task{container = #container{type = docker, docker = #dock
     task_ip_by_network_infos(Task, <<"autoip">>);
 task_ip_autoip(Task = #task{container = #container{type = mesos, network_infos = NetworkInfos}}) when
         NetworkInfos == [] orelse NetworkInfos == undefined ->
-    task_ip_by_network_infos(Task, <<"autoip">>);
+    task_ip_autoip_other_networkInfos(Task);
 task_ip_autoip(Task = #task{container = #container{type = mesos,
-      network_infos = []}}) ->
-    task_ip_by_network_infos(Task, <<"autoip">>);
-task_ip_autoip(Task = #task{container = #container{type = mesos,
-      network_infos = [#network_info{port_mappings = PortMappings}|_]}}) when
-      PortMappings == [] orelse PortMappings == undefined ->
-    task_ip_by_network_infos(Task, <<"autoip">>);
+        network_infos = [#network_info{port_mappings = PortMappings}|_]}}) when
+        PortMappings == [] orelse PortMappings == undefined ->
+    task_ip_autoip_other_networkInfos(Task);
 task_ip_autoip(Task) ->
+    task_ip_by_agent(Task, <<"autoip">>).
+
+task_ip_autoip_other_networkInfos(Task = #task{statuses = [#task_status{
+       container_status = #container_status{network_infos = NetworkInfos}}|_]}) when
+       NetworkInfos == [] orelse NetworkInfos == undefined ->
+    task_ip_autoip_no_networkinfos(Task);
+task_ip_autoip_other_networkInfos(Task = #task{statuses = [#task_status{
+       container_status = #container_status{network_infos = [#network_info{port_mappings = PortMappings}|_]}}|_]}) when
+       PortMappings == [] orelse PortMappings == undefined ->
+    task_ip_by_network_infos(Task, <<"autoip">>);
+task_ip_autoip_other_networkInfos(Task) ->
     task_ip_by_agent(Task, <<"autoip">>).
 
 task_ip_autoip_no_networkinfos(Task) ->
     task_ip_by_agent(Task, <<"autoip">>).
-
 
 
 %% Creates the zone:
