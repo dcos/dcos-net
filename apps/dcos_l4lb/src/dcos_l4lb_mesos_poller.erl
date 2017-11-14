@@ -237,21 +237,21 @@ unflatten_vips(VIPBes) ->
         ),
     orddict:map(fun(_Key, Value) -> ordsets:from_list(Value) end, VIPBEsDict).
 
+-spec is_healthy(task()) -> boolean().
+is_healthy(#task{state = running, statuses = TaskStatuses}) ->
+    lists:all(fun is_healthy/1, TaskStatuses);
+is_healthy(#task_status{state = running, healthy = undefined}) ->
+    true;
+is_healthy(#task_status{state = running, healthy = true}) ->
+    true;
+is_healthy(_) ->
+    false.
+
 -spec(collect_vips(MesosState :: mesos_state_client:mesos_agent_state(), State :: state()) ->
     [{VIP :: protocol_vip(), [Backend :: ip_ip_port()]}]).
 collect_vips(MesosState, _State) ->
     Tasks = mesos_state_client:tasks(MesosState),
-    Tasks1 =
-        lists:filter(
-            fun
-                (#task{statuses = [_TaskStatus = #task_status{healthy = false}|_]}) ->
-                    false;
-                (#task{state = running}) ->
-                    true;
-                (_) ->
-                    false
-            end,
-            Tasks),
+    Tasks1 = lists:filter(fun is_healthy/1, Tasks),
     VIPBEs = collect_vips_from_tasks_labels(Tasks1, ordsets:new()),
     VIPBEs1 = collect_vips_from_discovery_info(Tasks1, VIPBEs),
     VIPBes2 = lists:usort(VIPBEs1),
