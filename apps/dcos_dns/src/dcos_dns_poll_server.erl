@@ -179,15 +179,9 @@ add_mesos_dns_a_recs(RecordName0, Values, MesosDNSDomain, Acc) ->
 add_mesos_dns_a_rec(IPBin, RecordName0, Acc) ->
     RecordName1 = <<RecordName0/binary, ?MESOS_DOMAIN/binary>>,
     IPStr = binary_to_list(IPBin),
-    case inet:parse_ipv4_address(IPStr) of
+    case inet:parse_address(IPStr) of
         {ok, IP} ->
-            Record =
-                #dns_rr{
-                    name = RecordName1,
-                    type = ?DNS_TYPE_A,
-                    ttl = ?TTL,
-                    data = #dns_rrdata_a{ip = IP}
-                },
+            Record = record(RecordName1, IP),
             [Record|Acc];
         {error, Reason} ->
             lager:warning("Couldn't create DNS A record: ~p:~p Error:~p", [RecordName1, IPStr, Reason]),
@@ -348,10 +342,7 @@ basic_task_record(Name, IPResolver, Task = #task{framework = #framework{name = F
 basic_task_record(_, [], Acc) ->
     Acc;
 basic_task_record(FormatedName, [IP|Rest], Acc) ->
-    Record = case dcos_dns:family(IP) of
-               inet -> record(FormatedName, ?DNS_TYPE_A, #dns_rrdata_a{ip = IP});
-               inet6 -> record(FormatedName, ?DNS_TYPE_AAAA, #dns_rrdata_aaaa{ip = IP})
-             end,
+    Record = record(FormatedName, IP),
     basic_task_record(FormatedName, Rest, [Record | Acc]).
 
 format_name(ListOfNames0, Postfix) ->
@@ -366,13 +357,24 @@ format_name(ListOfNames0, Postfix) ->
         ListOfNames2
     ).
 
-record(FormatedName, Type, Data) ->
-    #dns_rr{
-        name = FormatedName,
-        type = Type,
-        ttl = ?TTL,
-        data = Data
-    }.
+record(Name, IP) ->
+    case dcos_dns:family(IP) of
+        inet ->
+            #dns_rr{
+                name = Name,
+                type = ?DNS_TYPE_A,
+                ttl = ?TTL,
+                data = #dns_rrdata_a{ip = IP}
+            };
+        inet6 ->
+            #dns_rr{
+                name = Name,
+                type = ?DNS_TYPE_AAAA,
+                ttl = ?TTL,
+                data = #dns_rrdata_aaaa{ip = IP}
+            }
+    end.
+
 
 base_records(ZoneName) ->
     ordsets:from_list(
