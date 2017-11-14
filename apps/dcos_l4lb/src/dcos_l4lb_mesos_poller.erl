@@ -326,7 +326,7 @@ collect_vips_from_discovery_info_fold(_PortLabels, VIPs,
 -type label_value() :: binary().
 -spec(parse_vip({LabelBin :: label_value(), task()}) -> {name_or_ip(), inet:port_number()}).
 parse_vip({LabelBin, Task = #task{}}) ->
-    [HostBin, PortBin] = binary:split(LabelBin, <<":">>),
+    [HostBin, PortBin] = string:split(LabelBin, <<":">>, trailing),
     HostStr = binary_to_list(HostBin),
     Host =
         case inet:parse_address(HostStr) of
