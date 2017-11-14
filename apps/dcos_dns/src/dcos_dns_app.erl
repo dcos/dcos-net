@@ -205,7 +205,11 @@ parse_ipv4_addres_with_port_test() ->
     %% Fallback to default
     ?assertEqual(
         {{8, 8, 8, 8}, 12345},
-        parse_ipv4_address_with_port("8.8.8.8", 12345)).
+        parse_ipv4_address_with_port("8.8.8.8", 12345)),
+    %% Default port
+    ?assertEqual(
+        {{1, 1, 1, 1}, 53},
+        parse_ipv4_address_with_port("1.1.1.1")).
 
 parse_ipv4_address_test() ->
     ?assertEqual(
