@@ -148,10 +148,10 @@ start_http_listener(IP) ->
 %    "upstream_resolvers": ["169.254.169.253"],
 %    "udp_port": 53,
 %    "tcp_port": 53,
-%    "forward_zones": [["a.contoso.com", [["1.1.1.1", 53]
-%                                         ["2.2.2.2", 53]]],
-%                      ["b.contoso.com", [["3.3.3.3", 53],
-%                                         ["4.4.4.4", 53]]]]
+%    "forward_zones": {
+%      "a.contoso.com" : ["1.1.1.1:53", "2.2.2.2"],
+%      "b.contoso.com" : ["3.3.3.3", "4.4.4.4:53"]
+%    }
 %  }
 maybe_load_json_config() ->
     case file:read_file("/opt/mesosphere/etc/dcos-dns.json") of
@@ -169,9 +169,9 @@ load_json_config(FileBin) ->
 process_config_tuple({<<"upstream_resolvers">>, UpstreamResolvers}) ->
     UpstreamIPsAndPorts = lists:map(fun parse_ipv4_address_with_port/1, UpstreamResolvers),
     application:set_env(?APP, upstream_resolvers, UpstreamIPsAndPorts);
-process_config_tuple({<<"forward_zones">>, Upstreams0}) ->
-    Upstreams1 = lists:foldl(fun parse_upstream/2, maps:new(), Upstreams0),
-    application:set_env(?APP, forward_zones, Upstreams1);
+process_config_tuple({<<"forward_zones">>, Zones}) ->
+    Zones0 = maps:fold(fun parse_upstream/3, maps:new(), Zones),
+    application:set_env(?APP, forward_zones, Zones0);
 process_config_tuple({<<"bind_ips">>, IPs0}) ->
     IPs1 = lists:map(fun parse_ipv4_address/1, IPs0),
     application:set_env(?APP, bind_ips, IPs1);
@@ -183,16 +183,12 @@ process_config_tuple({Key, Value}) when is_binary(Value) ->
 process_config_tuple({Key, Value}) ->
     application:set_env(?APP, binary_to_atom(Key, utf8), Value).
 
--spec(parse_upstream(ZoneDef :: [binary() | list([binary() | integer(), ...]), ...],
-                     Acc :: #{[dns:label()] => [upstream()]}) -> #{[dns:label()] => [upstream()]}).
-parse_upstream([Zone, Upstreams0], Acc) when is_binary(Zone), is_list(Upstreams0) ->
-    Labels = parse_upstream_name(Zone),
-    Upstreams1 = lists:map(fun mk_upstream/1, Upstreams0),
-    maps:put(Labels, Upstreams1, Acc).
-
--spec(mk_upstream(Upstream :: [binary() | integer()]) -> upstream()).
-mk_upstream([Server, Port]) when is_binary(Server), is_integer(Port) ->
-    {parse_ipv4_address(Server), Port}.
+-spec parse_upstream(ZoneName :: binary(), Upstreams :: [binary()], Acc) -> Acc
+    when Acc :: #{[dns:label()] => [upstream()]}.
+parse_upstream(ZoneName, Upstreams, Acc) ->
+    Labels = parse_upstream_name(ZoneName),
+    Upstreams0 = lists:map(fun parse_ipv4_address_with_port/1, Upstreams),
+    Acc#{Labels => Upstreams0}.
 
 %%====================================================================
 %% Unit Tests
@@ -203,12 +199,24 @@ mk_upstream([Server, Port]) when is_binary(Server), is_integer(Port) ->
 
 parse_ipv4_addres_with_port_test() ->
     %% With explicit port
-    ?assert({{127, 0, 0, 1}, 9000} == parse_ipv4_address_with_port("127.0.0.1:9000", 42)),
+    ?assertEqual(
+        {{127, 0, 0, 1}, 9000},
+        parse_ipv4_address_with_port("127.0.0.1:9000", 42)),
     %% Fallback to default
-    ?assert({{8, 8, 8, 8}, 12345} == parse_ipv4_address_with_port("8.8.8.8", 12345)).
+    ?assertEqual(
+        {{8, 8, 8, 8}, 12345},
+        parse_ipv4_address_with_port("8.8.8.8", 12345)),
+    %% Default port
+    ?assertEqual(
+        {{1, 1, 1, 1}, 53},
+        parse_ipv4_address_with_port("1.1.1.1")).
 
 parse_ipv4_address_test() ->
-    ?assert({127, 0, 0, 1} == parse_ipv4_address(<<"127.0.0.1">>)),
-    ?assert([{127, 0, 0, 1}, {2, 2, 2, 2}] == lists:map(fun parse_ipv4_address/1, [<<"127.0.0.1">>, <<"2.2.2.2">>])).
+    ?assertEqual(
+        {127, 0, 0, 1},
+        parse_ipv4_address(<<"127.0.0.1">>)),
+    ?assertEqual(
+        [{127, 0, 0, 1}, {2, 2, 2, 2}],
+        lists:map(fun parse_ipv4_address/1, [<<"127.0.0.1">>, <<"2.2.2.2">>])).
 
 -endif.
