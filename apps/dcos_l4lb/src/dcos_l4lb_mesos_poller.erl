@@ -551,6 +551,21 @@ ipv6_vip_test() ->
     ],
     ?assertEqual(Expected, VIPBes).
 
+ipv6_vip2_test() ->
+    {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/state2_ipv6.json"),
+    {ok, MesosState} = mesos_state_client:parse_response(Data),
+    VIPBes = collect_vips(MesosState, fake_state()),
+    Expected = [
+        {
+            {tcp, {16#fd01, 16#d, 16#0, 16#0, 16#0, 16#0, 16#0, 16#1}, 80},
+            [
+              {{10, 0, 0, 230}, {{172, 18, 0, 2}, 80}},
+              {{10, 0, 0, 230}, {{16#fd01, 16#b, 16#0, 16#0, 16#2, 16#8000, 16#0, 16#2}, 80}}
+            ]
+        }
+    ],
+    ?assertEqual(Expected, VIPBes).
+
 di_state_test() ->
     {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/state_di.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
