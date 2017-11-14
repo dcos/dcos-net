@@ -13,7 +13,7 @@
 -spec(upstreams_from_questions(dns:questions()) -> ordsets:ordset(upstream())).
 upstreams_from_questions([#dns_query{name=Name}]) ->
     Labels = dcos_dns_app:parse_upstream_name(Name),
-    Upstreams = find_upstream(Name, Labels),
+    Upstreams = find_upstream(Labels),
     lists:map(fun validate_upstream/1, Upstreams);
 
 %% There is more than one question. This is beyond our capabilities at the moment
@@ -58,17 +58,25 @@ default_resolvers() ->
     application:get_env(?APP, upstream_resolvers, Defaults).
 
 %% @private
--spec(find_upstream(Name :: binary(), Labels :: [binary()]) -> [upstream()]).
-find_upstream(_Name, [<<"mesos">>|_]) ->
+-spec(find_upstream(Labels :: [binary()]) -> [upstream()]).
+find_upstream([<<"mesos">>|_]) ->
     dcos_dns_config:mesos_resolvers();
-find_upstream(_Name, [<<"zk">>|_]) ->
+find_upstream([<<"localhost">>|_]) ->
     erldns_resolvers();
-find_upstream(_Name, [<<"spartan">>|_]) ->
+find_upstream([<<"zk">>|_]) ->
     erldns_resolvers();
-find_upstream(Name, Labels) ->
+find_upstream([<<"spartan">>|_]) ->
+    erldns_resolvers();
+find_upstream([<<"directory">>, <<"thisdcos">>|_]) ->
+    erldns_resolvers();
+find_upstream([<<"global">>, <<"thisdcos">>|_]) ->
+    erldns_resolvers();
+find_upstream([<<"directory">>, <<"dcos">>|_]) ->
+    erldns_resolvers();
+find_upstream(Labels) ->
     case find_custom_upstream(Labels) of
         [] ->
-            find_default_upstream(Name);
+            default_resolvers();
         Resolvers ->
             lager:debug("resolving ~p with custom upstream: ~p", [Labels, Resolvers]),
             Resolvers
@@ -90,13 +98,4 @@ upstream_filter_fun(QueryLabels) ->
             false ->
                 Acc
         end
-    end.
-
--spec(find_default_upstream(Name :: binary()) -> [upstream()]).
-find_default_upstream(Name) ->
-    case erldns_zone_cache:get_authority(Name) of
-        {ok, _} ->
-            erldns_resolvers();
-        _ ->
-            default_resolvers()
     end.
