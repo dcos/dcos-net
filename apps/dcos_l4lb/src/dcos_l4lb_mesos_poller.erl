@@ -326,7 +326,7 @@ collect_vips_from_discovery_info_fold(_PortLabels, VIPs,
 -type label_value() :: binary().
 -spec(parse_vip({LabelBin :: label_value(), task()}) -> {name_or_ip(), inet:port_number()}).
 parse_vip({LabelBin, Task = #task{}}) ->
-    [HostBin, PortBin] = binary:split(LabelBin, <<":">>),
+    [HostBin, PortBin] = string:split(LabelBin, <<":">>, trailing),
     HostStr = binary_to_list(HostBin),
     Host =
         case inet:parse_address(HostStr) of
@@ -546,6 +546,21 @@ ipv6_vip_test() ->
             [
               {{10, 0, 2, 74}, {{12, 0, 1, 4}, 80}},
               {{10, 0, 2, 74}, {{16#fd01, 16#0, 16#0, 16#0, 16#0, 16#1, 16#8000, 16#4}, 80}}
+            ]
+        }
+    ],
+    ?assertEqual(Expected, VIPBes).
+
+ipv6_vip2_test() ->
+    {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/state2_ipv6.json"),
+    {ok, MesosState} = mesos_state_client:parse_response(Data),
+    VIPBes = collect_vips(MesosState, fake_state()),
+    Expected = [
+        {
+            {tcp, {16#fd01, 16#d, 16#0, 16#0, 16#0, 16#0, 16#0, 16#1}, 80},
+            [
+              {{10, 0, 0, 230}, {{172, 18, 0, 2}, 80}},
+              {{10, 0, 0, 230}, {{16#fd01, 16#b, 16#0, 16#0, 16#2, 16#8000, 16#0, 16#2}, 80}}
             ]
         }
     ],
