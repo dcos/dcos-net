@@ -20,6 +20,7 @@ init([true]) ->
     %% Setup ready.spartan zone / record
     ok = dcos_dns_zone_setup(),
     ok = localhost_zone_setup(),
+    ok = custom_zones_setup(),
 
     %% Systemd Sup intentionally goes last
     Children = [
@@ -78,22 +79,25 @@ soa_record(Name) ->
         }
     }.
 
+ns_record(Name) ->
+    #dns_rr{
+        name = Name,
+        type = ?DNS_TYPE_NS,
+        ttl = 3600,
+        data = #dns_rrdata_ns{
+            dname = <<"ns.spartan">>
+        }
+    }.
+
 localhost_zone_setup() ->
     Records = [
         soa_record(<<"localhost">>),
+        ns_record(<<"localhost">>),
         #dns_rr{
             name = <<"localhost">>,
             type = ?DNS_TYPE_A,
             ttl = 5,
             data = #dns_rrdata_a{ip = {127, 0, 0, 1}}
-        },
-        #dns_rr{
-            name = <<"localhost">>,
-            type = ?DNS_TYPE_NS,
-            ttl = 3600,
-            data = #dns_rrdata_ns{
-                dname = <<"ns.spartan">>
-            }
         }
     ],
     Sha = crypto:hash(sha, term_to_binary(Records)),
@@ -102,6 +106,7 @@ localhost_zone_setup() ->
 dcos_dns_zone_setup() ->
     Records = [
         soa_record(<<"spartan">>),
+        ns_record(<<"spartan">>),
         #dns_rr{
             name = <<"ready.spartan">>,
             type = ?DNS_TYPE_A,
@@ -115,15 +120,51 @@ dcos_dns_zone_setup() ->
             data = #dns_rrdata_a{
                 ip = {198, 51, 100, 1} %% Default dcos_dns IP
             }
-        },
-        #dns_rr{
-            name = <<"spartan">>,
-            type = ?DNS_TYPE_NS,
-            ttl = 3600,
-            data = #dns_rrdata_ns{
-                dname = <<"ns.spartan">>
-            }
         }
     ],
     Sha = crypto:hash(sha, term_to_binary(Records)),
     erldns_zone_cache:put_zone({<<"spartan">>, Sha, Records}).
+
+custom_zones_setup() ->
+    Zones = application:get_env(dcos_dns, zones, #{}),
+    maps:fold(fun (ZoneName, Zone, ok) ->
+        ZoneName0 = to_binary(ZoneName),
+        true = validate_zone_name(ZoneName0),
+        Records = [
+            soa_record(ZoneName0),
+            ns_record(ZoneName0) |
+            lists:map(fun (R) -> record(ZoneName0, R) end, Zone)
+        ],
+        Sha = crypto:hash(sha, term_to_binary(Records)),
+        erldns_zone_cache:put_zone({ZoneName0, Sha, Records})
+    end, ok, Zones).
+
+-spec validate_zone_name(ZoneName :: binary()) -> boolean().
+validate_zone_name(ZoneName) ->
+    case dcos_dns_app:parse_upstream_name(ZoneName) of
+        [<<"directory">>, <<"thisdcos">>, <<"l4lb">>  | _Labels] -> false;
+        [<<"directory">>, <<"thisdcos">>, <<"mesos">> | _Labels] -> false;
+        [<<"directory">>, <<"thisdcos">>, <<"dcos">>  | _Labels] -> false;
+        [<<"directory">>, <<"thisdcos">>, _Zone | _Labels] -> true;
+        _Labels -> false
+    end.
+
+-spec record(ZoneName :: binary(), Record :: maps:map()) -> dns:rr().
+record(ZoneName, #{type := cname, name := CName, value := DName}) ->
+    CName0 = list_to_binary(mesos_state:label(CName)),
+    #dns_rr{
+        name = <<CName0/binary, ".", ZoneName/binary>>,
+        type = ?DNS_TYPE_CNAME,
+        ttl = 5,
+        data = #dns_rrdata_cname{dname=to_binary(DName)}
+    };
+record(_ZoneName, Record) ->
+    lager:error("Unexpected format: ~p", [Record]),
+    init:stop(1),
+    error(stop).
+
+-spec to_binary(term()) -> binary().
+to_binary(Bin) when is_binary(Bin) ->
+    Bin;
+to_binary(List) when is_list(List) ->
+    list_to_binary(List).
