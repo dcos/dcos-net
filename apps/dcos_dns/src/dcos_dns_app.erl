@@ -118,8 +118,7 @@ start_tcp_listener(IP) ->
 maybe_start_http_listener() ->
     case dcos_dns_config:http_enabled() of
         true ->
-            IPs = dcos_dns_config:bind_ips(),
-            lists:foreach(fun start_http_listener/1, IPs);
+            start_http_listener({127, 0, 0, 1});
         false ->
             ok
     end.
