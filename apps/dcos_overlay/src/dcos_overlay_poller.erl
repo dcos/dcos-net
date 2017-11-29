@@ -270,6 +270,8 @@ maybe_add_overlay_to_lashup(Overlay, State) ->
 
 maybe_add_overlay_to_lashup(_VTEPIPStr, _VTEPMac, _AgentSubnet, undefined, _State) ->
     ok;
+maybe_add_overlay_to_lashup(undefined, _VTEPMac, _AgentSubnet, _OverlaySubnet, _State) ->
+    ok;
 maybe_add_overlay_to_lashup(VTEPIPStr, VTEPMac, AgentSubnet, OverlaySubnet, State) ->
     ParsedSubnet = parse_subnet(OverlaySubnet),
     Key = [navstar, overlay, ParsedSubnet],
