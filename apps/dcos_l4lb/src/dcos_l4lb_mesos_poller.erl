@@ -237,9 +237,13 @@ unflatten_vips(VIPBes) ->
         ),
     orddict:map(fun(_Key, Value) -> ordsets:from_list(Value) end, VIPBEsDict).
 
--spec is_healthy(task()) -> boolean().
+-spec is_healthy(task() | task_status()) -> boolean().
+is_healthy(#task{state = running, statuses = []}) ->
+    true;
 is_healthy(#task{state = running, statuses = TaskStatuses}) ->
-    lists:all(fun is_healthy/1, TaskStatuses);
+    TaskStatuses0 = lists:keysort(#task_status.timestamp, TaskStatuses),
+    TaskStatus = lists:last(TaskStatuses0),
+    is_healthy(TaskStatus);
 is_healthy(#task_status{state = running, healthy = undefined}) ->
     true;
 is_healthy(#task_status{state = running, healthy = true}) ->
@@ -531,6 +535,20 @@ state5_test() ->
             {udp, {1, 2, 3, 4}, 5000},
             [
                 {{10, 0, 0, 243}, {{10, 0, 0, 243}, 26645}}
+            ]
+        }
+    ],
+    ?assertEqual(Expected, VIPBes).
+
+state6_test() ->
+    {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/state6.json"),
+    {ok, MesosState} = mesos_state_client:parse_response(Data),
+    VIPBes = collect_vips(MesosState, fake_state()),
+    Expected = [
+        {
+            {tcp, {1, 2, 3, 4}, 80},
+            [
+                {{172, 18, 0, 3}, {{9, 0, 1, 130}, 80}}
             ]
         }
     ],
