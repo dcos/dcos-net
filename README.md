@@ -57,7 +57,7 @@ following list of additional dependencies:
 [coverage badge]: https://img.shields.io/codecov/c/github/dcos/dcos-net/master.svg?style=flat-square
 [jira badge]: https://img.shields.io/badge/issues-jira-yellow.svg?style=flat-square
 [license badge]: https://img.shields.io/github/license/dcos/dcos-net.svg?style=flat-square
-[erlang version badge]: https://img.shields.io/badge/erlang-20.0-blue.svg?style=flat-square
+[erlang version badge]: https://img.shields.io/badge/erlang-20.1-blue.svg?style=flat-square
 
 <!-- Links -->
 [circleci]: https://circleci.com/gh/dcos/dcos-net
