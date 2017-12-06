@@ -32,6 +32,8 @@
     start_timestamp = undefined :: os:timestamp()
 }).
 
+-define(MAX_PACKET_SIZE, 512).
+
 -spec(start(from(), binary() | dns:message()) -> {ok, pid()} | {error, overload}).
 start(From, Data) ->
     case sidejob_supervisor:start_child(dcos_dns_handler_fsm_sj,
@@ -114,7 +116,11 @@ execute(State = #state{data = Data}) ->
         [] ->
             dcos_dns_metrics:update([?APP, no_upstreams_available], 1, ?SPIRAL),
             reply_fail(State1),
-            {stop, normal, State};
+            {stop, normal, State1};
+        erldns ->
+            ReplyData = erldns_resolve(State1),
+            reply_success(ReplyData, State),
+            {stop, normal, State1};
         Upstreams ->
             StartTimestamp = os:timestamp(),
             OutstandingUpstreams = start_workers(Upstreams, State),
@@ -182,6 +188,38 @@ reply_fail(_State1 = #state{dns_message = DNSMessage, from = {FromModule, FromKe
         },
     EncodedReply = dns:encode_message(Reply),
     FromModule:do_reply(FromKey, EncodedReply).
+
+%% @private
+-define(LOCALHOST, {127, 0, 0, 1}).
+erldns_resolve(#state{dns_message = DNSMessage, from = {dcos_dns_udp_server, _}}) ->
+    Response = erldns_handler:do_handle(DNSMessage, ?LOCALHOST),
+    encode_message(Response, [{max_size, max_payload_size(Response)}]);
+erldns_resolve(#state{dns_message = DNSMessage, from = {dcos_dns_tcp_handler, _}}) ->
+    Response = erldns_handler:do_handle(DNSMessage, ?LOCALHOST),
+    encode_message(Response, []).
+
+encode_message(DNSMessage, Opts) ->
+    case erldns_encoder:encode_message(DNSMessage, Opts) of
+        {false, EncodedMessage} ->
+            EncodedMessage;
+        {true, EncodedMessage, Message} when is_record(Message, dns_message)->
+            EncodedMessage;
+        {false, EncodedMessage, _TsigMac} ->
+            EncodedMessage;
+        {true, EncodedMessage, _TsigMac, _Message} ->
+            EncodedMessage
+    end.
+
+%% Determine the max payload size by looking for additional
+%% options passed by the client.
+max_payload_size(
+        #dns_message{additional =
+            [#dns_optrr{udp_payload_size = PayloadSize}
+            |_Additional]})
+        when is_integer(PayloadSize) ->
+    PayloadSize;
+max_payload_size(_DNSMessage) ->
+    ?MAX_PACKET_SIZE.
 
 %% @private
 resolve(Parent, Upstream, State) ->
