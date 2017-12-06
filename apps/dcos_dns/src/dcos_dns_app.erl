@@ -31,7 +31,6 @@ maybe_start_dcos_dns(false) ->
 maybe_start_dcos_dns(true) ->
     Ret = dcos_dns_sup:start_link(true),
     maybe_start_tcp_listener(),
-    maybe_start_http_listener(),
     Ret.
 
 stop(_State) ->
@@ -113,34 +112,6 @@ start_tcp_listener(IP) ->
         Options,
         dcos_dns_tcp_handler,
         []).
-
--spec(maybe_start_http_listener() -> ok).
-maybe_start_http_listener() ->
-    case dcos_dns_config:http_enabled() of
-        true ->
-            start_http_listener({127, 0, 0, 1});
-        false ->
-            ok
-    end.
-
--spec(start_http_listener(inet:ip4_address()) -> supervisor:startchild_ret()).
-start_http_listener(IP) ->
-    Dispatch = cowboy_router:compile([
-        {'_', [
-            {"/v1/version", dcos_dns_http_handler, [version]},
-            {"/v1/config", dcos_dns_http_handler, [config]},
-            {"/v1/hosts/:host", dcos_dns_http_handler, [hosts]},
-            {"/v1/services/:service", dcos_dns_http_handler, [services]},
-            {"/v1/enumerate", dcos_dns_http_handler, [enumerate]},
-            {"/v1/records", dcos_dns_http_handler, [records]}
-        ]}
-    ]),
-    Port = dcos_dns_config:http_port(),
-    cowboy:start_http(
-        IP, 1024,
-        [dcos_dns:family(IP), {ip, IP}, {port, Port}],
-        [{env, [{dispatch, Dispatch}]}]
-    ).
 
 % Sample configuration:
 %  {

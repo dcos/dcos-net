@@ -34,4 +34,4 @@ dcos-dns implements a simple REST API for service discovery over HTTP:
 * GET /v1/enumerate: lists all DNS information (not implemented)
 * GET /v1/records: lists all DNS records
 
-This HTTP API is reachable at http://<host>:63053/. For more information please see Mesos-DNS [documentation](https://github.com/mesosphere/mesos-dns/blob/master/docs/docs/http.md).
+This HTTP API is reachable at http://127.0.0.1:62080/. For more information please see Mesos-DNS [documentation](https://github.com/mesosphere/mesos-dns/blob/master/docs/docs/http.md).
