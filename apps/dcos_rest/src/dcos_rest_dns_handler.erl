@@ -1,4 +1,4 @@
--module(dcos_dns_http_handler).
+-module(dcos_rest_dns_handler).
 
 -export([
     init/3,

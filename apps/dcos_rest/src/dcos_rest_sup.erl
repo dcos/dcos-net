@@ -17,7 +17,14 @@ setup_cowboy() ->
             {"/lashup/kv/[...]", dcos_rest_lashup_handler, []},
             {"/lashup/key", dcos_rest_key_handler, []},
             {"/v1/vips", dcos_rest_vips_handler, []},
-            {"/status", dcos_rest_status_handler, []}
+            {"/status", dcos_rest_status_handler, []},
+
+            {"/v1/version", dcos_rest_dns_handler, [version]},
+            {"/v1/config", dcos_rest_dns_handler, [config]},
+            {"/v1/hosts/:host", dcos_rest_dns_handler, [hosts]},
+            {"/v1/services/:service", dcos_rest_dns_handler, [services]},
+            {"/v1/enumerate", dcos_rest_dns_handler, [enumerate]},
+            {"/v1/records", dcos_rest_dns_handler, [records]}
         ]}
     ]),
     {ok, Ip} = application:get_env(dcos_rest, ip),
