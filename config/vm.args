@@ -29,5 +29,7 @@
 ## Scheduler modifications.
 -stbt nnts
 
+## Dirty I/O schedulers
++SDio 0
 
 # This file MUST have extra new lines at the end
