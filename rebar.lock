@@ -65,11 +65,11 @@
  {<<"lager">>,{pkg,<<"lager">>,<<"3.5.1">>},0},
  {<<"lashup">>,
   {git,"https://github.com/dcos/lashup.git",
-       {ref,"db9f0a8a6a65f56f5a7b041de300bac316d8422a"}},
+       {ref,"49d72946dbfd88a0ac1b086427a24c90bcab06e1"}},
   0},
  {<<"mesos_state">>,
   {git,"https://github.com/dcos/mesos_state.git",
-       {ref,"f09c6b676a602ec2a6926d0255366fb5fd8546f6"}},
+       {ref,"c34cdb13be34bdabecae611ea9128a418bae3650"}},
   0},
  {<<"parse_trans">>,
   {git,"https://github.com/uwiger/parse_trans.git",
@@ -106,7 +106,7 @@
   0},
  {<<"telemetry">>,
   {git,"https://github.com/dcos/telemetry-net.git",
-       {ref,"5b99d9c1cdd56a92ea0d0986940c0157ff8ebec3"}},
+       {ref,"1a2a14949b484bf13a84c9bf1d705cae8ccd4194"}},
   0}]}.
 [
 {pkg_hash,[
