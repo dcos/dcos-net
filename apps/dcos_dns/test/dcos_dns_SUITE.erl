@@ -42,6 +42,7 @@ init_per_suite(_Config) ->
     ],
     meck_mods(Workers),
     {ok, _} = application:ensure_all_started(dcos_dns),
+    {ok, _} = application:ensure_all_started(dcos_rest),
     meck:unload(Workers),
     generate_fixture_mesos_zone(),
     generate_thisdcos_directory_zone(),
@@ -258,7 +259,7 @@ resolver_options() ->
     [{nameservers, [dcos_dns_app:parse_ipv4_address_with_port(LocalResolver, 53)]}].
 
 http_hosts_test(_Config) ->
-    Records = request("http://localhost:63053/v1/hosts/commontest.thisdcos.directory"),
+    Records = request("http://localhost:62080/v1/hosts/commontest.thisdcos.directory"),
     lists:foreach(fun (RR) ->
         ?assertMatch(
             {<<"host">>, <<"commontest.thisdcos.directory">>},
@@ -271,7 +272,7 @@ http_hosts_test(_Config) ->
     end, Records).
 
 http_services_test(_Config) ->
-    Records = request("http://localhost:63053/v1/services/_service._tcp.commontest.thisdcos.directory"),
+    Records = request("http://localhost:62080/v1/services/_service._tcp.commontest.thisdcos.directory"),
     lists:foreach(fun (RR) ->
         ?assertMatch(
             {<<"service">>, <<"_service._tcp.commontest.thisdcos.directory">>},
@@ -287,7 +288,7 @@ http_services_test(_Config) ->
     end, Records).
 
 http_records_test(_Config) ->
-    Records = request("http://localhost:63053/v1/records"),
+    Records = request("http://localhost:62080/v1/records"),
     Records0 =
         lists:filter(fun (RR) ->
             {<<"name">>, Name} = lists:keyfind(<<"name">>, 1, RR),
