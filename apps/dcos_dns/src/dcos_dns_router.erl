@@ -10,42 +10,20 @@
 -export([upstreams_from_questions/1]).
 
 %% @doc Resolvers based on a set of "questions"
--spec(upstreams_from_questions(dns:questions()) -> ordsets:ordset(upstream())).
+-spec(upstreams_from_questions(dns:questions()) -> [upstream()] | erldns).
 upstreams_from_questions([#dns_query{name=Name}]) ->
     Labels = dcos_dns_app:parse_upstream_name(Name),
-    Upstreams = find_upstream(Name, Labels),
-    lists:map(fun validate_upstream/1, Upstreams);
-
-%% There is more than one question. This is beyond our capabilities at the moment
+    find_upstream(Labels);
 upstreams_from_questions([Question|Others]) ->
+    %% There is more than one question. This is beyond our capabilities at the moment
     dcos_dns_metrics:update([dcos_dns, ignored_questions], length(Others), ?COUNTER),
-    upstreams_from_questions([Question]).
+    Result = upstreams_from_questions([Question]),
+    lager:debug("~p will be forwarded to ~p", [Others, Result]),
+    Result.
 
 -spec(validate_upstream(upstream()) -> upstream()).
 validate_upstream({{_, _, _, _}, Port} = Upstream) when is_integer(Port) ->
     Upstream.
-
-%% This one is a little bit more complicated...
-%% @private
--spec(erldns_resolvers() -> [upstream()]).
-erldns_resolvers() ->
-    ErlDNSServers = application:get_env(erldns, servers, []),
-    retrieve_servers(ErlDNSServers, []).
-retrieve_servers([], Acc) ->
-    Acc;
-retrieve_servers([Config|Rest], Acc) ->
-    case {
-            inet:parse_ipv4_address(proplists:get_value(address, Config, "")),
-            proplists:get_value(port, Config),
-            proplists:get_value(family, Config)
-    } of
-        {_, undefined, _} ->
-            retrieve_servers(Rest, Acc);
-        {{ok, Address}, Port, inet} when is_integer(Port) ->
-            retrieve_servers(Rest, [{Address, Port}|Acc]);
-        _ ->
-            retrieve_servers(Rest, Acc)
-    end.
 
 %% @private
 -spec(default_resolvers() -> [upstream()]).
@@ -55,20 +33,29 @@ default_resolvers() ->
                 {{8, 8, 8, 8}, 53},
                 {{4, 2, 2, 1}, 53},
                 {{8, 8, 8, 8}, 53}],
-    application:get_env(?APP, upstream_resolvers, Defaults).
+    Resolvers = application:get_env(?APP, upstream_resolvers, Defaults),
+    lists:map(fun validate_upstream/1, Resolvers).
 
 %% @private
--spec(find_upstream(Name :: binary(), Labels :: [binary()]) -> [upstream()]).
-find_upstream(_Name, [<<"mesos">>|_]) ->
+-spec(find_upstream(Labels :: [binary()]) -> [upstream()] | erldns).
+find_upstream([<<"mesos">>|_]) ->
     dcos_dns_config:mesos_resolvers();
-find_upstream(_Name, [<<"zk">>|_]) ->
-    erldns_resolvers();
-find_upstream(_Name, [<<"spartan">>|_]) ->
-    erldns_resolvers();
-find_upstream(Name, Labels) ->
+find_upstream([<<"localhost">>|_]) ->
+    erldns;
+find_upstream([<<"zk">>|_]) ->
+    erldns;
+find_upstream([<<"spartan">>|_]) ->
+    erldns;
+find_upstream([<<"directory">>, <<"thisdcos">>|_]) ->
+    erldns;
+find_upstream([<<"global">>, <<"thisdcos">>|_]) ->
+    erldns;
+find_upstream([<<"directory">>, <<"dcos">>|_]) ->
+    erldns;
+find_upstream(Labels) ->
     case find_custom_upstream(Labels) of
         [] ->
-            find_default_upstream(Name);
+            default_resolvers();
         Resolvers ->
             lager:debug("resolving ~p with custom upstream: ~p", [Labels, Resolvers]),
             Resolvers
@@ -90,13 +77,4 @@ upstream_filter_fun(QueryLabels) ->
             false ->
                 Acc
         end
-    end.
-
--spec(find_default_upstream(Name :: binary()) -> [upstream()]).
-find_default_upstream(Name) ->
-    case erldns_zone_cache:get_authority(Name) of
-        {ok, _} ->
-            erldns_resolvers();
-        _ ->
-            default_resolvers()
     end.

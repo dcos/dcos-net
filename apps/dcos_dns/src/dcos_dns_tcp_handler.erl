@@ -22,7 +22,8 @@
     socket,
     ref,
     transport,
-    query_pid
+    query_pid,
+    query_monref
 }).
 
 -include("dcos_dns.hrl").
@@ -56,8 +57,8 @@ wait_for_query(info, {tcp_closed, Socket}, #state{socket = Socket}) ->
 wait_for_query(info, {tcp, Socket, Data}, State0 = #state{socket = Socket}) ->
     case dcos_dns_handler_fsm:start({?MODULE, self()}, Data) of
         {ok, Pid} when is_pid(Pid) ->
-            _MonRef = erlang:monitor(process, Pid),
-            State1 = State0#state{query_pid = Pid},
+            MonRef = erlang:monitor(process, Pid),
+            State1 = State0#state{query_pid = Pid, query_monref = MonRef},
             {next_state, waiting_for_reply, State1, {timeout, ?TIMEOUT, query_timeout}};
         {error, overload} ->
             % NOTE: to avoid ddos spartan doesn't reply anything in case of overload
@@ -77,9 +78,11 @@ waiting_for_reply(timeout, query_timeout, #state{transport = Transport, socket =
 waiting_for_reply(info, {tcp_closed, Socket}, #state{socket = Socket, query_pid = Pid}) ->
     exit(Pid, normal),
     {stop, ?SHUTDOWN(tcp_closed)};
-waiting_for_reply(cast, {do_reply, ReplyData}, State0 = #state{transport = Transport, socket = Socket}) ->
+waiting_for_reply(cast, {do_reply, ReplyData}, State0 =
+        #state{transport = Transport, socket = Socket, query_monref = MonRef}) ->
     Transport:send(Socket, ReplyData),
     inet:setopts(Socket, [{active, once}]),
+    erlang:demonitor(MonRef, [flush]),
     {next_state, wait_for_query, State0, {timeout, ?TIMEOUT, idle_timeout}}.
 
 terminate(_Reason, _State, #state{}) ->
