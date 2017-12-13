@@ -186,10 +186,10 @@ load_plugin({App, AppPath}) ->
     case code:add_pathz(AppPath) of
         true ->
             load_modules(App, AppPath),
-            case application:start(App) of
+            case application:ensure_all_started(App) of
                 {error, Error} ->
                     lager:error("Plugin ~p: ~p", [App, Error]);
-                ok -> ok
+                {ok, _Apps} -> ok
             end;
         {error, bad_directory} ->
             lager:error("Plugin ~p: bad_directory", [App])
