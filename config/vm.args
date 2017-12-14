@@ -4,38 +4,33 @@
 ## Cookie for distributed erlang
 -setcookie minuteman
 
-## Heartbeat management; auto-restarts VM if it dies or becomes unresponsive
-## (Disabled by default..use with caution!)
-##-heart
-
 ## Enable kernel poll and a few async threads
 +K true
-+A 100
++A 10
 
 ## Increase number of concurrent ports/sockets
--env ERL_MAX_PORTS 100000
+-env ERL_MAX_PORTS 16384
 
 ## Tweak GC to run more often
 ##-env ERL_FULLSWEEP_AFTER 10
 
-+P 256000
+## Maximum number of simultaneously existing processes
+##+P 262144
 
+## Enable time correction
 +C multi_time_warp
 +c true
 
--epmd_port 61420
-
+## Disable a fully connected network for global module
 -connect_all false
 
 ## Increase atom count 4x
 +t 4194304
 
-# Scheduler modifications.
+## Scheduler modifications.
 -stbt nnts
 
-## Dirty schedulers and CPU
--smp enable
-## Dirty Scheduler count is 100% of CPUs, with only 50% online
-+SDPcpu 100:100
+## Dirty I/O schedulers
++SDio 0
 
 # This file MUST have extra new lines at the end
