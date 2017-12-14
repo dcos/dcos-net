@@ -55,9 +55,8 @@ start_link() ->
 %%%===================================================================
 
 init([]) ->
-    MatchSpec = ets:fun2ms(fun({[navstar, dns, zones, '_']}) -> true end),
-    {ok, Ref} = lashup_kv_events_helper:start_link(MatchSpec),
-    {ok, #state{ref = Ref}}.
+    self() ! init,
+    {ok, []}.
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
@@ -65,6 +64,10 @@ handle_call(_Request, _From, State) ->
 handle_cast(_Request, State) ->
     {noreply, State}.
 
+handle_info(init, []) ->
+    MatchSpec = ets:fun2ms(fun({[navstar, dns, zones, '_']}) -> true end),
+    {ok, Ref} = lashup_kv_events_helper:start_link(MatchSpec),
+    {noreply, #state{ref = Ref}};
 handle_info({lashup_kv_events, Event = #{ref := Reference}},
             State0 = #state{ref = Ref}) when Ref == Reference ->
     State1 = handle_event(Event, State0),

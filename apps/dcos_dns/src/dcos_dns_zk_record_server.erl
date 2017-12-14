@@ -45,8 +45,7 @@ start_link(Opts) ->
 %%%===================================================================
 
 init([]) ->
-    update_zone([]),
-    timer:send_after(0, ?REFRESH_MESSAGE),
+    self() ! init,
     {ok, #state{}}.
 
 handle_call(?REFRESH_MESSAGE, _FRom, State0) ->
@@ -60,6 +59,10 @@ handle_cast(Msg, State) ->
     lager:warning("Unhandled messages: ~p", [Msg]),
     {noreply, State}.
 
+handle_info(init, State) ->
+    update_zone([]),
+    self() ! ?REFRESH_MESSAGE,
+    {noreply, State};
 handle_info(?REFRESH_MESSAGE, State) ->
     case dcos_dns_config:mesos_resolvers() of
         [] ->

@@ -18,7 +18,7 @@
 -export([init/1, callback_mode/0, terminate/3, code_change/4]).
 
 %% state API
--export([unconfigured/3, configuring/3, batching/3, reapplying/3]).
+-export([init/3, unconfigured/3, configuring/3, batching/3, reapplying/3]).
 
 -define(SERVER, ?MODULE).
 -define(HEAPSIZE, 100). %% In MB
@@ -56,12 +56,7 @@ start_link() ->
 %%%===================================================================
 
 init([]) ->
-    MaxHeapSizeInWords = (?HEAPSIZE bsl 20) div erlang:system_info(wordsize), %%100 MB
-    process_flag(message_queue_data, on_heap),
-    process_flag(max_heap_size, MaxHeapSizeInWords),
-    MatchSpec = mk_key_matchspec(),
-    {ok, Ref} = lashup_kv_events_helper:start_link(MatchSpec),
-    {ok, unconfigured, #data{ref = Ref}}.
+    {ok, init, [], {timeout, 0, init}}.
 
 callback_mode() ->
     state_functions.
@@ -88,6 +83,14 @@ code_change(_OldVsn, OldState, OldData, _Extra) ->
 %%  +--------------+              +-------------+              +----------+               +------------+
 %%                                       |<------------------------------------------------------|
 %%------------------------------------------------------------------------------------------------------
+
+init(timeout, init, []) ->
+    MaxHeapSizeInWords = (?HEAPSIZE bsl 20) div erlang:system_info(wordsize), %%100 MB
+    process_flag(message_queue_data, on_heap),
+    process_flag(max_heap_size, MaxHeapSizeInWords),
+    MatchSpec = mk_key_matchspec(),
+    {ok, Ref} = lashup_kv_events_helper:start_link(MatchSpec),
+    {next_state, unconfigured, #data{ref = Ref}}.
 
 unconfigured(info, LashupEvent = {lashup_kv_events, #{key := OverlayKey, value := Value}}, StateData0) ->
     StateData1 = handle_lashup_event(LashupEvent, StateData0),

@@ -65,9 +65,8 @@ start_link() ->
 %%%===================================================================
 
 init([]) ->
-    {ok, Pid} = gen_netlink_client:start_link(?NETLINK_ROUTE),
-    timer:send_after(0, poll),
-    {ok, #state{netlink = Pid}}.
+    self() ! init,
+    {ok, []}.
 
 handle_call(ip, _From, State = #state{ip = IP}) ->
     {reply, IP, State};
@@ -80,6 +79,10 @@ handle_call(Request, _From, State) ->
 handle_cast(_Request, State) ->
     {noreply, State}.
 
+handle_info(init, []) ->
+    {ok, Pid} = gen_netlink_client:start_link(?NETLINK_ROUTE),
+    timer:send_after(0, poll),
+    {noreply, #state{netlink = Pid}};
 handle_info(poll, State0) ->
     State1 =
         case poll(State0) of

@@ -37,11 +37,6 @@
     tree            :: lashup_gm_route:tree() | undefined
 }).
 
--type state_data() :: #state{}.
-
--type state_name() :: notree | reconcile | maintain.
-
-
 %% API
 -export([start_link/0]).
 -export([push_vips/1,
@@ -52,7 +47,7 @@
 -export([init/1, terminate/3, code_change/4, callback_mode/0]).
 
 %% State callbacks
--export([notree/3, reconcile/3, maintain/3]).
+-export([init/3, notree/3, reconcile/3, maintain/3]).
 
 -ifdef(TEST).
 -export([normalize_services_and_dests/1]).
@@ -68,16 +63,8 @@ push_netns(EventType, EventContent) ->
 start_link() ->
     gen_statem:start_link({local, ?SERVER}, ?MODULE, [], []).
 
--spec(init([]) -> {ok, state_name(), state_data()}).
 init([]) ->
-    {ok, KVRef} = lashup_kv_events_helper:start_link(ets:fun2ms(fun({?NODEMETADATA_KEY}) -> true end)),
-    {ok, Ref} = lashup_gm_route_events:subscribe(),
-    {ok, IPVSMgr} = dcos_l4lb_ipvs_mgr:start_link(),
-    {ok, RouteMgr} = dcos_l4lb_route_mgr:start_link(),
-    {ok, NetnsRef} = dcos_l4lb_netns_watcher:start_link(),
-    State = #state{route_mgr = RouteMgr, ipvs_mgr = IPVSMgr, route_events_ref = Ref,
-                   kv_ref = KVRef, netns_event_ref = NetnsRef},
-    {ok, notree, State}.
+    {ok, init, [], {timeout, 0, init}}.
 
 terminate(Reason, State, Data) ->
     lager:warning("Terminating, due to: ~p, in state: ~p, with state data: ~p", [Reason, State, Data]).
@@ -97,6 +84,16 @@ callback_mode() ->
 %% Then we we redeliver the event for further processing
 %% VIPs are in the structure [{{protocol(), inet:ip_address(), port_num}, [{inet:ip_address(), port_num}]}]
 %% [{{tcp,{1,2,3,4},80},[{{33,33,33,2},20320}]}]
+
+init(timeout, init, []) ->
+    {ok, KVRef} = lashup_kv_events_helper:start_link(ets:fun2ms(fun({?NODEMETADATA_KEY}) -> true end)),
+    {ok, Ref} = lashup_gm_route_events:subscribe(),
+    {ok, IPVSMgr} = dcos_l4lb_ipvs_mgr:start_link(),
+    {ok, RouteMgr} = dcos_l4lb_route_mgr:start_link(),
+    {ok, NetnsRef} = dcos_l4lb_netns_watcher:start_link(),
+    State = #state{route_mgr = RouteMgr, ipvs_mgr = IPVSMgr, route_events_ref = Ref,
+                   kv_ref = KVRef, netns_event_ref = NetnsRef},
+    {next_state, notree, State}.
 
 %% States go notree -> reconcile -> maintain
 notree(info, {lashup_gm_route_events, #{ref := Ref, tree := Tree}}, State0 = #state{route_events_ref = Ref}) ->

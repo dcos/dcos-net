@@ -67,14 +67,8 @@ start_link() ->
 %%%===================================================================
 
 init([]) ->
-    ets_restart(name_to_ip, bag),
-    ets_restart(ip_to_name, set),
-    MinIP = ip_to_integer(dcos_l4lb_config:min_named_ip()),
-    MaxIP = ip_to_integer(dcos_l4lb_config:max_named_ip()),
-    LastIP6 = dcos_l4lb_config:min_named_ip6(),
-    {ok, Ref} = lashup_kv_events_helper:start_link(ets:fun2ms(fun({?VIPS_KEY2}) -> true end)),
-    State = #state{ref = Ref, max_ip_num = MaxIP, min_ip_num = MinIP, last_ip6 = LastIP6},
-    {ok, State}.
+    self() ! init,
+    {ok, []}.
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
@@ -84,6 +78,16 @@ handle_cast(push_vips, State) ->
 handle_cast(_Request, State) ->
     {noreply, State}.
 
+handle_info(init, []) ->
+    ets_restart(name_to_ip, bag),
+    ets_restart(ip_to_name, set),
+    MinIP = ip_to_integer(dcos_l4lb_config:min_named_ip()),
+    MaxIP = ip_to_integer(dcos_l4lb_config:max_named_ip()),
+    LastIP6 = dcos_l4lb_config:min_named_ip6(),
+    {ok, Ref} = lashup_kv_events_helper:start_link(ets:fun2ms(fun({?VIPS_KEY2}) -> true end)),
+    {noreply, #state{
+        ref = Ref, max_ip_num = MaxIP,
+        min_ip_num = MinIP, last_ip6 = LastIP6}};
 handle_info({lashup_kv_events, Event = #{ref := Reference}}, State0 = #state{ref = Reference}) ->
     State1 = handle_event(Event, State0),
     {noreply, State1};
