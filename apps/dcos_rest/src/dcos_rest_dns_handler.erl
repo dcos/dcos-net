@@ -145,6 +145,12 @@ record_to_term(#dns_rr{
       <<"host">> => ntoa(Ip),
       <<"rtype">> => <<"A">>};
 record_to_term(#dns_rr{
+        name = Name, type = ?DNS_TYPE_AAAA,
+        data = #dns_rrdata_aaaa{ip = Ip}}) ->
+    #{<<"name">> => Name,
+      <<"host">> => ntoa(Ip),
+      <<"rtype">> => <<"AAAA">>};
+record_to_term(#dns_rr{
         name = Name, type = ?DNS_TYPE_SRV,
         data = #dns_rrdata_srv{port = Port, target = Target}}) ->
     PortBin = integer_to_binary(Port),
