@@ -45,7 +45,7 @@
 
 -record(vip_be2, {
     protocol = erlang:error() :: protocol(),
-    vip_ip = erlang:error() :: inet:ip_address(),
+    vip_ip = erlang:error() :: inet:ip_address() | {name, {binary(), binary()}},
     vip_port = erlang:error() :: inet:port_number(),
     agent_ip = erlang:error() :: inet:ip4_address(),
     backend_ip = erlang:error() :: inet:ip_address(),
@@ -223,6 +223,24 @@ flatten_vips(VIPDict) ->
         ),
     ordsets:from_list(VIPBEs).
 
+-spec(maybe_disable_ipv6([vip_be2()]) -> [vip_be2()]).
+maybe_disable_ipv6(VIPBEs) ->
+    case application:get_env(dcos_l4lb, enable_ipv6, true) of
+        false ->
+            {_, VIPBEs0} = lists:partition(fun is_ipv6/1, VIPBEs),
+            VIPBEs0;
+        true -> VIPBEs
+    end.
+
+-spec(is_ipv6(vip_be2()) -> boolean()).
+is_ipv6(#vip_be2{vip_ip = {name, _Name}, backend_ip = IPAddress}) ->
+    dcos_l4lb_app:family(IPAddress) =:= inet6;
+is_ipv6(#vip_be2{vip_ip = VIPIP, backend_ip = IPAddress}) ->
+    VIPFamily = dcos_l4lb_app:family(VIPIP),
+    BackendFamily = dcos_l4lb_app:family(IPAddress),
+    VIPFamily =:= inet6 orelse BackendFamily =:= inet6.
+
+
 -spec(unflatten_vips([vip_be2()]) -> [{VIP :: protocol_vip(), [Backend :: ip_ip_port()]}]).
 unflatten_vips(VIPBes) ->
     VIPBEsDict =
@@ -258,8 +276,9 @@ collect_vips(MesosState, _State) ->
     Tasks1 = lists:filter(fun is_healthy/1, Tasks),
     VIPBEs = collect_vips_from_tasks_labels(Tasks1, ordsets:new()),
     VIPBEs1 = collect_vips_from_discovery_info(Tasks1, VIPBEs),
-    VIPBes2 = lists:usort(VIPBEs1),
-    unflatten_vips(VIPBes2).
+    VIPBEs2 = maybe_disable_ipv6(VIPBEs1),
+    VIPBes3 = lists:usort(VIPBEs2),
+    unflatten_vips(VIPBes3).
 
 collect_vips_from_discovery_info([], VIPBEs) ->
     VIPBEs;
@@ -583,6 +602,36 @@ ipv6_vip2_test() ->
         }
     ],
     ?assertEqual(Expected, VIPBes).
+
+disable_ipv6_vip_test_() ->
+    {setup, fun () ->
+        ok = application:load(dcos_l4lb),
+        application:set_env(dcos_l4lb, enable_ipv6, false)
+    end, fun (_) ->
+        ok = application:unset_env(dcos_l4lb, enable_ipv6),
+        ok = application:unload(dcos_l4lb)
+    end, [
+        fun () ->
+            {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/state_ipv6.json"),
+            {ok, MesosState} = mesos_state_client:parse_response(Data),
+            VIPBes = collect_vips(MesosState, fake_state()),
+            Expected = [
+                {
+                    {tcp, {name, {<<"/foo">>, <<"marathon">>}}, 80},
+                    [
+                      {{10, 0, 2, 74}, {{12, 0, 1, 4}, 80}}
+                    ]
+                }
+            ],
+            ?assertEqual(Expected, VIPBes)
+        end,
+        fun () ->
+            {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/state2_ipv6.json"),
+            {ok, MesosState} = mesos_state_client:parse_response(Data),
+            VIPBes = collect_vips(MesosState, fake_state()),
+            ?assertEqual([], VIPBes)
+        end
+    ]}.
 
 di_state_test() ->
     {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/state_di.json"),
