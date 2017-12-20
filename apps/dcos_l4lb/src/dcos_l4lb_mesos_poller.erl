@@ -33,6 +33,7 @@
 -endif.
 
 -include("dcos_l4lb.hrl").
+-include("dcos_l4lb_lashup.hrl").
 -include_lib("mesos_state/include/mesos_state.hrl").
 -define(SERVER, ?MODULE).
 -define(VIP_PORT, "VIP_PORT").
@@ -79,6 +80,7 @@ start_link() ->
 
 init([]) ->
     PollInterval = dcos_l4lb_config:agent_poll_interval(),
+    erlang:send_after(5000, self(), k8s_poller),
     erlang:send_after(PollInterval, self(), poll),
     AgentIP = mesos_state:ip(),
     {ok, #state{agent_ip = AgentIP}}.
@@ -94,6 +96,9 @@ handle_info(poll, State) ->
     PollInterval = dcos_l4lb_config:agent_poll_interval(),
     _Ref = erlang:send_after(PollInterval, self(), poll),
     {noreply, NewState};
+handle_info(k8s_poller, State) ->
+    maybe_start_k8s_poller(State),
+    {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -106,6 +111,14 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+maybe_start_k8s_poller(#state{agent_ip = AgentIP}) ->
+   KubeMetaData = lashup_kv:value(?KUBEMETADATA_KEY),
+   KubeMetaDataList = orddict:from_list(KubeMetaData),
+   case orddict:find(?LWW_REG(?KUBEAPIKEY), KubeMetaDataList) of
+       {ok, AgentIP} -> dcos_l4lb_k8s_poller:start();
+       _ -> ok
+   end.
 
 maybe_poll(State) ->
     case dcos_l4lb_config:agent_polling_enabled() of
@@ -142,7 +155,10 @@ handle_poll_failure(_TimeSinceLastPoll, State) ->
 
 -spec(handle_poll_state(mesos_state_client:mesos_agent_state(), state()) -> state()).
 handle_poll_state(MesosState, State) ->
-    VIPBEs = collect_vips(MesosState, State),
+    Tasks0 = mesos_state_client:tasks(MesosState),
+    Tasks1 = lists:filter(fun is_healthy/1, Tasks0),
+    maybe_poll_k8s(Tasks1, State),
+    VIPBEs = collect_vips(Tasks1, State),
     handle_poll_changes(VIPBEs, State#state.agent_ip),
     State#state{last_poll_time = erlang:monotonic_time()}.
 
@@ -269,13 +285,11 @@ is_healthy(#task_status{state = running, healthy = true}) ->
 is_healthy(_) ->
     false.
 
--spec(collect_vips(MesosState :: mesos_state_client:mesos_agent_state(), State :: state()) ->
+-spec(collect_vips(Tasks :: mesos_state_client:task(), State :: state()) ->
     [{VIP :: protocol_vip(), [Backend :: ip_ip_port()]}]).
-collect_vips(MesosState, _State) ->
-    Tasks = mesos_state_client:tasks(MesosState),
-    Tasks1 = lists:filter(fun is_healthy/1, Tasks),
-    VIPBEs = collect_vips_from_tasks_labels(Tasks1, ordsets:new()),
-    VIPBEs1 = collect_vips_from_discovery_info(Tasks1, VIPBEs),
+collect_vips(Tasks, _State) ->
+    VIPBEs = collect_vips_from_tasks_labels(Tasks, ordsets:new()),
+    VIPBEs1 = collect_vips_from_discovery_info(Tasks, VIPBEs),
     VIPBEs2 = maybe_disable_ipv6(VIPBEs1),
     VIPBes3 = lists:usort(VIPBEs2),
     unflatten_vips(VIPBes3).
@@ -457,6 +471,44 @@ string_to_integer(Str) ->
     {Int, _Rest} = string:to_integer(Str),
     Int.
 
+maybe_poll_k8s(Tasks, State) ->
+    case lists:filter(fun is_k8s_apiserver/1, Tasks) of
+        [] -> ok;
+        _ -> maybe_poll_k8s2(State)
+    end.
+
+maybe_poll_k8s2(State) ->
+    case check_lashup(fun check_ip/1) of
+        not_present ->
+            update_lashup(State),
+            dcos_l4lb_k8s_poller:start();
+        _ -> ok
+    end.
+
+update_lashup(#state{agent_ip = AgentIP}) ->
+    Ops = [{update, ?LWW_REG(?KUBEAPIKEY), {assign, AgentIP, erlang:system_time(nano_seconds)}}],
+    {ok, _} = lashup_kv:request_op(?KUBEMETADATA_KEY, {update, Ops}).
+
+check_ip({ok, IP}) ->
+    NodeMetadata = lashup_kv:value(?NODEMETADATA_KEY),
+    NodeMetadataDict = orddict:from_list(NodeMetadata),
+    case orddict:find(?LWW_REG(IP), NodeMetadataDict) of
+        {ok, _} -> present;
+        _ -> not_present
+    end;
+check_ip(_) -> not_present.
+
+check_lashup(Checker) ->
+    KubeMetaData = lashup_kv:value(?KUBEMETADATA_KEY),
+    KubeMetaDataList = orddict:from_list(KubeMetaData),
+    Result = orddict:find(?LWW_REG(?KUBEAPIKEY), KubeMetaDataList),
+    Checker(Result).
+
+is_k8s_apiserver(#task{name = <<"kube-apiserver", _Rest/binary>>}) ->
+    true;
+is_k8s_apiserver(_) ->
+    false.
+
 -ifdef(TEST).
 fake_state() ->
     #state{agent_ip = {0, 0, 0, 0}}.
@@ -464,7 +516,9 @@ fake_state() ->
 overlay_vips_test() ->
     {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/overlay.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
-    VIPBes = collect_vips(MesosState, fake_state()),
+    Tasks0 = mesos_state_client:tasks(MesosState),
+    Tasks1 = lists:filter(fun is_healthy/1, Tasks0),
+    VIPBes = collect_vips(Tasks1, fake_state()),
     Expected = [
         {
            {tcp, {1, 2, 3, 4}, 5000},
@@ -478,7 +532,9 @@ overlay_vips_test() ->
 two_healthcheck_free_vips_test() ->
     {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/two-healthcheck-free-vips-state.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
-    VIPBes = collect_vips(MesosState, fake_state()),
+    Tasks0 = mesos_state_client:tasks(MesosState),
+    Tasks1 = lists:filter(fun is_healthy/1, Tasks0),
+    VIPBes = collect_vips(Tasks1, fake_state()),
     Expected = [
         {
             {tcp, {4, 3, 2, 1}, 1234},
@@ -500,7 +556,9 @@ two_healthcheck_free_vips_test() ->
 state2_test() ->
     {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/state2.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
-    VIPBes = collect_vips(MesosState, fake_state()),
+    Tasks0 = mesos_state_client:tasks(MesosState),
+    Tasks1 = lists:filter(fun is_healthy/1, Tasks0),
+    VIPBes = collect_vips(Tasks1, fake_state()),
     Expected = [
         {
             {tcp, {1, 2, 3, 4}, 5000},
@@ -514,7 +572,9 @@ state2_test() ->
 state3_test() ->
     {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/state3.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
-    VIPBes = collect_vips(MesosState, fake_state()),
+    Tasks0 = mesos_state_client:tasks(MesosState),
+    Tasks1 = lists:filter(fun is_healthy/1, Tasks0),
+    VIPBes = collect_vips(Tasks1, fake_state()),
     Expected = [
         {
             {tcp, {1, 2, 3, 4}, 5000},
@@ -528,7 +588,9 @@ state3_test() ->
 state4_test() ->
     {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/state4.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
-    VIPBes = collect_vips(MesosState, fake_state()),
+    Tasks0 = mesos_state_client:tasks(MesosState),
+    Tasks1 = lists:filter(fun is_healthy/1, Tasks0),
+    VIPBes = collect_vips(Tasks1, fake_state()),
     Expected = [
         {
             {tcp, {1, 2, 3, 4}, 5000},
@@ -542,7 +604,9 @@ state4_test() ->
 state5_test() ->
     {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/state5.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
-    VIPBes = collect_vips(MesosState, fake_state()),
+    Tasks0 = mesos_state_client:tasks(MesosState),
+    Tasks1 = lists:filter(fun is_healthy/1, Tasks0),
+    VIPBes = collect_vips(Tasks1, fake_state()),
     Expected = [
         {
             {tcp, {1, 2, 3, 4}, 5000},
@@ -562,7 +626,9 @@ state5_test() ->
 state6_test() ->
     {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/state6.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
-    VIPBes = collect_vips(MesosState, fake_state()),
+    Tasks0 = mesos_state_client:tasks(MesosState),
+    Tasks1 = lists:filter(fun is_healthy/1, Tasks0),
+    VIPBes = collect_vips(Tasks1, fake_state()),
     Expected = [
         {
             {tcp, {1, 2, 3, 4}, 80},
@@ -576,7 +642,9 @@ state6_test() ->
 ipv6_vip_test() ->
     {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/state_ipv6.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
-    VIPBes = collect_vips(MesosState, fake_state()),
+    Tasks0 = mesos_state_client:tasks(MesosState),
+    Tasks1 = lists:filter(fun is_healthy/1, Tasks0),
+    VIPBes = collect_vips(Tasks1, fake_state()),
     Expected = [
         {
             {tcp, {name, {<<"/foo">>, <<"marathon">>}}, 80},
@@ -591,7 +659,9 @@ ipv6_vip_test() ->
 ipv6_vip2_test() ->
     {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/state2_ipv6.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
-    VIPBes = collect_vips(MesosState, fake_state()),
+    Tasks0 = mesos_state_client:tasks(MesosState),
+    Tasks1 = lists:filter(fun is_healthy/1, Tasks0),
+    VIPBes = collect_vips(Tasks1, fake_state()),
     Expected = [
         {
             {tcp, {16#fd01, 16#d, 16#0, 16#0, 16#0, 16#0, 16#0, 16#1}, 80},
@@ -636,7 +706,9 @@ disable_ipv6_vip_test_() ->
 di_state_test() ->
     {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/state_di.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
-    VIPBes = collect_vips(MesosState, fake_state()),
+    Tasks0 = mesos_state_client:tasks(MesosState),
+    Tasks1 = lists:filter(fun is_healthy/1, Tasks0),
+    VIPBes = collect_vips(Tasks1, fake_state()),
     Expected = [
         {
             {tcp, {1, 2, 3, 4}, 8080},
@@ -651,7 +723,9 @@ di_state_test() ->
 named_vips_test() ->
     {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/named-base-vips.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
-    VIPBes = collect_vips(MesosState, fake_state()),
+    Tasks0 = mesos_state_client:tasks(MesosState),
+    Tasks1 = lists:filter(fun is_healthy/1, Tasks0),
+    VIPBes = collect_vips(Tasks1, fake_state()),
     Expected = [
         {
             {tcp, {name, {<<"merp">>, <<"marathon">>}}, 5000},
@@ -666,7 +740,9 @@ named_vips_test() ->
 missing_port_test() ->
     {ok, Data} = file:read_file("apps/dcos_l4lb/testdata/missing-port.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
-    VIPBes = collect_vips(MesosState, fake_state()),
+    Tasks0 = mesos_state_client:tasks(MesosState),
+    Tasks1 = lists:filter(fun is_healthy/1, Tasks0),
+    VIPBes = collect_vips(Tasks1, fake_state()),
     Expected = [],
     ?assertEqual(Expected, VIPBes).
 
