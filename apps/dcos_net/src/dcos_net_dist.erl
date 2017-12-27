@@ -76,13 +76,10 @@ check_ssl_dist_opt(Args) ->
         {"client_cacertfile", file},
         {"client_keyfile", file},
         {"client_certfile", file},
-        {"client_verify", verify},
         {"client_depth", integer},
         {"server_cacertfile", file},
         {"server_keyfile", file},
         {"server_certfile", file},
-        {"server_verify", verify},
-        {"server_fail_if_no_peer_cert", true},
         {"server_depth", integer}
     ], Args).
 
@@ -110,20 +107,6 @@ check_ssl_dist_opt(Key, Value, integer) ->
             ok
     catch error:badarg ->
         critical_error("~s (~s) is not an integer", [Value, Key])
-    end;
-check_ssl_dist_opt(Key, Value, verify) ->
-    case Value of
-        "verify_peer" ->
-            ok;
-        Value ->
-            critical_error("~s (~s) is not verify_peer", [Value, Key])
-    end;
-check_ssl_dist_opt(Key, Value, true) ->
-    case Value of
-        "true" ->
-            ok;
-        Value ->
-            critical_error("~s (~s) is not true", [Value, Key])
     end.
 
 critical_error(Format, Args) ->
