@@ -15,7 +15,6 @@
   agent_poll_interval/0,
   networking/0,
   agent_polling_enabled/0,
-  agent_port/0,
   min_named_ip/0,
   max_named_ip/0,
   min_named_ip6/0,
@@ -43,9 +42,6 @@ networking() ->
 
 agent_polling_enabled() ->
   application:get_env(dcos_l4lb, agent_polling_enabled, true).
-
-agent_port() ->
-  application:get_env(dcos_l4lb, agent_port, 5051).
 
 cni_dir() ->
   application:get_env(dcos_l4lb, cni_dir, "/var/run/dcos/cni/l4lb").

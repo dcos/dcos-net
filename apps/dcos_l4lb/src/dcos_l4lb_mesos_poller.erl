@@ -80,7 +80,7 @@ start_link() ->
 init([]) ->
     PollInterval = dcos_l4lb_config:agent_poll_interval(),
     erlang:send_after(PollInterval, self(), poll),
-    AgentIP = mesos_state:ip(),
+    AgentIP = dcos_net_dist:nodeip(),
     {ok, #state{agent_ip = AgentIP}}.
 
 handle_call(_Request, _From, State) ->
@@ -115,9 +115,8 @@ maybe_poll(State) ->
             State
     end.
 
-poll(State = #state{agent_ip = AgentIP}) ->
-    Port = dcos_l4lb_config:agent_port(),
-    case mesos_state_client:poll(AgentIP, Port) of
+poll(State) ->
+    case dcos_net_mesos:poll("/state") of
         {error, Reason} ->
             %% This might generate a lot of messages?
             lager:warning("Unable to poll agent: ~p", [Reason]),

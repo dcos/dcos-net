@@ -8,7 +8,9 @@
     stdlib,
     lashup,
     lager,
-    ranch
+    ranch,
+    inets,
+    ssl
    ]},
   {env,[]},
   {modules, []},

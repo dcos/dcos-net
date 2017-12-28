@@ -31,13 +31,11 @@
 -define(MIN_POLL_PERIOD, 30000). %% 30 secs
 -define(MAX_POLL_PERIOD, 120000). %% 120 secs
 
--include("dcos_overlay.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 -include_lib("mesos_state/include/mesos_state_overlay_pb.hrl").
 -include_lib("gen_netlink/include/netlink.hrl").
 
 -define(TABLE, 42).
--define(MASTERS_KEY, {masters, riak_dt_orswot}).
 
 -record(state, {
     known_overlays = ordsets:new(),
@@ -107,38 +105,14 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-scheme() ->
-    case os:getenv("MESOS_STATE_SSL_ENABLED") of
-        "true" ->
-            "https";
-        _ ->
-            "http"
-    end.
-
 update_poll_period(OldPollPeriod) when OldPollPeriod*2 =< ?MAX_POLL_PERIOD ->
     OldPollPeriod*2;
 update_poll_period(_) ->
     ?MAX_POLL_PERIOD.
 
 poll(State0) ->
-    Options = [
-        {ssl, [{server_name_indication, disable}]},
-        {timeout, application:get_env(?APP, timeout, ?DEFAULT_TIMEOUT)},
-        {connect_timeout, application:get_env(?APP, connect_timeout, ?DEFAULT_CONNECT_TIMEOUT)}
-    ],
-    IP = inet:ntoa(mesos_state:ip()),
-    Masters = masters(),
-    BaseURI =
-        case ordsets:is_element(node(), Masters) of
-            true ->
-                scheme() ++ "://~s:5050/overlay-agent/overlay";
-            false ->
-                scheme() ++ "://~s:5051/overlay-agent/overlay"
-        end,
-
-    URI = lists:flatten(io_lib:format(BaseURI, [IP])),
-    Headers = [{"Accept", "application/x-protobuf"}, {"node", atom_to_list(node())}],
-    Response = httpc:request(get, {URI, Headers}, Options, [{body_format, binary}]),
+    Headers = [{"Accept", "application/x-protobuf"}],
+    Response = dcos_net_mesos:request("/overlay-agent/overlay", Headers),
     handle_response(State0, Response).
 
 handle_response(_State0, {error, Reason}) ->
@@ -237,17 +211,6 @@ maybe_add_ip_rule2(Pid, Subnet) ->
             {ok, _} = dcos_overlay_netlink:iprule_add(Pid, inet, ParsedSubnetIP, PrefixLen, ?TABLE);
         _ ->
             ok
-    end.
-
-%% Always return an ordered set of masters
--spec(masters() -> [node()]).
-masters() ->
-    Masters = lashup_kv:value([masters]),
-    case orddict:find(?MASTERS_KEY, Masters) of
-        error ->
-            [];
-        {ok, Value} ->
-            ordsets:from_list(Value)
     end.
 
 maybe_add_overlay_to_lashup(Overlay, State) ->

@@ -53,6 +53,13 @@ init_per_testcase(_, _, _) ->
     {skip, "Not running as root"}.
 
 end_per_testcase(_, Config) ->
+    try
+        Pid = ?config(pid, Config),
+        unlink(Pid),
+        exit(Pid, kill)
+    catch _:_ ->
+        ok
+    end,
     iplink_del(),
     Config.
 

@@ -1,6 +1,8 @@
 -module(dcos_net_dist).
 
 -export([
+    hostname/0,
+    nodeip/0,
     listen/1,
     select/1,
     accept/1,
@@ -9,6 +11,20 @@
     close/1,
     childspecs/0
 ]).
+
+-spec(hostname() -> binary()).
+hostname() ->
+    [_Name, Hostname] = binary:split(atom_to_binary(node(), latin1), <<"@">>),
+    Hostname.
+
+-spec(nodeip() -> inet:ip4_address()).
+nodeip() ->
+    Hostname = hostname(),
+    Hostname0 = binary_to_list(Hostname),
+    case inet:parse_ipv4strict_address(Hostname0) of
+        {ok, IP} -> IP;
+        {error, _} -> {0, 0, 0, 0}
+    end.
 
 listen(Name) ->
     set_dist_port(Name),

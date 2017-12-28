@@ -93,6 +93,6 @@ reply_port_epmd(Name) ->
       (byte_size(Extra)):16, Extra/binary>>.
 
 names() ->
-    [_Name, Hostname] = string:tokens(atom_to_list(node()), "@"),
-    {ok, Nodes} = names(Hostname),
+    Hostname = dcos_net_dist:hostname(),
+    {ok, Nodes} = names(binary_to_list(Hostname)),
     [{list_to_binary(Node), Port} || {Node, Port} <- Nodes].

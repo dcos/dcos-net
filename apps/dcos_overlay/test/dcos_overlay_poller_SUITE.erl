@@ -55,6 +55,7 @@ unique_iprules_test(_Config) ->
     ok.
 
 start_get_kill_poller() ->
+    maybe_kill_poller(),
     {ok, Pid} = dcos_overlay_poller:start_link(),
     {ok, NetlinkPid} = gen_netlink_client:start_link(?NETLINK_ROUTE),
     {ok, Rules} =
@@ -66,3 +67,12 @@ start_get_kill_poller() ->
             erlang:exit(Pid, kill)
         end,
     ct:pal("Rules: ~p", [Rules]).
+
+maybe_kill_poller() ->
+    try
+        Pid = whereis(dcos_overlay_poller),
+        erlang:unlink(Pid),
+        erlang:exit(Pid, kill)
+    catch _:_ ->
+        ok
+    end.
