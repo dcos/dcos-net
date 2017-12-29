@@ -60,11 +60,9 @@ add_useragent(Headers) ->
 -spec(mesos_uri(string()) -> string()).
 mesos_uri(Path) ->
     Protocol =
-        case os:getenv("MESOS_STATE_SSL_ENABLED") of
-            "true" ->
-                "https";
-            _ ->
-                "http"
+        case dcos_net_dist:ssl_dist_opts() of
+            false -> "http";
+            _Opts -> "https"
         end,
     PortDefault =
         case dcos_dns:is_master() of
@@ -75,15 +73,12 @@ mesos_uri(Path) ->
     Hostname = binary_to_list(dcos_net_dist:hostname()),
     lists:concat([Protocol, "://", Hostname, ":", Port, Path]).
 
--spec mesos_http_options() -> list().
+-spec mesos_http_options() -> [{ssl, ssl:ssl_options()}].
 mesos_http_options() ->
-    case init:get_argument(ssl_dist_opt) of
-        {ok, Args} ->
-            Args0 = lists:map(fun list_to_tuple/1, Args),
-            {_, CAFile} = lists:keyfind("client_cacertfile", 1, Args0),
-            {_, DepthArg} = lists:keyfind("client_depth", 1, Args0),
-            Depth = list_to_integer(DepthArg),
-            [{ssl, [{verify, verify_peer}, {cacertfile, CAFile}, {depth, Depth}]}];
-        error ->
-            []
+    case dcos_net_dist:ssl_dist_opts() of
+        false ->
+            [];
+        DistOpts ->
+            {client, Opts} = lists:keyfind(client, 1, DistOpts),
+            [{ssl, Opts}]
     end.
