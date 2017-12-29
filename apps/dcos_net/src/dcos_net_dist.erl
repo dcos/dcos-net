@@ -22,13 +22,19 @@ hostname() ->
     [_Name, Hostname] = binary:split(atom_to_binary(node(), latin1), <<"@">>),
     Hostname.
 
+-ifdef(TEST).
+-define(NOIP, {0, 0, 0, 0}).
+-else.
+-define(NOIP, error(noip)).
+-endif.
+
 -spec(nodeip() -> inet:ip4_address()).
 nodeip() ->
     Hostname = hostname(),
     Hostname0 = binary_to_list(Hostname),
     case inet:parse_ipv4strict_address(Hostname0) of
         {ok, IP} -> IP;
-        {error, _} -> {0, 0, 0, 0}
+        {error, _} -> ?NOIP
     end.
 
 -spec(ssl_dist_opts() -> [{server | client, ssl:ssl_option()}] | false).
