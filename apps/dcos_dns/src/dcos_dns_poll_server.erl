@@ -104,24 +104,6 @@ is_leader(IFAddrs, Addr) ->
 poll_period() ->
     application:get_env(dcos_dns, poll_period, 30000).
 
-scheme() ->
-    case os:getenv("MESOS_STATE_SSL_ENABLED") of
-        "true" ->
-            "https";
-        _ ->
-            "http"
-    end.
-
-%% Gotta query the leader for all the tasks
-mesos_master_uri() ->
-    MesosMasterIP =
-        case dcos_dns:get_leader_addr() of
-            {ok, IP} -> IP;
-            _Error -> mesos_state:ip()
-        end,
-    Host = inet:ntoa(MesosMasterIP),
-    lists:flatten([scheme(), "://", Host, ":5050/state"]).
-
 %% We should only ever poll mesos dns on the masters
 poll() ->
     lager:info("Navstar DNS polling"),
@@ -213,13 +195,12 @@ add_mesos_dns_srv_rec(SRV, RecordName0, MesosDNSDomain, Acc) ->
     [Record|Acc].
 
 mesos_master_poll() ->
-    URI = mesos_master_uri(),
-    case mesos_state_client:poll(URI) of
+    case dcos_net_mesos:poll("/state") of
         {ok, MAS0} ->
             {ZoneName, Records} = build_zone(MAS0),
             ok = push_zone(ZoneName, Records),
             ok;
-        Error ->
+        {error, Error} ->
             lager:warning("Could not poll mesos state: ~p", [Error]),
             {error, Error}
     end.

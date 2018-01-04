@@ -86,7 +86,7 @@ perform_ops(Ops) ->
   {ok, _} = lashup_kv:request_op(?NODEMETADATA_KEY, {update, Ops}).
 
 check_ip(NodeMetadata, Ops) ->
-  IP = get_ip(),
+  IP = dcos_net_dist:nodeip(),
   check_ip(IP, NodeMetadata, Ops).
 
 check_ip(IP, NodeMetadata, Ops) ->
@@ -100,43 +100,3 @@ check_ip(IP, NodeMetadata, Ops) ->
 
 set_ip(IP, Node, Ops) ->
   [{update, ?LWW_REG(IP), {assign, Node, erlang:system_time(nano_seconds)}}|Ops].
-
-
-get_ip() ->
-  case get_dcos_ip() of
-    false ->
-      infer_ip();
-    IP ->
-      IP
-  end.
-
-infer_ip() ->
-  ForeignIP = get_foreign_ip(),
-  {ok, Socket} = gen_udp:open(0),
-  inet_udp:connect(Socket, ForeignIP, 4),
-  {ok, {Address, _LocalPort}} = inet:sockname(Socket),
-  gen_udp:close(Socket),
-  Address.
-
-get_foreign_ip() ->
-  case dcos_dns:get_leader_addr() of
-    {ok, IPAddr} ->
-      IPAddr;
-    _ ->
-      {192, 88, 99, 0}
-  end.
-
-
-%% Regex borrowed from:
-%% http://stackoverflow.com/questions/12794358/how-to-strip-all-blank-characters-in-a-string-in-erlang
--spec(get_dcos_ip() -> false | inet:ip4_address()).
-get_dcos_ip() ->
-  String = os:cmd("/opt/mesosphere/bin/detect_ip"),
-  String1 = re:replace(String, "(^\\s+)|(\\s+$)", "", [global, {return, list}]),
-  case inet:parse_ipv4_address(String1) of
-    {ok, IP} ->
-      IP;
-    {error, einval} ->
-      false
-  end.
-
