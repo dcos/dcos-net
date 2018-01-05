@@ -83,7 +83,11 @@ routes() ->
     Lines = string:tokens(Data, "\n"),
     Routes = lists:map(fun string:strip/1, Lines),
     ct:pal("got routes ~p", [Routes]),
-    Routes.
+    lists:map(fun remove_dup_spaces/1, Routes).
+
+remove_dup_spaces(Str) ->
+    string:join(string:tokens(Str, " "), " ").
+
 
 get_routes(Pid) ->
     ordsets:to_list(dcos_l4lb_route_mgr:get_routes(Pid, host)).
@@ -93,7 +97,7 @@ test_route_mgr(_Config) ->
     {ok, Pid} = dcos_l4lb_route_mgr:start_link(),
     [] = get_routes(Pid),
     dcos_l4lb_route_mgr:add_routes(Pid, [{1, 2, 3, 4}], host),
-    R = "local 1.2.3.4 dev minuteman  scope host",
+    R = "local 1.2.3.4 dev minuteman scope host",
     true = lists:member(R,  routes()),
     [{1, 2, 3, 4}] = get_routes(Pid),
     dcos_l4lb_route_mgr:remove_routes(Pid, [{1, 2, 3, 4}], host),
