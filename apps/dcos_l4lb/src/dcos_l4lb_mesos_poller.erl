@@ -78,10 +78,8 @@ start_link() ->
 %%%===================================================================
 
 init([]) ->
-    PollInterval = dcos_l4lb_config:agent_poll_interval(),
-    erlang:send_after(PollInterval, self(), poll),
-    AgentIP = dcos_net_dist:nodeip(),
-    {ok, #state{agent_ip = AgentIP}}.
+    self() ! init,
+    {ok, []}.
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
@@ -89,6 +87,11 @@ handle_call(_Request, _From, State) ->
 handle_cast(_Request, State) ->
     {noreply, State}.
 
+handle_info(init, []) ->
+    PollInterval = dcos_l4lb_config:agent_poll_interval(),
+    erlang:send_after(PollInterval, self(), poll),
+    AgentIP = dcos_net_dist:nodeip(),
+    {noreply, #state{agent_ip = AgentIP}};
 handle_info(poll, State) ->
     NewState = maybe_poll(State),
     PollInterval = dcos_l4lb_config:agent_poll_interval(),
