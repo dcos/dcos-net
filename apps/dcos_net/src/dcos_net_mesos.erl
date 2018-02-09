@@ -2,6 +2,7 @@
 
 -export([
     request/2,
+    request/4,
     poll/1
 ]).
 
@@ -9,21 +10,40 @@
 
 -type response() :: {httpc:status_line(), httpc:headers(), Body :: binary()}.
 
--spec(poll(string()) -> {ok, mesos_state_client:mesos_agent_state()} | {error, Reason :: term()}).
+-spec(poll(string()) -> {ok, MesosState} | {error, Reason :: term()}
+    when MesosState :: mesos_state_client:mesos_agent_state()).
 poll(URIPath) ->
     Response = request(URIPath, [{"Accept", "application/json"}]),
     handle_response(Response).
 
--spec(request(string(), httpc:headers()) -> {ok, response()} | {error, Reason :: term()}).
+-spec(request(string(), httpc:headers()) ->
+    {ok, response()} | {error, Reason :: term()}).
 request(URIPath, Headers) ->
-    Options = [
-        {timeout, application:get_env(dcos_net, mesos_timeout, 30000)},
-        {connect_timeout, application:get_env(dcos_net, mesos_connect_timeout, 30000)} |
-        mesos_http_options()
-    ],
+    {ok, Ref} = request(get, {URIPath, Headers}, [], [{sync, false}]),
+    Timeout = application:get_env(dcos_net, mesos_timeout, 30000),
+    receive
+        {http, {Ref, {error, Error}}} ->
+            {error, Error};
+        {http, {Ref, Response}} ->
+            {ok, Response}
+    after Timeout ->
+        ok = httpc:cancel_request(Ref),
+        {error, timeout}
+    end.
+
+-spec(request(
+    httpc:method(), httpc:request(),
+    httpc:http_options(), httpc:options()
+) -> {ok, response()} | {error, Reason :: term()}).
+request(Method, Request, HTTPOptions, Opts) ->
+    URIPath = element(1, Request),
+    Headers = element(2, Request),
+    URI = mesos_uri(URIPath),
     Headers0 = maybe_add_token(Headers),
     Headers1 = add_useragent(Headers0),
-    httpc:request(get, {mesos_uri(URIPath), Headers1}, Options, [{body_format, binary}]).
+    Request0 = setelement(1, Request, URI),
+    Request1 = setelement(2, Request0, Headers1),
+    httpc:request(Method, Request1, mesos_http_options(HTTPOptions), Opts).
 
 %%%===================================================================
 %%% Internal functions
@@ -72,6 +92,20 @@ mesos_uri(Path) ->
     Port = application:get_env(dcos_net, mesos_port, PortDefault),
     Hostname = binary_to_list(dcos_net_dist:hostname()),
     lists:concat([Protocol, "://", Hostname, ":", Port, Path]).
+
+-spec(mesos_http_options(httpc:http_options()) -> httpc:http_options()).
+mesos_http_options(HTTPOptions) ->
+    Timeout = application:get_env(dcos_net, mesos_timeout, 30000),
+    ConnectionTimeout = application:get_env(dcos_net, mesos_connect_timeout, 5000),
+    HTTPOptions0 = [
+        {timeout, Timeout},
+        {connect_timeout, ConnectionTimeout},
+        {autoredirect, false} |
+        mesos_http_options()
+    ],
+    lists:foldl(fun ({Key, Value}, Acc) ->
+        [{Key, Value}|lists:keydelete(Key, 1, Acc)]
+    end, HTTPOptions0, HTTPOptions).
 
 -spec mesos_http_options() -> [{ssl, ssl:ssl_options()}].
 mesos_http_options() ->
