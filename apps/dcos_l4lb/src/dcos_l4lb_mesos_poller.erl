@@ -276,11 +276,39 @@ is_healthy(_) ->
 collect_vips(MesosState, _State) ->
     Tasks = mesos_state_client:tasks(MesosState),
     Tasks1 = lists:filter(fun is_healthy/1, Tasks),
+    PortMappings = collect_port_mappings(Tasks1),
+    dcos_l4lb_mgr:local_port_mappings(PortMappings),
     VIPBEs = collect_vips_from_tasks_labels(Tasks1, ordsets:new()),
     VIPBEs1 = collect_vips_from_discovery_info(Tasks1, VIPBEs),
     VIPBEs2 = maybe_disable_ipv6(VIPBEs1),
     VIPBes3 = lists:usort(VIPBEs2),
     unflatten_vips(VIPBes3).
+
+collect_port_mappings(Tasks) when is_list(Tasks) ->
+    lists:flatmap(fun collect_port_mappings/1, Tasks);
+collect_port_mappings(#task{container=
+        #container{type=mesos, network_infos=
+            [#network_info{port_mappings=PMs}|_]
+        }}=Task) when is_list(PMs) ->
+    [IP|_] = task_ip_addresses(Task),
+    collect_port_mappings(IP, PMs);
+collect_port_mappings(#task{container=
+        #container{type=docker, docker=#docker{
+            port_mappings=PMs}
+        }}=Task) when is_list(PMs) ->
+    [IP|_] = task_ip_addresses(Task),
+    collect_port_mappings(IP, PMs);
+collect_port_mappings(#task{}) ->
+    [].
+
+collect_port_mappings(IP, PortMappings) ->
+    lists:map(
+        fun (#port_mapping{
+                protocol=Protocol,
+                host_port=HPort,
+                container_port=CPort}) ->
+            {{Protocol, HPort}, {IP, CPort}}
+        end, PortMappings).
 
 collect_vips_from_discovery_info([], VIPBEs) ->
     VIPBEs;
@@ -333,12 +361,11 @@ collect_vips_from_discovery_info_fold(#{<<"network-scope">> := <<"container">>},
     #mesos_port{protocol = Protocol, number = PortNum}, Task) ->
     Slave = Task#task.slave,
     #libprocess_pid{ip = AgentIP} = Slave#slave.pid,
-    #task{statuses = [#task_status{container_status = #container_status{
-          network_infos = [#network_info{ip_addresses = IPAddresses}|_]}}|_]} = Task,
+    IPAddresses = task_ip_addresses(Task),
     [#vip_be2{vip_ip = VIPIP, vip_port = VIPPort, protocol = Protocol,
               backend_port = PortNum, backend_ip =  IPAddress,
               agent_ip = AgentIP} || {VIPIP, VIPPort} <- VIPs,
-              #ip_address{ip_address = IPAddress} <- IPAddresses];
+              IPAddress <- IPAddresses];
 collect_vips_from_discovery_info_fold(_PortLabels, VIPs,
     #mesos_port{protocol = Protocol, number = PortNum}, Task) ->
     Slave = Task#task.slave,
@@ -458,6 +485,12 @@ parse_host_port_2(Proto, Host, PortStr) ->
 string_to_integer(Str) ->
     {Int, _Rest} = string:to_integer(Str),
     Int.
+
+-spec(task_ip_addresses(task()) -> [inet:ip_address()]).
+task_ip_addresses(Task) ->
+    #task{statuses = [#task_status{container_status = #container_status{
+        network_infos = [#network_info{ip_addresses = IPAddresses}|_]}}|_]} = Task,
+    [IPAddress || #ip_address{ip_address = IPAddress} <- IPAddresses].
 
 -ifdef(TEST).
 fake_state() ->

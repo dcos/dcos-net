@@ -38,10 +38,12 @@
 }).
 
 %% API
--export([start_link/0]).
--export([push_vips/1,
-         push_netns/2]).
-
+-export([
+    start_link/0,
+    push_vips/1,
+    push_netns/2,
+    local_port_mappings/1
+]).
 
 %% gen_statem behaviour
 -export([init/1, terminate/3, code_change/4, callback_mode/0]).
@@ -61,7 +63,29 @@ push_netns(EventType, EventContent) ->
     gen_statem:cast(?SERVER, {netns_event, self(), EventType, EventContent}).
 
 start_link() ->
+    try
+        ets:new(local_port_mappings, [public, named_table])
+    catch error:badarg ->
+        ok
+    end,
     gen_statem:start_link({local, ?SERVER}, ?MODULE, [], []).
+
+-spec(local_port_mappings([{Host, Container}] | #{Host => Container}) -> true
+    when Host :: {tcp | udp, inet:port_number()},
+         Container :: {inet:ip_address(), inet:port_number()}).
+local_port_mappings(PortMappings) when is_list(PortMappings) ->
+    PortMappings0 = maps:from_list(PortMappings),
+    local_port_mappings(PortMappings0);
+local_port_mappings(PortMappings) ->
+    try
+        true = ets:insert(local_port_mappings, {pm, PortMappings})
+    catch error:badarg ->
+        true
+    end.
+
+%%%===================================================================
+%%% gen_statem callbacks
+%%%===================================================================
 
 init([]) ->
     {ok, init, [], {timeout, 0, init}}.
