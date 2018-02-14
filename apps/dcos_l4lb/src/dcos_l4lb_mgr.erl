@@ -38,10 +38,12 @@
 }).
 
 %% API
--export([start_link/0]).
--export([push_vips/1,
-         push_netns/2]).
-
+-export([
+    start_link/0,
+    push_vips/1,
+    push_netns/2,
+    local_port_mappings/1
+]).
 
 %% gen_statem behaviour
 -export([init/1, terminate/3, code_change/4, callback_mode/0]).
@@ -61,7 +63,29 @@ push_netns(EventType, EventContent) ->
     gen_statem:cast(?SERVER, {netns_event, self(), EventType, EventContent}).
 
 start_link() ->
+    try
+        ets:new(local_port_mappings, [public, named_table])
+    catch error:badarg ->
+        ok
+    end,
     gen_statem:start_link({local, ?SERVER}, ?MODULE, [], []).
+
+-spec(local_port_mappings([{Host, Container}] | #{Host => Container}) -> true
+    when Host :: {tcp | udp, inet:port_number()},
+         Container :: {inet:ip_address(), inet:port_number()}).
+local_port_mappings(PortMappings) when is_list(PortMappings) ->
+    PortMappings0 = maps:from_list(PortMappings),
+    local_port_mappings(PortMappings0);
+local_port_mappings(PortMappings) ->
+    try
+        true = ets:insert(local_port_mappings, {pm, PortMappings})
+    catch error:badarg ->
+        true
+    end.
+
+%%%===================================================================
+%%% gen_statem callbacks
+%%%===================================================================
 
 init([]) ->
     {ok, init, [], {timeout, 0, init}}.
@@ -176,7 +200,8 @@ push_routes(Namespace, #state{routes = Routes, route_mgr = RouteMgr}) ->
 push_services(Namespace, State = #state{last_configured_vips = VIPs}) ->
     lists:foreach(fun({VIP, BEs}) -> add_service(VIP, BEs, Namespace, State) end, VIPs).
 
-do_reconcile(VIPs0, State0 = #state{ns = Namespaces}) ->
+do_reconcile(VIPs, State0 = #state{ns = Namespaces}) ->
+    VIPs0 = vips_port_mappings(VIPs),
     VIPs1 = process_reachability(VIPs0, State0),
     Routes = ordsets:from_list([VIP || {{_Proto, VIP, _Port}, _Backends} <- VIPs1]),
     State1 = State0#state{last_received_vips = VIPs0, last_configured_vips = VIPs1, routes = Routes},
@@ -263,7 +288,8 @@ add_service({Protocol, IP, Port}, BEs, Namespace, #state{ipvs_mgr = IPVSMgr}) ->
 process_reachability(VIPs0, State) ->
     lists:map(fun({VIP, BEs0}) -> {VIP, reachable_backends(BEs0, State)} end, VIPs0).
 
-maintain(VIPs0, State = #state{ns = Namespaces, routes = Routes, last_configured_vips = LastConfigured}) ->
+maintain(VIPs, State = #state{ns = Namespaces, routes = Routes, last_configured_vips = LastConfigured}) ->
+    VIPs0 = vips_port_mappings(VIPs),
     VIPs1 = process_reachability(VIPs0, State),
     Diff = generate_diff(LastConfigured, VIPs1),
     NewRoutes = ordsets:from_list([VIP || {{_Proto, VIP, _Port}, _Backends} <- VIPs1]),
@@ -322,6 +348,36 @@ reachable_backends([BE = {IP, {_BEIP, _BEPort}}|Rest], OB, CB, State = #state{ip
             reachable_backends(Rest, OB, [BE|CB], State)
     end.
 
+
+vips_port_mappings(VIPs) ->
+    PMs = local_port_mappings(),
+    AgentIP = dcos_net_dist:nodeip(),
+    % remove port mappings for local backends
+    lists:map(fun ({{Protocol, VIP, VIPPort}, BEs}) ->
+        BEs0 = bes_port_mappings(PMs, Protocol, AgentIP, BEs),
+        {{Protocol, VIP, VIPPort}, BEs0}
+    end, VIPs).
+
+bes_port_mappings(PMs, Protocol, AgentIP, BEs) ->
+    lists:map(
+        fun ({BEAgentIP, {BEIP, BEPort}}) when BEIP =:= AgentIP ->
+                case maps:find({Protocol, BEPort}, PMs) of
+                    {ok, {IP, Port}} -> {BEAgentIP, {IP, Port}};
+                    error -> {BEAgentIP, {BEIP, BEPort}}
+                end;
+            ({BEAgentIP, {BEIP, BEPort}}) ->
+                {BEAgentIP, {BEIP, BEPort}}
+        end, BEs).
+
+local_port_mappings() ->
+    try ets:lookup(local_port_mappings, pm) of
+        [{pm, PortMappings}] ->
+            PortMappings;
+        [] ->
+            #{}
+    catch error:badarg ->
+        #{}
+    end.
 
 -ifdef(TEST).
 
