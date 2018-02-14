@@ -286,12 +286,15 @@ collect_vips(MesosState, _State) ->
 
 collect_port_mappings(Tasks) when is_list(Tasks) ->
     lists:flatmap(fun collect_port_mappings/1, Tasks);
-collect_port_mappings(#task{container=
-        #container{type=mesos, network_infos=
-            [#network_info{port_mappings=PMs}|_]
-        }}=Task) when is_list(PMs) ->
+collect_port_mappings(#task{
+        container=#container{type=mesos},
+        statuses=[#task_status{container_status=
+            #container_status{network_infos=NIs}
+        }|_]}=Task) ->
     [IP|_] = task_ip_addresses(Task),
-    collect_port_mappings(IP, PMs);
+    PMs = [P || #network_info{port_mappings=P} <- NIs, is_list(P)],
+    PMs0 = lists:flatten(PMs),
+    collect_port_mappings(IP, PMs0);
 collect_port_mappings(#task{container=
         #container{type=docker, docker=#docker{
             port_mappings=PMs}
