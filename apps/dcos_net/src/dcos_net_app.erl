@@ -15,7 +15,8 @@
     start/2,
     stop/1,
     load_config_files/1,
-    dist_port/0
+    dist_port/0,
+    is_master/0
 ]).
 
 %%====================================================================
@@ -35,8 +36,12 @@ stop(_State) ->
 %% Internal functions
 %%====================================================================
 
+-spec(is_master() -> boolean()).
+is_master() ->
+    application:get_env(dcos_net, is_master, false).
+
 maybe_add_master() ->
-    case application:get_env(dcos_net, is_master, false) of
+    case is_master() of
         false ->
             ok;
         true ->
