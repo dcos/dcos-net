@@ -12,10 +12,11 @@ init([]) ->
         {ok, Port} -> start_epmd(Port);
         undefined -> ok
     end,
+
+    IsMaster = dcos_net_app:is_master(),
+    MChildren = [?CHILD(dcos_net_mesos_state) || IsMaster],
     {ok, {#{intensity => 10000, period => 1}, [
-        ?CHILD(dcos_net_masters),
-        % TODO start only on master nodes
-        ?CHILD(dcos_net_mesos_state)
+        ?CHILD(dcos_net_masters) | MChildren
     ]}}.
 
 start_epmd(Port) ->
