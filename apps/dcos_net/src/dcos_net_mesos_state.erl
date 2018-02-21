@@ -1,11 +1,16 @@
 -module(dcos_net_mesos_state).
 
 %% API
--export([start_link/0]).
+-export([
+    start_link/0,
+    subscribe/0
+]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2,
     handle_info/2, terminate/2, code_change/3]).
+
+-export_type([task_id/0, task/0]).
 
 -type task_id() :: binary().
 -type task() :: #{
@@ -25,7 +30,8 @@
     agents = #{} :: #{binary() => inet:ip4_address()},
     frameworks = #{} :: #{binary() => binary()},
     tasks = #{} :: #{task_id() => task()},
-    waiting_tasks = #{} :: #{task_id() => true}
+    waiting_tasks = #{} :: #{task_id() => true},
+    subs = undefined :: #{pid() => reference()} | undefined
 }).
 
 -type state() :: #state{}.
@@ -33,6 +39,16 @@
 -spec(start_link() -> {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+
+-spec(subscribe() -> {ok, MonRef, Tasks} | {error, atom()}
+    when MonRef :: reference(), Tasks :: #{task_id() => task()}).
+subscribe() ->
+    case whereis(?MODULE) of
+        undefined ->
+            {error, not_found};
+        Pid ->
+            subscribe(Pid)
+    end.
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -49,7 +65,7 @@ handle_cast(_Request, State) ->
     {noreply, State}.
 
 handle_info(init, []) ->
-    case subscribe() of
+    case handle_init() of
         {ok, State} ->
             {noreply, State};
         {error, redirect} ->
@@ -63,6 +79,8 @@ handle_info(init, []) ->
             self() ! init,
             {noreply, []}
     end;
+handle_info({subscribe, Pid, Ref}, State) ->
+    {noreply, handle_subscribe(Pid, Ref, State)};
 handle_info({http, {Ref, stream, Data}}, #state{ref=Ref}=State) ->
     case stream(Data, State) of
         {next, State0} ->
@@ -84,6 +102,8 @@ handle_info({http, {Ref, {error, Error}}}, #state{ref=Ref}=State) ->
 handle_info({'DOWN', _MonRef, process, Pid, Info}, #state{pid=Pid}=State) ->
     lager:error("Mesos http client: ~p", [Info]),
     {stop, Info, State};
+handle_info({'DOWN', _MonRef, process, Pid, _Info}, #state{subs=Subs}=State) ->
+    {noreply, State#state{subs=maps:remove(Pid, Subs)}};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -154,8 +174,10 @@ handle(subscribed, Obj, State) ->
             handle_task(Task, St)
         end, State2, Tasks),
 
+    State4 = State3#state{subs=#{}},
+
     erlang:garbage_collect(),
-    handle(heartbeat, #{}, State3);
+    handle(heartbeat, #{}, State4);
 
 handle(heartbeat, _Obj, #state{timeout = T, timeout_ref = TRef}=State) ->
     TRef0 = erlang:start_timer(3 * T, self(), httpc),
@@ -264,13 +286,15 @@ handle_task(TaskId, TaskObj, Task,
     add_task(TaskId, Task0, State).
 
 -spec(add_task(task_id(), task(), state()) -> state()).
-add_task(TaskId, #{state := TaskState}, #state{tasks=T, waiting_tasks=TW}=State)
-        when ?IS_TERMINAL(TaskState) ->
-    State#state{
+add_task(TaskId, #{state := TaskState} = Task, #state{
+        tasks=T, waiting_tasks=TW}=State) when ?IS_TERMINAL(TaskState) ->
+    State0 = send_task(TaskId, Task, State),
+    State0#state{
         tasks=mremove(TaskId, T),
         waiting_tasks=mremove(TaskId, TW)};
 add_task(TaskId, Task, #state{tasks=T, waiting_tasks=TW}=State) ->
     % NOTE: you can get task info before you get agent or framework
+    State0 = send_task(TaskId, Task, State),
     TW0 =
         case Task of
             #{agent := {id, _Id}} ->
@@ -280,7 +304,7 @@ add_task(TaskId, Task, #state{tasks=T, waiting_tasks=TW}=State) ->
             _Task ->
                 mremove(TaskId, TW)
         end,
-    State#state{
+    State0#state{
         tasks=mput(TaskId, Task, T),
         waiting_tasks=TW0}.
 
@@ -298,6 +322,58 @@ handle_waiting_tasks({Key, Id}, Value, #state{waiting_tasks=TW}=State) ->
                 Acc
         end
     end, State, TW).
+
+%%%===================================================================
+%%% Subscribe Functions
+%%%===================================================================
+
+-spec(subscribe(pid()) -> {ok, MonRef, Tasks} | {error, atom()}
+    when MonRef :: reference(), Tasks :: #{task_id() => task()}).
+subscribe(Pid) ->
+    Self = self(),
+    MonRef = erlang:monitor(process, Pid),
+    Pid ! {subscribe, Self, MonRef},
+    receive
+        {'DOWN', MonRef, process, Pid, Reason} ->
+            {error, Reason};
+        {error, MonRef, Reason} ->
+            erlang:demonitor(MonRef, [flush]),
+            {error, Reason};
+        {ok, MonRef, Tasks} ->
+            {ok, MonRef, Tasks}
+    after 5000 ->
+        erlang:demonitor(MonRef, [flush]),
+        {error, timeout}
+    end.
+
+-spec(handle_subscribe(pid(), reference(), state()) -> state()).
+handle_subscribe(Pid, Ref, State) ->
+    case State of
+        [] ->
+            Pid ! {error, Ref, init},
+            State;
+        #state{subs=undefined} ->
+            Pid ! {error, Ref, wait},
+            State;
+        #state{subs=#{Pid := _}} ->
+            Pid ! {error, Ref, subscribed},
+            State;
+        #state{subs=Subs, tasks=T} ->
+            Pid ! {ok, Ref, T},
+            _MonRef = erlang:monitor(process, Pid),
+            State#state{subs=maps:put(Pid, Ref, Subs)}
+    end.
+
+-spec(send_task(task_id(), task(), state()) -> state()).
+send_task(_TaskId, _Task, #state{subs=undefined}=State) ->
+    State;
+send_task(TaskId, Task, #state{subs=Subs}=State) ->
+    maps:fold(fun (Pid, Ref, ok) ->
+        Pid ! {task_updated, Ref, TaskId, Task},
+        ok
+    end, ok, Subs),
+
+    State.
 
 %%%===================================================================
 %%% Maps Functions
@@ -348,8 +424,8 @@ mdiff(A, B) ->
 %%% Mesos Operator API Client
 %%%===================================================================
 
--spec(subscribe() -> {ok, state()} | {error, term()}).
-subscribe() ->
+-spec(handle_init() -> {ok, state()} | {error, term()}).
+handle_init() ->
     Body = jiffy:encode(#{type => <<"SUBSCRIBE">>}),
     ContentType = "application/json",
     Request = {"/api/v1", [], ContentType, Body},
@@ -366,7 +442,7 @@ subscribe() ->
             {error, Error};
         {http, {Ref, stream_start, _Headers, Pid}} ->
             httpc:stream_next(Pid),
-            monitor(process, Pid),
+            erlang:monitor(process, Pid),
             {ok, #state{pid=Pid, ref=Ref}}
     after 5000 ->
         ok = httpc:cancel_request(Ref),
