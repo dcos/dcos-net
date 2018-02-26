@@ -637,7 +637,7 @@ handle_init() ->
     end.
 
 -spec(stream(binary(), State) -> {error, term()} |
-    {next, State} | {next, binary(), State}
+    {next, State} | {next, jiffy:object(), State}
         when State :: state()).
 stream(Data, #state{pid=Pid, size=undefined, buf=Buf}=State) ->
     Buf0 = <<Buf/binary, Data/binary>>,

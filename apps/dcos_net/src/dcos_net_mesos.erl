@@ -34,7 +34,7 @@ request(URIPath, Headers) ->
 -spec(request(
     httpc:method(), httpc:request(),
     httpc:http_options(), httpc:options()
-) -> {ok, response()} | {error, Reason :: term()}).
+) -> {ok, response() | reference()} | {error, Reason :: term()}).
 request(Method, Request, HTTPOptions, Opts) ->
     URIPath = element(1, Request),
     Headers = element(2, Request),
