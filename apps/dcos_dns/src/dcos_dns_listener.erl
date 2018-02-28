@@ -65,7 +65,7 @@ handle_cast(_Request, State) ->
     {noreply, State}.
 
 handle_info(init, []) ->
-    MatchSpec = ets:fun2ms(fun({[navstar, dns, zones, '_']}) -> true end),
+    MatchSpec = ets:fun2ms(fun({?LASHUP_KEY('_')}) -> true end),
     {ok, Ref} = lashup_kv_events_helper:start_link(MatchSpec),
     {noreply, #state{ref = Ref}};
 handle_info({lashup_kv_events, Event = #{ref := Reference}},
@@ -90,7 +90,10 @@ zone(ZoneName, LashupValue) ->
     Sha = crypto:hash(sha, term_to_binary(Records)),
     {ZoneName, Sha, Records}.
 
-handle_event(_Event = #{key := [navstar, dns, zones, ZoneName] = _Key, value := Value}, State) ->
+handle_event(#{key := ?LASHUP_KEY(?DCOS_DIRECTORY("mesos"))}, State) ->
+    % DNAME .mesos.thisdcos.directory -> .mesos
+    State;
+handle_event(#{key := ?LASHUP_KEY(ZoneName), value := Value}, State) ->
     Zone = zone(ZoneName, Value),
     ok = push_zone(Zone),
     State.
@@ -115,8 +118,8 @@ sign_zone(Zone = {ZoneName, _ZoneSha, Records}) ->
 
 convert_zone(PublicKey, ZoneName0, Records0) ->
     PublicKeyEncoded = zbase32:encode(PublicKey),
-    NewPostfix = <<PublicKeyEncoded/binary, <<".dcos.directory">>/binary>>,
-    convert_zone(ZoneName0, Records0, ?POSTFIX, NewPostfix).
+    NewPostfix = <<".", PublicKeyEncoded/binary, ".dcos.directory">>,
+    convert_zone(ZoneName0, Records0, ?DCOS_DIRECTORY(""), NewPostfix).
 
 %% For our usage postfix -> thisdcos.directory
 %% New Postfix is $(zbase32(public_key).thisdcos.directory)
@@ -126,10 +129,9 @@ convert_zone(ZoneName0, Records0, Postfix, NewPostfix) ->
     {ZoneName1, Records1}.
 
 convert_name(Name, Postfix, NewPostfix) ->
-    true = size(Postfix) == binary:longest_common_suffix([Name, Postfix]),
-    FrontName = binary:part(Name, 0, size(Name) - size(Postfix)),
+    Size = size(Name) - size(Postfix),
+    <<FrontName:Size/binary, Postfix/binary>> = Name,
     <<FrontName/binary, NewPostfix/binary>>.
-
 
 convert_record(Record0 = #dns_rr{type = ?DNS_TYPE_A, name = Name0}, Postfix, NewPostfix) ->
     Name1 = convert_name(Name0, Postfix, NewPostfix),

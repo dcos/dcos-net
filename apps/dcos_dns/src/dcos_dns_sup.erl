@@ -27,17 +27,21 @@ init([true]) ->
         ?CHILD(dcos_dns_zk_record_server),
         ?CHILD(dcos_dns_config_loader_server),
         ?CHILD(dcos_dns_key_mgr, #{restart => transient}),
-        ?CHILD(dcos_dns_poll_server),
         ?CHILD(dcos_dns_listener)
     ],
     Children1 = maybe_add_udp_servers(Children),
+
+    IsMaster = dcos_net_app:is_master(),
+    MChildren = [?CHILD(dcos_dns_mesos) || IsMaster],
 
     sidejob:new_resource(
         dcos_dns_handler_fsm_sj, sidejob_supervisor,
         dcos_dns_config:handler_limit()),
 
     %% The top level sup should never die.
-    {ok, {#{intensity => 10000, period => 1}, Children1}}.
+    {ok, {#{intensity => 10000, period => 1},
+        MChildren ++ Children1
+    }}.
 
 %%====================================================================
 %% Internal functions

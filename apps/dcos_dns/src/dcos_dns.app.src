@@ -21,7 +21,8 @@
         crypto,
         ranch,
         sidejob,
-        cowboy
+        cowboy,
+        dcos_net
     ]},
     {env,[]},
     {modules, []},
