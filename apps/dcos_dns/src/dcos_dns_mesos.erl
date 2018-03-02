@@ -62,6 +62,7 @@ handle_info(init, State) ->
     end;
 handle_info({task_updated, Ref, TaskId, Task},
             #state{ref=Ref, tasks=Tasks}=State) ->
+    ok = dcos_net_mesos_state:next(Ref),
     TaskState = maps:get(state, Task),
     case {?IS_RUNNING(TaskState), maps:is_key(TaskId, Tasks)} of
         {Same, Same} ->
@@ -301,7 +302,7 @@ complement_test() ->
             [a, 0, b, 1, c, 2],
             [e, 0, d, 1, f, 2]),
     ?assertEqual(
-        {[a, b, c], [e, d, f]},
+        {[a, b, c], [d, e, f]},
         {lists:sort(A), lists:sort(B)}).
 
 -endif.

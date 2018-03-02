@@ -3,7 +3,8 @@
 %% API
 -export([
     start_link/0,
-    subscribe/0
+    subscribe/0,
+    next/1
 ]).
 
 %% gen_server callbacks
@@ -60,6 +61,11 @@ subscribe() ->
             subscribe(Pid)
     end.
 
+-spec(next(reference()) -> ok).
+next(Ref) ->
+    ?MODULE ! {next, Ref},
+    ok.
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -112,8 +118,8 @@ handle_info({http, {Ref, {error, Error}}}, #state{ref=Ref}=State) ->
 handle_info({'DOWN', _MonRef, process, Pid, Info}, #state{pid=Pid}=State) ->
     lager:error("Mesos http client: ~p", [Info]),
     {stop, Info, State};
-handle_info({'DOWN', _MonRef, process, Pid, _Info}, #state{subs=Subs}=State) ->
-    {noreply, State#state{subs=maps:remove(Pid, Subs)}};
+handle_info({'DOWN', _MonRef, process, Pid, _Info}, State) ->
+    {noreply, handle_unsubscribe(Pid, State)};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -549,16 +555,30 @@ handle_subscribe(Pid, Ref, State) ->
             State#state{subs=maps:put(Pid, Ref, Subs)}
     end.
 
+-spec(handle_unsubscribe(pid(), state()) -> state()).
+handle_unsubscribe(Pid, #state{subs=Subs}=State) ->
+    State#state{subs=maps:remove(Pid, Subs)}.
+
 -spec(send_task(task_id(), task(), state()) -> state()).
 send_task(_TaskId, _Task, #state{subs=undefined}=State) ->
     State;
-send_task(TaskId, Task, #state{subs=Subs}=State) ->
+send_task(TaskId, Task, #state{subs=Subs, timeout=Timeout}=State) ->
     maps:fold(fun (Pid, Ref, ok) ->
         Pid ! {task_updated, Ref, TaskId, Task},
         ok
     end, ok, Subs),
 
-    State.
+    maps:fold(fun (Pid, Ref, St) ->
+        receive
+            {next, Ref} ->
+                St;
+            {'DOWN', _MonRef, process, Pid, _Info} ->
+                handle_unsubscribe(Pid, St)
+        after Timeout div 3 ->
+            exit(Pid, {?MODULE, timeout}),
+            St
+        end
+    end, State, Subs).
 
 %%%===================================================================
 %%% Maps Functions
