@@ -195,10 +195,8 @@ handle(subscribed, Obj, State) ->
     erlang:garbage_collect(),
     handle(heartbeat, #{}, State4);
 
-handle(heartbeat, _Obj, #state{timeout = T, timeout_ref = TRef}=State) ->
-    TRef0 = erlang:start_timer(3 * T, self(), httpc),
-    _ = erlang:cancel_timer(TRef),
-    State#state{timeout_ref=TRef0};
+handle(heartbeat, _Obj, State) ->
+    handle_heartbeat(State);
 
 handle(task_added, Obj, State) ->
     Task = mget(<<"task">>, Obj),
@@ -247,6 +245,12 @@ handle(agent_removed, Obj, #state{agents=A}=State) ->
     Id = mget([<<"agent_id">>, <<"value">>], Obj),
     lager:notice("Agent ~s removed", [Id]),
     State#state{agents=mremove(Id, A)}.
+
+-spec(handle_heartbeat(state()) -> state()).
+handle_heartbeat(#state{timeout = T, timeout_ref = TRef}=State) ->
+    TRef0 = erlang:start_timer(3 * T, self(), httpc),
+    _ = erlang:cancel_timer(TRef),
+    State#state{timeout_ref=TRef0}.
 
 %%%===================================================================
 %%% Handle task functions
@@ -650,7 +654,8 @@ handle_init() ->
         {http, {Ref, stream_start, _Headers, Pid}} ->
             httpc:stream_next(Pid),
             erlang:monitor(process, Pid),
-            {ok, #state{pid=Pid, ref=Ref}}
+            State = #state{pid=Pid, ref=Ref},
+            {ok, handle_heartbeat(State)}
     after 5000 ->
         ok = httpc:cancel_request(Ref),
         {error, timeout}
