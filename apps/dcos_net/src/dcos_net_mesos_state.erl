@@ -114,36 +114,36 @@ code_change(_OldVsn, State, _Extra) ->
 -spec(handle(jiffy:object(), state()) -> state()).
 handle(#{<<"type">> := <<"SUBSCRIBED">>} = Obj, State) ->
     Obj0 = mget(<<"subscribed">>, Obj),
-    handle(subscribed, Obj0, State);
+    handle_subscribed(Obj0, State);
 handle(#{<<"type">> := <<"HEARTBEAT">>}, State) ->
-    handle(heartbeat, #{}, State);
+    handle_heartbeat(State);
 handle(#{<<"type">> := <<"TASK_ADDED">>} = Obj, State) ->
     Obj0 = mget(<<"task_added">>, Obj),
-    handle(task_added, Obj0, State);
+    handle_task_added(Obj0, State);
 handle(#{<<"type">> := <<"TASK_UPDATED">>} = Obj, State) ->
     Obj0 = mget(<<"task_updated">>, Obj),
-    handle(task_updated, Obj0, State);
+    handle_task_updated(Obj0, State);
 handle(#{<<"type">> := <<"FRAMEWORK_ADDED">>} = Obj, State) ->
     Obj0 = mget(<<"framework_added">>, Obj),
-    handle(framework_added, Obj0, State);
+    handle_framework_added(Obj0, State);
 handle(#{<<"type">> := <<"FRAMEWORK_UPDATED">>} = Obj, State) ->
     Obj0 = mget(<<"framework_updated">>, Obj),
-    handle(framework_updated, Obj0, State);
+    handle_framework_updated(Obj0, State);
 handle(#{<<"type">> := <<"FRAMEWORK_REMOVED">>} = Obj, State) ->
     Obj0 = mget(<<"framework_removed">>, Obj),
-    handle(framework_removed, Obj0, State);
+    handle_framework_removed(Obj0, State);
 handle(#{<<"type">> := <<"AGENT_ADDED">>} = Obj, State) ->
     Obj0 = mget(<<"agent_added">>, Obj),
-    handle(agent_added, Obj0, State);
+    handle_agent_added(Obj0, State);
 handle(#{<<"type">> := <<"AGENT_REMOVED">>} = Obj, State) ->
     Obj0 = mget(<<"agent_removed">>, Obj),
-    handle(agent_removed, Obj0, State);
+    handle_agent_removed(Obj0, State);
 handle(Obj, State) ->
     lager:error("Unexpected mesos message type: ~p", [Obj]),
     State.
 
--spec(handle(atom(), jiffy:object(), state()) -> state()).
-handle(subscribed, Obj, State) ->
+-spec(handle_subscribed(jiffy:object(), state()) -> state()).
+handle_subscribed(Obj, State) ->
     Timeout = mget(<<"heartbeat_interval_seconds">>, Obj),
     Timeout0 = erlang:trunc(Timeout * 1000),
     State0 = State#state{timeout = Timeout0},
@@ -153,13 +153,13 @@ handle(subscribed, Obj, State) ->
     Agents = mget([<<"get_agents">>, <<"agents">>], MState, []),
     State1 =
         lists:foldl(fun (Agent, St) ->
-            handle(agent_added, #{<<"agent">> => Agent}, St)
+            handle_agent_added(#{<<"agent">> => Agent}, St)
         end, State0, Agents),
 
     Frameworks = mget([<<"get_frameworks">>, <<"frameworks">>], MState, []),
     State2 =
         lists:foldl(fun (Framework, St) ->
-            handle(framework_updated, #{<<"framework">> => Framework}, St)
+            handle_framework_updated(#{<<"framework">> => Framework}, St)
         end, State1, Frameworks),
 
     Tasks = mget([<<"get_tasks">>, <<"tasks">>], MState, []),
@@ -171,39 +171,48 @@ handle(subscribed, Obj, State) ->
     State4 = State3#state{subs=#{}},
 
     erlang:garbage_collect(),
-    handle(heartbeat, #{}, State4);
+    handle_heartbeat(State4).
 
-handle(heartbeat, _Obj, State) ->
-    handle_heartbeat(State);
+-spec(handle_heartbeat(state()) -> state()).
+handle_heartbeat(#state{timeout = T, timeout_ref = TRef}=State) ->
+    TRef0 = erlang:start_timer(3 * T, self(), httpc),
+    _ = erlang:cancel_timer(TRef),
+    State#state{timeout_ref=TRef0}.
 
-handle(task_added, Obj, State) ->
+-spec(handle_task_added(jiffy:object(), state()) -> state()).
+handle_task_added(Obj, State) ->
     Task = mget(<<"task">>, Obj),
-    handle_task(Task, State);
+    handle_task(Task, State).
 
-handle(task_updated, Obj, State) ->
+-spec(handle_task_updated(jiffy:object(), state()) -> state()).
+handle_task_updated(Obj, State) ->
     Task = mget(<<"status">>, Obj),
     FrameworkId = mget(<<"framework_id">>, Obj),
     Task0 = mput(<<"framework_id">>, FrameworkId, Task),
-    handle_task(Task0, State);
+    handle_task(Task0, State).
 
-handle(framework_added, Obj, State) ->
-    handle(framework_updated, Obj, State);
+-spec(handle_framework_added(jiffy:object(), state()) -> state()).
+handle_framework_added(Obj, State) ->
+    handle_framework_updated(Obj, State).
 
-handle(framework_updated, Obj, #state{frameworks=F}=State) ->
+-spec(handle_framework_updated(jiffy:object(), state()) -> state()).
+handle_framework_updated(Obj, #state{frameworks=F}=State) ->
     Info = mget([<<"framework">>, <<"framework_info">>], Obj),
     Id = mget([<<"id">>, <<"value">>], Info),
     Name = mget(<<"name">>, Info, undefined),
 
     lager:notice("Framework ~s added, ~s", [Id, Name]),
     State0 = State#state{frameworks=mput(Id, Name, F)},
-    handle_waiting_tasks(framework, Id, Name, State0);
+    handle_waiting_tasks(framework, Id, Name, State0).
 
-handle(framework_removed, Obj, #state{frameworks=F}=State) ->
+-spec(handle_framework_removed(jiffy:object(), state()) -> state()).
+handle_framework_removed(Obj, #state{frameworks=F}=State) ->
     Id = mget([<<"framework_info">>, <<"id">>, <<"value">>], Obj),
     lager:notice("Framework ~s removed", [Id]),
-    State#state{frameworks=mremove(Id, F)};
+    State#state{frameworks=mremove(Id, F)}.
 
-handle(agent_added, Obj, #state{agents=A}=State) ->
+-spec(handle_agent_added(jiffy:object(), state()) -> state()).
+handle_agent_added(Obj, #state{agents=A}=State) ->
     Info = mget([<<"agent">>, <<"agent_info">>], Obj),
     Id = mget([<<"id">>, <<"value">>], Info),
     {ok, Host} =
@@ -217,18 +226,13 @@ handle(agent_added, Obj, #state{agents=A}=State) ->
         end,
 
     State0 = State#state{agents=mput(Id, Host, A)},
-    handle_waiting_tasks(agent_ip, Id, Host, State0);
+    handle_waiting_tasks(agent_ip, Id, Host, State0).
 
-handle(agent_removed, Obj, #state{agents=A}=State) ->
+-spec(handle_agent_removed(jiffy:object(), state()) -> state()).
+handle_agent_removed(Obj, #state{agents=A}=State) ->
     Id = mget([<<"agent_id">>, <<"value">>], Obj),
     lager:notice("Agent ~s removed", [Id]),
     State#state{agents=mremove(Id, A)}.
-
--spec(handle_heartbeat(state()) -> state()).
-handle_heartbeat(#state{timeout = T, timeout_ref = TRef}=State) ->
-    TRef0 = erlang:start_timer(3 * T, self(), httpc),
-    _ = erlang:cancel_timer(TRef),
-    State#state{timeout_ref=TRef0}.
 
 %%%===================================================================
 %%% Handle task functions
