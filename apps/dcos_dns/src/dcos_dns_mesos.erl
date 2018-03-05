@@ -26,7 +26,7 @@
 -record(state, {
     ref :: reference(),
     tasks :: #{ task_id() => [dns:dns_rr()] },
-    master_ref :: reference(),
+    masters_ref :: reference(),
     masters = [] :: [dns:dns_rr()]
 }).
 
@@ -51,10 +51,12 @@ handle_cast(_Request, State) ->
 handle_info(init, State) ->
     case dcos_net_mesos_state:subscribe() of
         {ok, Ref, MTasks} ->
-            MRef = erlang:start_timer(0, self(), masters),
+            MRef = start_masters_timer(),
             Tasks = task_records(MTasks),
-            ok = push_tasks(Tasks),
-            {noreply, #state{ref=Ref, tasks=Tasks, master_ref=MRef}};
+            {ok, NewRRs, OldRRs} = push_tasks(Tasks),
+            lager:warning("~p reconds were added, ~p reconds were removed",
+                [length(NewRRs), length(OldRRs)]),
+            {noreply, #state{ref=Ref, tasks=Tasks, masters_ref=MRef}};
         {error, _Error} ->
             self() ! init,
             timer:sleep(100),
@@ -80,12 +82,18 @@ handle_info({task_updated, Ref, TaskId, Task},
 handle_info({'DOWN', Ref, process, _Pid, Info}, #state{ref=Ref}=State) ->
     {stop, Info, State};
 handle_info({timeout, Ref, masters},
-            #state{master_ref=Ref, masters=MRecords}=State) ->
-    Ref0 = erlang:start_timer(5000, self(), masters),
+            #state{masters_ref=Ref, masters=MRecords}=State) ->
+    Ref0 = start_masters_timer(),
     ZoneName = ?DCOS_DOMAIN,
     MRecords0 = master_records(ZoneName),
-    ok = push_diff(ZoneName, MRecords0, MRecords),
-    {noreply, State#state{master_ref=Ref0, masters=MRecords}};
+    {ok, NewRRs, OldRRs} = push_diff(ZoneName, MRecords0, MRecords),
+    lists:foreach(fun (#dns_rr{data=#dns_rrdata_a{ip = IP}}) ->
+        lager:notice("master ~p was added", [IP])
+    end, NewRRs),
+    lists:foreach(fun (#dns_rr{data=#dns_rrdata_a{ip = IP}}) ->
+        lager:notice("master ~p was removed", [IP])
+    end, OldRRs),
+    {noreply, State#state{masters_ref=Ref0, masters=MRecords0}};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -150,11 +158,17 @@ is_port_mapping(#{host_port := _HPort, port := _Port}) ->
 is_port_mapping(_Port) ->
     false.
 
+-spec(start_masters_timer() -> reference()).
+start_masters_timer() ->
+    Timeout = application:get_env(dcos_dns, masters_timeout, 5000),
+    erlang:start_timer(Timeout, self(), masters).
+
 %%%===================================================================
 %%% DNS functions
 %%%===================================================================
 
--spec(push_tasks(#{task_id() => task()}) -> ok).
+-spec(push_tasks(#{task_id() => task()}) ->
+    {ok, New :: [dns:dns_rr()], Old :: [dns:dns_rr()]}).
 push_tasks(Tasks) ->
     ZoneName = ?DCOS_DOMAIN,
     Records = maps:values(Tasks),
@@ -211,7 +225,8 @@ leader_records(ZoneName) ->
 %%% Lashup functions
 %%%===================================================================
 
--spec(push_zone(dns:dname(), [dns:dns_rr()]) -> ok).
+-spec(push_zone(dns:dname(), [dns:dns_rr()]) ->
+    {ok, New :: [dns:dns_rr()], Old :: [dns:dns_rr()]}).
 push_zone(ZoneName, Records) ->
     Key = ?LASHUP_KEY(ZoneName),
     LRecords = lashup_kv:value(Key),
@@ -222,14 +237,16 @@ push_zone(ZoneName, Records) ->
         end,
     push_diff(ZoneName, Records, LRecords0).
 
--spec(push_diff(dns:dname(), [dns:dns_rr()], [dns:dns_rr()]) -> ok).
+-spec(push_diff(dns:dname(), [dns:dns_rr()], [dns:dns_rr()]) ->
+    {ok, New :: [dns:dns_rr()], Old :: [dns:dns_rr()]}).
 push_diff(ZoneName, New, Old) ->
     case complement(New, Old) of
         {[], []} ->
-            ok;
+            {ok, [], []};
         {AddRecords, RemoveRecords} ->
             Ops = [{remove_all, RemoveRecords}, {add_all, AddRecords}],
-            push_ops(ZoneName, Ops)
+            ok = push_ops(ZoneName, Ops),
+            {ok, AddRecords, RemoveRecords}
     end.
 
 -spec(push_ops(dns:dname(), [riak_dt_orswot:orswot_op()]) -> ok).
