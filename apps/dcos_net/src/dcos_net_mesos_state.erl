@@ -347,15 +347,17 @@ handle_waiting_tasks(Key, Id, Value, #state{waiting_tasks=TW}=State) ->
 %%% Handle task fields
 %%%===================================================================
 
-% NOTE: See comments for enum TaskState (#L2170-L2230) in
-% https://github.com/apache/mesos/blob/1.5.0/include/mesos/v1/mesos.proto
+% NOTE: See isTerminalState (#L91-L101) in
+% https://github.com/apache/mesos/blob/1.5.0/src/common/protobuf_utils.cpp
 -define(IS_TERMINAL(S),
     S =:= <<"TASK_FINISHED">> orelse
     S =:= <<"TASK_FAILED">> orelse
     S =:= <<"TASK_KILLED">> orelse
+    S =:= <<"TASK_LOST">> orelse
     S =:= <<"TASK_ERROR">> orelse
     S =:= <<"TASK_DROPPED">> orelse
-    S =:= <<"TASK_GONE">>
+    S =:= <<"TASK_GONE">> orelse
+    S =:= <<"TASK_GONE_BY_OPERATOR">>
 ).
 
 -spec(handle_task_state(jiffy:object()) -> task_state()).
