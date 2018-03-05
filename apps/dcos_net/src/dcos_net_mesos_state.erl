@@ -81,20 +81,7 @@ handle_cast(_Request, State) ->
     {noreply, State}.
 
 handle_info(init, []) ->
-    case handle_init() of
-        {ok, State} ->
-            {noreply, State};
-        {error, redirect} ->
-            % It's not a leader, don't log annything
-            timer:sleep(100),
-            self() ! init,
-            {noreply, []};
-        {error, Error} ->
-            lager:error("Couldn't connect to mesos: ~p", [Error]),
-            timer:sleep(100),
-            self() ! init,
-            {noreply, []}
-    end;
+    {noreply, handle_init([])};
 handle_info({subscribe, Pid, Ref}, State) ->
     {noreply, handle_subscribe(Pid, Ref, State)};
 handle_info({http, {Ref, stream, Data}}, #state{ref=Ref}=State) ->
@@ -637,8 +624,23 @@ mdiff(A, B) ->
 %%% Mesos Operator API Client
 %%%===================================================================
 
--spec(handle_init() -> {ok, state()} | {error, term()}).
-handle_init() ->
+-spec(handle_init([]) -> state() | []).
+handle_init(State0) ->
+    case start_stream() of
+        {ok, State} ->
+            State;
+        {error, redirect} ->
+            % It's not a leader, don't log anything
+            erlang:send_after(100, self(), init),
+            State0;
+        {error, Error} ->
+            lager:error("Couldn't connect to mesos: ~p", [Error]),
+            erlang:send_after(100, self(), init),
+            State0
+    end.
+
+-spec(start_stream() -> {ok, state()} | {error, term()}).
+start_stream() ->
     Body = jiffy:encode(#{type => <<"SUBSCRIBE">>}),
     ContentType = "application/json",
     Request = {"/api/v1", [], ContentType, Body},
