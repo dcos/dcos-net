@@ -85,16 +85,7 @@ handle_info(init, []) ->
 handle_info({subscribe, Pid, Ref}, State) ->
     {noreply, handle_subscribe(Pid, Ref, State)};
 handle_info({http, {Ref, stream, Data}}, #state{ref=Ref}=State) ->
-    case stream(Data, State) of
-        {next, State0} ->
-            {noreply, State0};
-        {next, Obj, State0} ->
-            State1 = handle(Obj, State0),
-            handle_info({http, {Ref, stream, <<>>}}, State1);
-        {error, Error} ->
-            lager:error("Mesos protocol error: ~p", [Error]),
-            {stop, Error, State}
-    end;
+    handle_stream(Data, State);
 handle_info({timeout, TRef, httpc}, #state{ref=Ref, timeout_ref=TRef}=State) ->
     ok = httpc:cancel_request(Ref),
     lager:error("Mesos timeout"),
@@ -663,6 +654,20 @@ start_stream() ->
     after 5000 ->
         ok = httpc:cancel_request(Ref),
         {error, timeout}
+    end.
+
+-spec(handle_stream(binary(), state()) ->
+    {noreply, state()} | {stop, term(), state()}).
+handle_stream(Data, State) ->
+    case stream(Data, State) of
+        {next, State0} ->
+            {noreply, State0};
+        {next, Obj, State0} ->
+            State1 = handle(Obj, State0),
+            handle_stream(<<>>, State1);
+        {error, Error} ->
+            lager:error("Mesos protocol error: ~p", [Error]),
+            {stop, Error, State}
     end.
 
 -spec(stream(binary(), State) -> {error, term()} |
