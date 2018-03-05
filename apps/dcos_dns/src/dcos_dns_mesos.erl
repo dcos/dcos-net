@@ -172,6 +172,16 @@ update_masters(MRecords) ->
     end, OldRRs),
     MRecords0.
 
+-spec(master_records(dns:dname()) -> [dns:dns_rr()]).
+master_records(ZoneName) ->
+    Masters = [IP || {IP, _} <- dcos_dns_config:mesos_resolvers()],
+    dns_records(<<"master.", ZoneName/binary>>, Masters).
+
+-spec(leader_records(dns:dname()) -> dns:dns_rr()).
+leader_records(ZoneName) ->
+    IP = dcos_net_dist:nodeip(),
+    dns_record(<<"leader.", ZoneName/binary>>, IP).
+
 -spec(start_masters_timer() -> reference()).
 start_masters_timer() ->
     Timeout = application:get_env(dcos_dns, masters_timeout, 5000),
@@ -220,20 +230,6 @@ join(List, Sep) ->
     <<Sep:SepSize/binary, Result/binary>> =
         << <<Sep/binary, X/binary>> || X <- List >>,
     Result.
-
-%%%===================================================================
-%%% Master functions
-%%%===================================================================
-
--spec(master_records(dns:dname()) -> [dns:dns_rr()]).
-master_records(ZoneName) ->
-    Masters = [IP || {IP, _} <- dcos_dns_config:mesos_resolvers()],
-    dns_records(<<"master.", ZoneName/binary>>, Masters).
-
--spec(leader_records(dns:dname()) -> dns:dns_rr()).
-leader_records(ZoneName) ->
-    IP = dcos_net_dist:nodeip(),
-    dns_record(<<"leader.", ZoneName/binary>>, IP).
 
 %%%===================================================================
 %%% Lashup functions
