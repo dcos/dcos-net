@@ -162,13 +162,16 @@ lager_config_handlers() ->
         {lager_common_test_backend, debug}
     ].
 
-meck_httpc_request(get, {_, Headers}, _, _) ->
+meck_httpc_request(get, {_, Headers}, _, [{sync, false}]) ->
     UserAgent = proplists:get_value("User-Agent", Headers),
     [Node, _] = string:split(UserAgent, " "),
     io:format(user, "Node: ~p", [Node]),
     Data = ?MODULE:create_data(list_to_binary(Node)),
     BinData = mesos_state_overlay_pb:encode_msg(Data),
-    {ok, {{"HTTP/1.1", 200, "OK"}, [], BinData}}.
+    Ref = make_ref(),
+    Response = {{"HTTP/1.1", 200, "OK"}, [], BinData},
+    self() ! {http, {Ref, Response}},
+    {ok, Ref}.
 
 %% Sometimes nodes stick around on Circle-CI
 %% TODO: Figure out why and troubleshoot
