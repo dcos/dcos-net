@@ -71,15 +71,7 @@ handle_info({'DOWN', Ref, process, _Pid, Info}, #state{ref=Ref}=State) ->
 handle_info({timeout, Ref, masters},
             #state{masters_ref=Ref, masters=MRecords}=State) ->
     Ref0 = start_masters_timer(),
-    ZoneName = ?DCOS_DOMAIN,
-    MRecords0 = master_records(ZoneName),
-    {ok, NewRRs, OldRRs} = push_diff(ZoneName, MRecords0, MRecords),
-    lists:foreach(fun (#dns_rr{data=#dns_rrdata_a{ip = IP}}) ->
-        lager:notice("master ~p was added", [IP])
-    end, NewRRs),
-    lists:foreach(fun (#dns_rr{data=#dns_rrdata_a{ip = IP}}) ->
-        lager:notice("master ~p was removed", [IP])
-    end, OldRRs),
+    MRecords0 = update_masters(MRecords),
     {noreply, State#state{masters_ref=Ref0, masters=MRecords0}};
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -162,6 +154,23 @@ is_port_mapping(#{host_port := _HPort, port := _Port}) ->
     true;
 is_port_mapping(_Port) ->
     false.
+
+%%%===================================================================
+%%% Masters functions
+%%%===================================================================
+
+-spec(update_masters([dns:dns_rr()]) -> [dns:dns_rr()]).
+update_masters(MRecords) ->
+    ZoneName = ?DCOS_DOMAIN,
+    MRecords0 = master_records(ZoneName),
+    {ok, NewRRs, OldRRs} = push_diff(ZoneName, MRecords0, MRecords),
+    lists:foreach(fun (#dns_rr{data=#dns_rrdata_a{ip = IP}}) ->
+        lager:notice("master ~p was added", [IP])
+    end, NewRRs),
+    lists:foreach(fun (#dns_rr{data=#dns_rrdata_a{ip = IP}}) ->
+        lager:notice("master ~p was removed", [IP])
+    end, OldRRs),
+    MRecords0.
 
 -spec(start_masters_timer() -> reference()).
 start_masters_timer() ->
