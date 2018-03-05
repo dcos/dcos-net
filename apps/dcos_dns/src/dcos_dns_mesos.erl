@@ -64,21 +64,8 @@ handle_info(init, State) ->
     end;
 handle_info({task_updated, Ref, TaskId, Task},
             #state{ref=Ref, tasks=Tasks}=State) ->
-    ok = dcos_net_mesos_state:next(Ref),
-    TaskState = maps:get(state, Task),
-    case {?IS_RUNNING(TaskState), maps:is_key(TaskId, Tasks)} of
-        {Same, Same} ->
-            {noreply, State};
-        {false, true} ->
-            {Records, Tasks0} = maps:take(TaskId, Tasks),
-            ok = push_ops(?DCOS_DOMAIN, [{remove_all, Records}]),
-            {noreply, State#state{tasks=Tasks0}};
-        {true, false} ->
-            TaskRecords = task_records(TaskId, Task),
-            Tasks0 = maps:put(TaskId, TaskRecords, Tasks),
-            ok = push_ops(?DCOS_DOMAIN, [{add_all, TaskRecords}]),
-            {noreply, State#state{tasks=Tasks0}}
-    end;
+    Tasks0 = task_updated(TaskId, Task, Tasks),
+    {noreply, State#state{tasks=Tasks0}};
 handle_info({'DOWN', Ref, process, _Pid, Info}, #state{ref=Ref}=State) ->
     {stop, Info, State};
 handle_info({timeout, Ref, masters},
@@ -104,8 +91,26 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%%===================================================================
-%%% Internal functions
+%%% Tasks functions
 %%%===================================================================
+
+-spec(task_updated(task_id(), task(), Tasks) -> Tasks
+    when Tasks :: #{task_id() => [dns:dns_rr()]}).
+task_updated(TaskId, Task, Tasks) ->
+    TaskState = maps:get(state, Task),
+    case {?IS_RUNNING(TaskState), maps:is_key(TaskId, Tasks)} of
+        {Same, Same} ->
+            Tasks;
+        {false, true} ->
+            {Records, Tasks0} = maps:take(TaskId, Tasks),
+            ok = push_ops(?DCOS_DOMAIN, [{remove_all, Records}]),
+            Tasks0;
+        {true, false} ->
+            TaskRecords = task_records(TaskId, Task),
+            Tasks0 = maps:put(TaskId, TaskRecords, Tasks),
+            ok = push_ops(?DCOS_DOMAIN, [{add_all, TaskRecords}]),
+            Tasks0
+    end.
 
 -spec(task_records(#{task_id() => task()}) -> #{task_id() => [dns:dns_rr()]}).
 task_records(Tasks) ->
