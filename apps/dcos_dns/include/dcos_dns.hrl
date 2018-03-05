@@ -11,7 +11,7 @@
 -define(LASHUP_KEY(ZoneName), [navstar, dns, zones, ZoneName]).
 -define(RECORDS_FIELD, {records, riak_dt_orswot}).
 -define(DCOS_DIRECTORY(Prefix), <<Prefix, ".thisdcos.directory">>).
--define(DCOS_DOMAIN, ?DCOS_DIRECTORY("dcos.")).
+-define(DCOS_DOMAIN, ?DCOS_DIRECTORY("dcos")).
 
 %% 30 seconds
 -define(DEFAULT_TIMEOUT, 30000).
