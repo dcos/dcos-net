@@ -64,6 +64,7 @@ handle_info(init, State) ->
     end;
 handle_info({task_updated, Ref, TaskId, Task},
             #state{ref=Ref, tasks=Tasks}=State) ->
+    ok = dcos_net_mesos_state:next(Ref),
     Tasks0 = task_updated(TaskId, Task, Tasks),
     {noreply, State#state{tasks=Tasks0}};
 handle_info({'DOWN', Ref, process, _Pid, Info}, #state{ref=Ref}=State) ->
