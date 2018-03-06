@@ -621,16 +621,17 @@ mdiff(A, B) ->
 
 -spec(handle_init([]) -> state() | []).
 handle_init(State0) ->
+    Timeout = application:get_env(dcos_net, mesos_reconnect_timeout, 500),
     case start_stream() of
         {ok, State} ->
             State;
         {error, redirect} ->
             % It's not a leader, don't log anything
-            erlang:send_after(100, self(), init),
+            erlang:send_after(Timeout, self(), init),
             State0;
         {error, Error} ->
             lager:error("Couldn't connect to mesos: ~p", [Error]),
-            erlang:send_after(100, self(), init),
+            erlang:send_after(Timeout, self(), init),
             State0
     end.
 
