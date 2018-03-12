@@ -131,22 +131,22 @@ task_agentip(#{name := Name, framework := Fwrk, agent_ip := AgentIP}) ->
 
 -spec(task_containerip(task()) -> [dns:dns_rr()]).
 task_containerip(#{name := Name, framework := Fwrk,
-                    container_ip := ContainerIPs}) ->
+                   task_ip := TaskIPs}) ->
     DName = format_name([Name, Fwrk, <<"containerip">>], ?DCOS_DOMAIN),
-    dns_records(DName, ContainerIPs);
+    dns_records(DName, TaskIPs);
 task_containerip(_Task) ->
     [].
 
 -spec(task_autoip(task()) -> [dns:dns_rr()]).
-task_autoip(#{name := Name, framework := Fwrk, agent_ip := AgentIP} = Task) ->
-    %% if task.port_mappings then agent_ip else container_ip
+task_autoip(#{name := Name, framework := Fwrk,
+              agent_ip := AgentIP, task_ip := TaskIPs} = Task) ->
+    %% if task.port_mappings then agent_ip else task_ip
     DName = format_name([Name, Fwrk, <<"autoip">>], ?DCOS_DOMAIN),
-    ContainerIPs = maps:get(container_ip, Task, [AgentIP]),
     Ports = maps:get(ports, Task, []),
     dns_records(DName,
         case lists:any(fun is_port_mapping/1, Ports) of
             true -> [AgentIP];
-            false -> ContainerIPs
+            false -> TaskIPs
         end
     ).
 

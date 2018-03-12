@@ -1,6 +1,7 @@
 -module(dcos_net_mesos_state_tests).
 
 -include_lib("eunit/include/eunit.hrl").
+
 all_test_() ->
     {setup, fun setup/0, fun cleanup/1, {with, [
         fun none_on_host/1,
@@ -19,7 +20,7 @@ none_on_host(Tasks) ->
         name => <<"none-on-host">>,
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 4},
-        container_ip => [{172, 17, 0, 4}],
+        task_ip => [{172, 17, 0, 4}],
         ports => [
             #{name => <<"http">>, protocol => tcp,
               host_port => 13977}
@@ -33,7 +34,7 @@ none_on_dcos(Tasks) ->
         name => <<"none-on-dcos">>,
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 4},
-        container_ip => [{9, 0, 2, 5}],
+        task_ip => [{9, 0, 2, 5}],
         ports => [
             #{name => <<"default">>, protocol => tcp,
               port => 0}
@@ -47,7 +48,7 @@ ucr_on_host(Tasks) ->
         name => <<"ucr-on-host">>,
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 3},
-        container_ip => [{172, 17, 0, 3}],
+        task_ip => [{172, 17, 0, 3}],
         ports => [
             #{name => <<"http">>, protocol => tcp,
               host_port => 10323}
@@ -61,7 +62,7 @@ ucr_on_bridge(Tasks) ->
         name => <<"ucr-on-bridge">>,
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 3},
-        container_ip => [{172, 31, 254, 3}],
+        task_ip => [{172, 31, 254, 3}],
         ports => [
             #{name => <<"http">>, protocol => tcp,
               host_port => 15263, port => 8080}
@@ -75,7 +76,7 @@ ucr_on_dcos(Tasks) ->
         name => <<"ucr-on-dcos">>,
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 3},
-        container_ip => [{9, 0, 1, 6}],
+        task_ip => [{9, 0, 1, 6}],
         ports => [
             #{name => <<"default">>, protocol => tcp,
               port => 0}
@@ -89,7 +90,7 @@ docker_on_host(Tasks) ->
         name => <<"docker-on-host">>,
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 4},
-        container_ip => [{172, 17, 0, 4}],
+        task_ip => [{172, 17, 0, 4}],
         ports => [
             #{name => <<"http">>, protocol => tcp,
               host_port => 31168}
@@ -103,7 +104,7 @@ docker_on_bridge(Tasks) ->
         name => <<"docker-on-bridge">>,
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 4},
-        container_ip => [{172, 18, 0, 2}],
+        task_ip => [{172, 18, 0, 2}],
         ports => [
             #{name => <<"http">>, protocol => tcp,
               host_port => 20560, port => 8080}
@@ -117,7 +118,7 @@ docker_on_dcos(Tasks) ->
         name => <<"docker-on-dcos">>,
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 4},
-        container_ip => [{9, 0, 2, 130}],
+        task_ip => [{9, 0, 2, 130}],
         ports => [
             #{name => <<"http">>, protocol => tcp,
               port => 8080}
@@ -156,7 +157,6 @@ setup() ->
     stream_wait(),
 
     {ok, _MonRef, Tasks} = dcos_net_mesos_state:subscribe(),
-    io:format(user, "~p~n", [Tasks]), % XXX
     Tasks.
 
 cleanup(Config) ->

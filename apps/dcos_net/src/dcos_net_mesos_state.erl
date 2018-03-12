@@ -18,7 +18,7 @@
     name => binary(),
     framework => binary() | {id, binary()},
     agent_ip => inet:ip4_address() | {id, binary()},
-    container_ip => [inet:ip_address()],
+    task_ip => [inet:ip_address()],
     state => task_state(),
     ports => [task_port()]
 }.
@@ -259,7 +259,7 @@ handle_task(TaskId, TaskObj, Task,
         name => {mget, <<"name">>},
         framework => {value, Framework},
         agent_ip => {value, Agent},
-        container_ip => fun handle_task_ip/1,
+        task_ip => fun handle_task_ip/1,
         state => fun handle_task_state/1,
         ports => fun handle_task_ports/1
     },
