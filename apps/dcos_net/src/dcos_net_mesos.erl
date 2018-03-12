@@ -85,7 +85,7 @@ mesos_uri(Path) ->
             _Opts -> "https"
         end,
     PortDefault =
-        case dcos_dns:is_master() of
+        case dcos_net_app:is_master() of
             true -> 5050;
             false -> 5051
         end,

@@ -11,29 +11,11 @@
 
 %% API
 -export([
-    masters/0,
-    is_master/0,
     key/0,
     family/1,
     get_leader_addr/0,
     resolve_mesos/1
 ]).
--define(MASTERS_KEY, {masters, riak_dt_orswot}).
-
-
-%% Always return an ordered set of masters
--spec(masters() -> [node()]).
-masters() ->
-    Masters = lashup_kv:value([masters]),
-    case orddict:find(?MASTERS_KEY, Masters) of
-        error ->
-            [];
-        {ok, Value} ->
-            ordsets:from_list(Value)
-    end.
--spec(is_master() -> boolean()).
-is_master() ->
-    ordsets:is_element(node(), masters()).
 
 key() ->
     MaybeNavstarKey = lashup_kv:value([navstar, key]),

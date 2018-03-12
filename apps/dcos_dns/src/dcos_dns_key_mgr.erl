@@ -112,7 +112,7 @@ check_lashup_key() ->
     end.
 
 maybe_zk() ->
-    IsMaster = dcos_dns:is_master(),
+    IsMaster = dcos_net_app:is_master(),
     case check_lashup_key() of
         true ->
             true;
