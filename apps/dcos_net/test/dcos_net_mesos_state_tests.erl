@@ -2,6 +2,15 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+-export([
+    setup/0,
+    cleanup/1
+]).
+
+%%%===================================================================
+%%% Tests
+%%%===================================================================
+
 all_test_() ->
     {setup, fun setup/0, fun cleanup/1, {with, [
         fun none_on_host/1,
@@ -159,7 +168,7 @@ setup() ->
     {ok, _MonRef, Tasks} = dcos_net_mesos_state:subscribe(),
     Tasks.
 
-cleanup(Config) ->
+cleanup(_Tasks) ->
     Pid = whereis(dcos_net_mesos_state),
     StreamPid = whereis(?MODULE),
 
@@ -169,9 +178,7 @@ cleanup(Config) ->
     exit(Pid, kill),
     exit(StreamPid, kill),
 
-    meck:unload(httpc),
-
-    Config.
+    meck:unload(httpc).
 
 stream_wait() ->
     lists:any(fun (_) ->
