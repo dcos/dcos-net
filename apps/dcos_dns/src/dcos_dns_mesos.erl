@@ -130,6 +130,8 @@ task_agentip(#{name := Name, framework := Fwrk, agent_ip := AgentIP}) ->
     dns_records(DName, [AgentIP]).
 
 -spec(task_containerip(task()) -> [dns:dns_rr()]).
+task_containerip(#{agent_ip := AgentIP, task_ip := [AgentIP]}) ->
+    [];
 task_containerip(#{name := Name, framework := Fwrk,
                    task_ip := TaskIPs}) ->
     DName = format_name([Name, Fwrk, <<"containerip">>], ?DCOS_DOMAIN),
