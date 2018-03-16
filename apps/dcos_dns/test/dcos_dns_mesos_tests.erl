@@ -32,7 +32,8 @@ basic_test_() ->
         {"UCR on User", fun ucr_on_dcos/0},
         {"Docker on Host", fun docker_on_host/0},
         {"Docker on Bridge", fun docker_on_bridge/0},
-        {"Docker on User", fun docker_on_dcos/0}
+        {"Docker on User", fun docker_on_dcos/0},
+        {"Docker on IPv6", fun docker_on_ipv6/0}
     ]}.
 
 updates_test_() ->
@@ -43,7 +44,10 @@ updates_test_() ->
 
 -define(LOCALHOST, {127, 0, 0, 1}).
 resolve(DName) ->
-    DNSQueries = [#dns_query{name=DName, type=?DNS_TYPE_A}],
+    resolve(?DNS_TYPE_A, DName).
+
+resolve(DType, DName) ->
+    DNSQueries = [#dns_query{name=DName, type=DType}],
     DNSMessage = #dns_message{
         rd=true, qc=length(DNSQueries),
         questions=DNSQueries
@@ -146,6 +150,18 @@ docker_on_dcos() ->
     ?assertMatch(
         [#dns_rr{data=#dns_rrdata_a{ip = {9, 0, 2, 130}}}],
         resolve(?DNAME("docker-on-dcos", "containerip"))).
+
+docker_on_ipv6() ->
+    {ok, IPv6} = inet:parse_ipv6_address("fd01:b::2:8000:0:2"),
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {172, 17, 0, 4}}}],
+        resolve(?DNAME("docker-on-ipv6", "agentip"))),
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_aaaa{ip = IPv6}}],
+        resolve(?DNS_TYPE_AAAA, ?DNAME("docker-on-ipv6", "autoip"))),
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_aaaa{ip = IPv6}}],
+        resolve(?DNS_TYPE_AAAA, ?DNAME("docker-on-ipv6", "containerip"))).
 
 %%%===================================================================
 %%% Updates Tests

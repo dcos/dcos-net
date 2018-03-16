@@ -20,7 +20,8 @@ basic_test_() ->
         fun ucr_on_dcos/1,
         fun docker_on_host/1,
         fun docker_on_bridge/1,
-        fun docker_on_dcos/1
+        fun docker_on_dcos/1,
+        fun docker_on_ipv6/1
     ]}}.
 
 hello_world_test_() ->
@@ -133,6 +134,21 @@ docker_on_dcos(Tasks) ->
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 4},
         task_ip => [{9, 0, 2, 130}],
+        ports => [
+            #{name => <<"http">>, protocol => tcp,
+              port => 8080}
+        ],
+        state => running
+    }, maps:get(TaskId, Tasks)).
+
+docker_on_ipv6(Tasks) ->
+    {ok, IPv6} = inet:parse_ipv6_address("fd01:b::2:8000:0:2"),
+    TaskId = <<"docker-on-ipv6.602453f2-28e7-11e8-8cba-70b3d5800001">>,
+    ?assertEqual(#{
+        name => <<"docker-on-ipv6">>,
+        framework => <<"marathon">>,
+        agent_ip => {172, 17, 0, 4},
+        task_ip => [{172, 19, 0, 2}, IPv6],
         ports => [
             #{name => <<"http">>, protocol => tcp,
               port => 8080}
