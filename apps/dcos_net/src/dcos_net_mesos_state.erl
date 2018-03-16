@@ -28,7 +28,7 @@
     host_port => inet:port_number(),
     port => inet:port_number(),
     protocol => tcp | udp,
-    vip => [binary()] | {host, [binary()]}
+    vip => [binary()]
 }.
 
 -record(state, {
@@ -427,18 +427,14 @@ handle_task_discovery_port(PortObj) ->
 
     Result = #{protocol => Protocol},
     Result0 = mput(name, Name, Result),
-    case handle_container_scope(Labels) of
-        false when VIPLabels =:= [] ->
-            mput(host_port, Port, Result0);
-        false ->
-            Result1 = mput(host_port, Port, Result0),
-            mput(vip, {host, VIPLabels}, Result1);
-        true when VIPLabels =:= [] ->
-            mput(port, Port, Result0);
-        true ->
-            Result1 = mput(port, Port, Result0),
-            mput(vip, VIPLabels, Result1)
-    end.
+    Result1 = mput(vip, VIPLabels, Result0),
+
+    PortField =
+        case handle_container_scope(Labels) of
+            false -> host_port;
+            true -> port
+        end,
+    mput(PortField, Port, Result1).
 
 -spec(handle_vip_labels(jiffy:object()) -> [binary()]).
 handle_vip_labels(Labels) when is_list(Labels) ->
