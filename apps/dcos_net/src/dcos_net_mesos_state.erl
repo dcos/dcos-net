@@ -296,15 +296,15 @@ add_task(TaskId, #{state := false} = Task, #state{
         waiting_tasks=mremove(TaskId, TW)};
 add_task(TaskId, Task, #state{tasks=T, waiting_tasks=TW}=State) ->
     % NOTE: you can get task info before you get agent or framework
-    State0 = send_task(TaskId, Task, State),
-    TW0 =
+    {TW0, State0} =
         case Task of
             #{agent_ip := {id, _Id}} ->
-                mput(TaskId, true, TW);
+                {mput(TaskId, true, TW), State};
             #{framework := {id, _Id}} ->
-                mput(TaskId, true, TW);
+                {mput(TaskId, true, TW), State};
             _Task ->
-                mremove(TaskId, TW)
+                St = send_task(TaskId, Task, State),
+                {mremove(TaskId, TW), St}
         end,
     State0#state{
         tasks=mput(TaskId, Task, T),
