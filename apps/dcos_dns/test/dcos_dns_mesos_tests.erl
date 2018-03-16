@@ -5,7 +5,25 @@
 -include_lib("erldns/include/erldns.hrl").
 -include("dcos_dns.hrl").
 
-all_test_() ->
+-define(
+    REPEAT(Attempts, Delay, Expr),
+    lists:foldl(
+        fun (A, false) ->
+                try (Expr),
+                    true
+                catch _:_ when A < Attempts ->
+                    timer:sleep(Delay),
+                    false
+                end;
+            (_A, true) ->
+                true
+        end, false, lists:seq(1, Attempts))).
+
+%%%===================================================================
+%%% Tests
+%%%===================================================================
+
+basic_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {"None on Host", fun none_on_host/0},
         {"None on User", fun none_on_dcos/0},
@@ -16,6 +34,27 @@ all_test_() ->
         {"Docker on Bridge", fun docker_on_bridge/0},
         {"Docker on User", fun docker_on_dcos/0}
     ]}.
+
+updates_test_() ->
+    {setup, fun setup/0, fun cleanup/1, [
+        {"Add task", fun add_task/0},
+        {"Remove task", fun remove_task/0}
+    ]}.
+
+-define(LOCALHOST, {127, 0, 0, 1}).
+resolve(DName) ->
+    DNSQueries = [#dns_query{name=DName, type=?DNS_TYPE_A}],
+    DNSMessage = #dns_message{
+        rd=true, qc=length(DNSQueries),
+        questions=DNSQueries
+    },
+    #dns_message{answers=DNSAnswers} =
+        erldns_handler:do_handle(DNSMessage, ?LOCALHOST),
+    DNSAnswers.
+
+%%%===================================================================
+%%% Basic Tests
+%%%===================================================================
 
 -define(DNAME(AppName, Type),
     <<AppName, ".marathon.", Type, ".dcos.thisdcos.directory">>).
@@ -108,16 +147,62 @@ docker_on_dcos() ->
         [#dns_rr{data=#dns_rrdata_a{ip = {9, 0, 2, 130}}}],
         resolve(?DNAME("docker-on-dcos", "containerip"))).
 
--define(LOCALHOST, {127, 0, 0, 1}).
-resolve(DName) ->
-    DNSQueries = [#dns_query{name=DName, type=?DNS_TYPE_A}],
-    DNSMessage = #dns_message{
-        rd=true, qc=length(DNSQueries),
-        questions=DNSQueries
+%%%===================================================================
+%%% Updates Tests
+%%%===================================================================
+
+add_task() ->
+    State = recon:get_state(dcos_dns_mesos),
+    Ref = element(2, State),
+    TaskId = <<"ucr-on-dcos.4014ba90-28b2-11e8-ab5a-70b3d5800002">>,
+    Task = #{
+        name => <<"ucr-on-dcos">>,
+        framework => <<"marathon">>,
+        agent_ip => {172, 17, 0, 4},
+        task_ip => [{9, 0, 2, 3}],
+        ports => [
+            #{name => <<"default">>, protocol => tcp, port => 0}
+        ],
+        state => {running, true}
     },
-    #dns_message{answers=DNSAnswers} =
-        erldns_handler:do_handle(DNSMessage, ?LOCALHOST),
-    DNSAnswers.
+    dcos_dns_mesos ! {task_updated, Ref, TaskId, Task},
+    ?REPEAT(20, 100, begin
+        ?assertMatch(
+            [#dns_rr{data=#dns_rrdata_a{ip = {172, 17, 0, 4}}}],
+            resolve(?DNAME("docker-on-dcos", "agentip"))),
+        ?assertMatch(
+            [#dns_rr{data=#dns_rrdata_a{ip = {9, 0, 2, 130}}}],
+            resolve(?DNAME("docker-on-dcos", "autoip"))),
+        ?assertMatch(
+            [#dns_rr{data=#dns_rrdata_a{ip = {9, 0, 2, 130}}}],
+            resolve(?DNAME("docker-on-dcos", "containerip")))
+    end).
+
+remove_task() ->
+    State = recon:get_state(dcos_dns_mesos),
+    Ref = element(2, State),
+    TaskId = <<"ucr-on-dcos.4014ba90-28b2-11e8-ab5a-70b3d5800002">>,
+    Task = #{
+        name => <<"ucr-on-dcos">>,
+        framework => <<"marathon">>,
+        agent_ip => {172, 17, 0, 4},
+        task_ip => [{172, 18, 0, 5}],
+        ports => [
+            #{name => <<"default">>, protocol => tcp, port => 0}
+        ],
+        state => false
+    },
+    dcos_dns_mesos ! {task_updated, Ref, TaskId, Task},
+    timer:sleep(1100), % 1 second buffer + delay
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {172, 17, 0, 4}}}],
+        resolve(?DNAME("docker-on-dcos", "agentip"))),
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {9, 0, 2, 130}}}],
+        resolve(?DNAME("docker-on-dcos", "autoip"))),
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {9, 0, 2, 130}}}],
+        resolve(?DNAME("docker-on-dcos", "containerip"))).
 
 %%%===================================================================
 %%% Setup & cleanup
