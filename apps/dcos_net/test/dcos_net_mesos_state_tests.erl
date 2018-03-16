@@ -53,10 +53,6 @@ none_on_dcos(Tasks) ->
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 4},
         task_ip => [{9, 0, 2, 5}],
-        ports => [
-            #{name => <<"default">>, protocol => tcp,
-              port => 0}
-        ],
         state => running
     }, maps:get(TaskId, Tasks)).
 
@@ -95,10 +91,6 @@ ucr_on_dcos(Tasks) ->
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 3},
         task_ip => [{9, 0, 1, 6}],
-        ports => [
-            #{name => <<"default">>, protocol => tcp,
-              port => 0}
-        ],
         state => running
     }, maps:get(TaskId, Tasks)).
 

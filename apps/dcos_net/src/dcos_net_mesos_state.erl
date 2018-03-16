@@ -417,7 +417,9 @@ handle_protocol(Obj) ->
 -spec(handle_task_discovery_ports(jiffy:object(), task()) -> [task_port()]).
 handle_task_discovery_ports(TaskObj, Task) ->
     try mget([<<"discovery">>, <<"ports">>, <<"ports">>], TaskObj) of
-        Ports -> lists:map(fun handle_task_discovery_port/1, Ports)
+        Ports ->
+            DPorts = lists:map(fun handle_task_discovery_port/1, Ports),
+            lists:filter(fun is_discovery_port/1, DPorts)
     catch error:{badkey, _} ->
         maps:get(ports, Task, [])
     end.
@@ -440,6 +442,12 @@ handle_task_discovery_port(PortObj) ->
             true -> port
         end,
     mput(PortField, Port, Result1).
+
+-spec(is_discovery_port(task_port()) -> boolean()).
+is_discovery_port(#{port := 0}) ->
+    false;
+is_discovery_port(_Port) ->
+    true.
 
 -spec(handle_vip_labels(jiffy:object()) -> [binary()]).
 handle_vip_labels(Labels) when is_list(Labels) ->
