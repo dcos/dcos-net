@@ -33,7 +33,10 @@ basic_test_() ->
         {"Docker on Host", fun docker_on_host/0},
         {"Docker on Bridge", fun docker_on_bridge/0},
         {"Docker on User", fun docker_on_dcos/0},
-        {"Docker on IPv6", fun docker_on_ipv6/0}
+        {"Docker on IPv6", fun docker_on_ipv6/0},
+        {"Pod on Host", fun pod_on_host/0},
+        {"Pod on Bridge", fun pod_on_bridge/0},
+        {"Pod on User", fun pod_on_dcos/0}
     ]}.
 
 updates_test_() ->
@@ -162,6 +165,39 @@ docker_on_ipv6() ->
     ?assertMatch(
         [#dns_rr{data=#dns_rrdata_aaaa{ip = IPv6}}],
         resolve(?DNS_TYPE_AAAA, ?DNAME("docker-on-ipv6", "containerip"))).
+
+pod_on_host() ->
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {172, 17, 0, 4}}}],
+        resolve(?DNAME("pod-on-host", "agentip"))),
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {172, 17, 0, 4}}}],
+        resolve(?DNAME("pod-on-host", "autoip"))),
+    ?assertMatch(
+        [],
+        resolve(?DNAME("pod-on-host", "containerip"))).
+
+pod_on_bridge() ->
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {172, 17, 0, 3}}}],
+        resolve(?DNAME("pod-on-bridge", "agentip"))),
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {172, 17, 0, 3}}}],
+        resolve(?DNAME("pod-on-bridge", "autoip"))),
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {172, 31, 254, 4}}}],
+        resolve(?DNAME("pod-on-bridge", "containerip"))).
+
+pod_on_dcos() ->
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {172, 17, 0, 3}}}],
+        resolve(?DNAME("pod-on-dcos", "agentip"))),
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {9, 0, 1, 3}}}],
+        resolve(?DNAME("pod-on-dcos", "autoip"))),
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {9, 0, 1, 3}}}],
+        resolve(?DNAME("pod-on-dcos", "containerip"))).
 
 %%%===================================================================
 %%% Updates Tests

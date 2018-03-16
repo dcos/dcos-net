@@ -21,7 +21,10 @@ basic_test_() ->
         fun docker_on_host/1,
         fun docker_on_bridge/1,
         fun docker_on_dcos/1,
-        fun docker_on_ipv6/1
+        fun docker_on_ipv6/1,
+        fun pod_on_host/1,
+        fun pod_on_bridge/1,
+        fun pod_on_dcos/1
     ]}}.
 
 hello_world_test_() ->
@@ -149,6 +152,48 @@ docker_on_ipv6(Tasks) ->
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 4},
         task_ip => [{172, 19, 0, 2}, IPv6],
+        ports => [
+            #{name => <<"http">>, protocol => tcp,
+              port => 8080}
+        ],
+        state => running
+    }, maps:get(TaskId, Tasks)).
+
+pod_on_host(Tasks) ->
+    TaskId = <<"pod-on-host.instance-ea1231bf-2930-11e8-96bf-70b3d5800001.pod-on-host">>,
+    ?assertEqual(#{
+        name => <<"pod-on-host">>,
+        framework => <<"marathon">>,
+        agent_ip => {172, 17, 0, 4},
+        task_ip => [{172, 17, 0, 4}],
+        ports => [
+            #{name => <<"http">>, protocol => tcp,
+              host_port => 28064}
+        ],
+        state => running
+    }, maps:get(TaskId, Tasks)).
+
+pod_on_bridge(Tasks) ->
+    TaskId = <<"pod-on-bridge.instance-e9d06dcd-2930-11e8-96bf-70b3d5800001.pod-on-bridge">>,
+    ?assertEqual(#{
+        name => <<"pod-on-bridge">>,
+        framework => <<"marathon">>,
+        agent_ip => {172, 17, 0, 3},
+        task_ip => [{172, 31, 254, 4}],
+        ports => [
+            #{name => <<"http">>, protocol => tcp,
+              host_port => 2254, port => 8080}
+        ],
+        state => running
+    }, maps:get(TaskId, Tasks)).
+
+pod_on_dcos(Tasks) ->
+    TaskId = <<"pod-on-dcos.instance-ea1231be-2930-11e8-96bf-70b3d5800001.pod-on-dcos">>,
+    ?assertEqual(#{
+        name => <<"pod-on-dcos">>,
+        framework => <<"marathon">>,
+        agent_ip => {172, 17, 0, 3},
+        task_ip => [{9, 0, 1, 3}],
         ports => [
             #{name => <<"http">>, protocol => tcp,
               port => 8080}
