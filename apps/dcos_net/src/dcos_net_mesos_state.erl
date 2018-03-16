@@ -533,8 +533,9 @@ handle_subscribe(Pid, Ref, State) ->
         #state{subs=#{Pid := _}} ->
             Pid ! {error, Ref, subscribed},
             State;
-        #state{subs=Subs, tasks=T} ->
-            Pid ! {ok, Ref, T},
+        #state{subs=Subs, tasks=T, waiting_tasks=TW} ->
+            T0 = maps:without(maps:keys(TW), T),
+            Pid ! {ok, Ref, T0},
             _MonRef = erlang:monitor(process, Pid),
             State#state{subs=maps:put(Pid, Ref, Subs)}
     end.
