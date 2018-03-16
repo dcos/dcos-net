@@ -27,8 +27,11 @@
     ref :: reference(),
     tasks :: #{ task_id() => [dns:dns_rr()] },
     masters_ref :: reference(),
-    masters = [] :: [dns:dns_rr()]
+    masters = [] :: [dns:dns_rr()],
+    ops_ref = make_ref() :: reference(),
+    ops = [] :: [riak_dt_orswot:orswot_op()]
 }).
+-type state() :: #state{}.
 
 -spec(start_link() -> {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link() ->
@@ -49,31 +52,17 @@ handle_cast(_Request, State) ->
     {noreply, State}.
 
 handle_info(init, State) ->
-    case dcos_net_mesos_state:subscribe() of
-        {ok, Ref, MTasks} ->
-            MRef = start_masters_timer(),
-            Tasks = task_records(MTasks),
-            {ok, NewRRs, OldRRs} = push_tasks(Tasks),
-            lager:warning("~p reconds were added, ~p reconds were removed",
-                [length(NewRRs), length(OldRRs)]),
-            {noreply, #state{ref=Ref, tasks=Tasks, masters_ref=MRef}};
-        {error, _Error} ->
-            self() ! init,
-            timer:sleep(100),
-            {noreply, State}
-    end;
-handle_info({task_updated, Ref, TaskId, Task},
-            #state{ref=Ref, tasks=Tasks}=State) ->
+    State0 = handle_init(State),
+    {noreply, State0};
+handle_info({task_updated, Ref, TaskId, Task}, #state{ref=Ref}=State) ->
     ok = dcos_net_mesos_state:next(Ref),
-    Tasks0 = task_updated(TaskId, Task, Tasks),
-    {noreply, State#state{tasks=Tasks0}};
+    {noreply, handle_task_updated(TaskId, Task, State)};
 handle_info({'DOWN', Ref, process, _Pid, Info}, #state{ref=Ref}=State) ->
     {stop, Info, State};
-handle_info({timeout, Ref, masters},
-            #state{masters_ref=Ref, masters=MRecords}=State) ->
-    Ref0 = start_masters_timer(),
-    MRecords0 = update_masters(MRecords),
-    {noreply, State#state{masters_ref=Ref0, masters=MRecords0}};
+handle_info({timeout, Ref, masters}, #state{masters_ref=Ref}=State) ->
+    {noreply, handle_masters(State)};
+handle_info({timeout, Ref, push_ops}, #state{ops_ref=Ref}=State) ->
+    {noreply, handle_push_ops(State)};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -84,25 +73,50 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+-spec(handle_init(State) -> State when State :: state() | []).
+handle_init(State) ->
+    case dcos_net_mesos_state:subscribe() of
+        {ok, Ref, MTasks} ->
+            MRef = start_masters_timer(),
+            Tasks = task_records(MTasks),
+            {ok, NewRRs, OldRRs} = push_tasks(Tasks),
+            lager:warning(
+                "~p reconds were added, ~p reconds were removed",
+                [length(NewRRs), length(OldRRs)]),
+            #state{ref=Ref, tasks=Tasks, masters_ref=MRef};
+        {error, _Error} ->
+            self() ! init,
+            timer:sleep(100),
+            State
+    end.
+
+%%%===================================================================
 %%% Tasks functions
 %%%===================================================================
 
--spec(task_updated(task_id(), task(), Tasks) -> Tasks
-    when Tasks :: #{task_id() => [dns:dns_rr()]}).
+-spec(handle_task_updated(task_id(), task(), state()) -> state()).
+handle_task_updated(TaskId, Task, #state{tasks=Tasks}=State) ->
+    {Tasks0, Ops} = task_updated(TaskId, Task, Tasks),
+    handle_push_ops(Ops, State#state{tasks=Tasks0}).
+
+-spec(task_updated(task_id(), task(), Tasks) -> {Tasks, Ops}
+    when Tasks :: #{task_id() => [dns:dns_rr()]},
+         Ops :: [riak_dt_orswot:orswot_op()]).
 task_updated(TaskId, Task, Tasks) ->
     TaskState = maps:get(state, Task),
     case {?IS_RUNNING(TaskState), maps:is_key(TaskId, Tasks)} of
         {Same, Same} ->
-            Tasks;
+            {Tasks, []};
         {false, true} ->
             {Records, Tasks0} = maps:take(TaskId, Tasks),
-            ok = push_ops(?DCOS_DOMAIN, [{remove_all, Records}]),
-            Tasks0;
+            {Tasks0, [{remove_all, Records}]};
         {true, false} ->
             TaskRecords = task_records(TaskId, Task),
             Tasks0 = maps:put(TaskId, TaskRecords, Tasks),
-            ok = push_ops(?DCOS_DOMAIN, [{add_all, TaskRecords}]),
-            Tasks0
+            {Tasks0, [{add_all, TaskRecords}]}
     end.
 
 -spec(task_records(#{task_id() => task()}) -> #{task_id() => [dns:dns_rr()]}).
@@ -162,18 +176,24 @@ is_port_mapping(_Port) ->
 %%% Masters functions
 %%%===================================================================
 
--spec(update_masters([dns:dns_rr()]) -> [dns:dns_rr()]).
-update_masters(MRecords) ->
+-spec(handle_masters(state()) -> state()).
+handle_masters(#state{masters=MRRs}=State) ->
     ZoneName = ?DCOS_DOMAIN,
-    MRecords0 = master_records(ZoneName),
-    {ok, NewRRs, OldRRs} = push_diff(ZoneName, MRecords0, MRecords),
+    MRRs0 = master_records(ZoneName),
+
+    {NewRRs, OldRRs} = complement(MRRs0, MRRs),
     lists:foreach(fun (#dns_rr{data=#dns_rrdata_a{ip = IP}}) ->
         lager:notice("master ~p was added", [IP])
     end, NewRRs),
     lists:foreach(fun (#dns_rr{data=#dns_rrdata_a{ip = IP}}) ->
         lager:notice("master ~p was removed", [IP])
     end, OldRRs),
-    MRecords0.
+
+    Ref = start_masters_timer(),
+    AddOps = [{add_all, NewRRs} || NewRRs =/= []],
+    RemoveOps = [{remove_all, OldRRs} || OldRRs =/= []],
+    State0 = State#state{masters_ref=Ref, masters=MRRs0},
+    handle_push_ops(AddOps ++ RemoveOps, State0).
 
 -spec(master_records(dns:dname()) -> [dns:dns_rr()]).
 master_records(ZoneName) ->
@@ -297,6 +317,33 @@ zone_records(ZoneName) ->
             }
         }
     ].
+
+-spec(handle_push_ops([riak_dt_orswot:orswot_op()], state()) -> state()).
+handle_push_ops([], State) ->
+    State;
+handle_push_ops(Ops, #state{ops=[], ops_ref=Ref}=State) ->
+    % NOTE: push data to lashup 1 time per second
+    case erlang:read_timer(Ref) of
+        false ->
+            ok = push_ops(?DCOS_DOMAIN, Ops),
+            State#state{ops_ref=start_push_ops_timer()};
+        _Timeout ->
+            State#state{ops=Ops}
+    end;
+handle_push_ops(Ops, #state{ops=Buf}=State) ->
+    State#state{ops=Buf ++ Ops}.
+
+-spec(handle_push_ops(state()) -> state()).
+handle_push_ops(#state{ops=[]}=State) ->
+    State;
+handle_push_ops(#state{ops=Ops}=State) ->
+    ok = push_ops(?DCOS_DOMAIN, Ops),
+    State#state{ops=[]}.
+
+-spec(start_push_ops_timer() -> reference()).
+start_push_ops_timer() ->
+    Timeout = application:get_env(dcos_dns, push_ops_timeout, 1000),
+    erlang:start_timer(Timeout, self(), push_ops).
 
 %%%===================================================================
 %%% Complement functions
