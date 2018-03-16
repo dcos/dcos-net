@@ -259,16 +259,16 @@ handle_task(TaskId, TaskObj, Task,
         name => {mget, <<"name">>},
         framework => {value, Framework},
         agent_ip => {value, Agent},
-        task_ip => fun handle_task_ip/1,
-        state => fun handle_task_state/1,
-        ports => fun handle_task_ports/1
+        task_ip => fun handle_task_ip/2,
+        state => fun handle_task_state/2,
+        ports => fun handle_task_ports/2
     },
     Task0 =
         maps:fold(
             fun (Key, {value, Value}, Acc) ->
                     mput(Key, Value, Acc);
                 (Key, Fun, Acc) when is_function(Fun) ->
-                    Value = Fun(TaskObj),
+                    Value = Fun(TaskObj, Acc),
                     mput(Key, Value, Acc);
                 (Key, {mget, Path}, Acc) ->
                     Value = mget(Path, TaskObj, undefined),
@@ -342,8 +342,8 @@ handle_waiting_tasks(Key, Id, Value, #state{waiting_tasks=TW}=State) ->
     S =:= <<"TASK_GONE_BY_OPERATOR">>
 ).
 
--spec(handle_task_state(jiffy:object()) -> task_state()).
-handle_task_state(TaskObj) ->
+-spec(handle_task_state(jiffy:object(), task()) -> task_state()).
+handle_task_state(TaskObj, _Task) ->
     case maps:get(<<"state">>, TaskObj) of
         TaskState when ?IS_TERMINAL(TaskState) ->
             false;
@@ -359,8 +359,8 @@ handle_task_state(TaskObj) ->
             true
     end.
 
--spec(handle_task_ip(jiffy:object()) -> [inet:ip_address()]).
-handle_task_ip(TaskObj) ->
+-spec(handle_task_ip(jiffy:object(), task()) -> [inet:ip_address()]).
+handle_task_ip(TaskObj, _Task) ->
     Status = handle_task_status(TaskObj),
     NetworkInfos =
         mget([<<"container_status">>, <<"network_infos">>], Status, []),
@@ -369,22 +369,24 @@ handle_task_ip(TaskObj) ->
         #{<<"ip_address">> := IP} <- mget(<<"ip_addresses">>, NetworkInfo),
         {ok, IPAddress} <- [inet:parse_strict_address(binary_to_list(IP))] ].
 
--spec(handle_task_ports(jiffy:object()) -> [task_port()] | undefined).
-handle_task_ports(TaskObj) ->
+-spec(handle_task_ports(jiffy:object(), task()) -> [task_port()] | undefined).
+handle_task_ports(TaskObj, Task) ->
     PortMappings = handle_task_port_mappings(TaskObj),
-    DiscoveryPorts = handle_task_discovery_ports(TaskObj),
+    DiscoveryPorts = handle_task_discovery_ports(TaskObj, Task),
     merge_task_ports(PortMappings, DiscoveryPorts).
 
 -spec(handle_task_port_mappings(jiffy:object()) -> [task_port()]).
 handle_task_port_mappings(TaskObj) ->
-    Type = mget([<<"container">>, <<"type">>], TaskObj, <<"HOST">>),
+    Type = mget([<<"container">>, <<"type">>], TaskObj, <<"MESOS">>),
     handle_task_port_mappings(Type, TaskObj).
 
 -spec(handle_task_port_mappings(binary(), jiffy:object()) -> [task_port()]).
-handle_task_port_mappings(<<"HOST">>, _TaskObj) ->
-    [];
 handle_task_port_mappings(<<"MESOS">>, TaskObj) ->
-    NetworkInfos = mget([<<"container">>, <<"network_infos">>], TaskObj, []),
+    Status = handle_task_status(TaskObj),
+    PodNetworkInfos =
+        mget([<<"container_status">>, <<"network_infos">>], Status, []),
+    NetworkInfos =
+        mget([<<"container">>, <<"network_infos">>], TaskObj, PodNetworkInfos),
     PortMappings =
         lists:flatmap(
             fun (NetworkInfo) ->
@@ -412,14 +414,17 @@ handle_protocol(Obj) ->
         <<"udp">> -> udp
     end.
 
--spec(handle_task_discovery_ports(jiffy:object()) -> [task_port()]).
-handle_task_discovery_ports(TaskObj) ->
-    Ports = mget([<<"discovery">>, <<"ports">>, <<"ports">>], TaskObj, []),
-    lists:map(fun handle_task_discovery_port/1, Ports).
+-spec(handle_task_discovery_ports(jiffy:object(), task()) -> [task_port()]).
+handle_task_discovery_ports(TaskObj, Task) ->
+    try mget([<<"discovery">>, <<"ports">>, <<"ports">>], TaskObj) of
+        Ports -> lists:map(fun handle_task_discovery_port/1, Ports)
+    catch error:{badkey, _} ->
+        maps:get(ports, Task, [])
+    end.
 
 -spec(handle_task_discovery_port(jiffy:object()) -> task_port()).
 handle_task_discovery_port(PortObj) ->
-    Name = mget(<<"name">>, PortObj, undefined),
+    Name = mget(<<"name">>, PortObj, <<"default">>),
     Protocol = handle_protocol(PortObj),
     Port = mget(<<"number">>, PortObj),
     Labels = mget([<<"labels">>, <<"labels">>], PortObj, []),
@@ -458,6 +463,8 @@ handle_container_scope(_Label) ->
     false.
 
 -spec(merge_task_ports([task_port()], [task_port()]) -> [task_port()]).
+merge_task_ports([], DiscoveryPorts) ->
+    DiscoveryPorts;
 merge_task_ports(PortMappings, DiscoveryPorts) ->
     Ports =
         maps:from_list([ begin
@@ -471,17 +478,14 @@ merge_task_ports(PortMappings, DiscoveryPorts) ->
             A = maps:get(protocol, TaskPort),
             B = maps:get(port, TaskPort, undefined),
             C = maps:get(host_port, TaskPort, undefined),
-            KeyA = {undefined, B, C},
+            KeyA = {A, B, undefined},
             KeyB = {A, undefined, C},
             KeyC = {A, B, C},
-            case {maps:find(KeyA, Acc), maps:find(KeyB, Acc)} of
-                {{ok, TP}, error} ->
+            case mfind([KeyA, KeyB, KeyC], Acc) of
+                {ok, Key, TP} ->
                     TP0 = maps:merge(TP, TaskPort),
-                    maps:put(KeyA, TP0, Acc);
-                {error, {ok, TP}} ->
-                    TP0 = maps:merge(TP, TaskPort),
-                    maps:put(KeyB, TP0, Acc);
-                {error, error} ->
+                    maps:put(Key, TP0, Acc);
+                error ->
                     maps:put(KeyC, TaskPort, Acc)
             end
         end, Ports, PortMappings),
@@ -611,6 +615,15 @@ mdiff(A, B) ->
             _ -> Acc
         end
     end, B, A).
+
+-spec(mfind([Key], #{Key => Value}) -> {ok, Key, Value} | error
+    when Key :: term(), Value :: term()).
+mfind(Keys, Map) ->
+    MapW = maps:with(Keys, Map),
+    case maps:to_list(MapW) of
+        [{Key, Value}] -> {ok, Key, Value};
+        [] -> error
+    end.
 
 %%%===================================================================
 %%% Mesos Operator API Client

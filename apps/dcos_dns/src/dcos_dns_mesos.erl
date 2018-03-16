@@ -167,7 +167,7 @@ task_autoip(#{name := Name, framework := Fwrk,
     ).
 
 -spec(is_port_mapping(dcos_net_mesos_state:task_port()) -> boolean()).
-is_port_mapping(#{host_port := _HPort, port := _Port}) ->
+is_port_mapping(#{host_port := _HPort}) ->
     true;
 is_port_mapping(_Port) ->
     false.
