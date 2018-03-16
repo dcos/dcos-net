@@ -214,7 +214,7 @@ setup() ->
     meck:expect(lashup_kv, request_op, fun request_op/2),
 
     {ok, Apps} = ensure_all_started(erldns),
-    Tasks = dcos_net_mesos_state_tests:setup(),
+    Tasks = dcos_net_mesos_state_tests:basic_setup(),
     {ok, Pid} = dcos_dns_mesos:start_link(),
     true =
         lists:any(fun (_) ->

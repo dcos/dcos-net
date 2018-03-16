@@ -3,7 +3,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -export([
-    setup/0,
+    basic_setup/0,
     cleanup/1
 ]).
 
@@ -11,8 +11,8 @@
 %%% Tests
 %%%===================================================================
 
-all_test_() ->
-    {setup, fun setup/0, fun cleanup/1, {with, [
+basic_test_() ->
+    {setup, fun basic_setup/0, fun cleanup/1, {with, [
         fun none_on_host/1,
         fun none_on_dcos/1,
         fun ucr_on_host/1,
@@ -21,6 +21,11 @@ all_test_() ->
         fun docker_on_host/1,
         fun docker_on_bridge/1,
         fun docker_on_dcos/1
+    ]}}.
+
+hello_world_test_() ->
+    {setup, fun hello_world_setup/0, fun cleanup/1, {with, [
+        fun (Tasks) -> ?assertEqual(#{}, Tasks) end
     ]}}.
 
 none_on_host(Tasks) ->
@@ -139,9 +144,15 @@ docker_on_dcos(Tasks) ->
 %%% Setup & cleanup
 %%%===================================================================
 
-setup() ->
+basic_setup() ->
+    setup("operator-api.json").
+
+hello_world_setup() ->
+    setup("hello-world.json").
+
+setup(FileName) ->
     {ok, Cwd} = file:get_cwd(),
-    DataFile = filename:join(Cwd, "apps/dcos_net/test/operator-api.json"),
+    DataFile = filename:join([Cwd, "apps/dcos_net/test/", FileName]),
     {ok, Data} = file:read_file(DataFile),
     Lines = binary:split(Data, <<"\n">>, [global]),
 
