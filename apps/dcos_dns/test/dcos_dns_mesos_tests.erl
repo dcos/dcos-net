@@ -74,7 +74,7 @@ none_on_host() ->
         [#dns_rr{data=#dns_rrdata_a{ip = {172, 17, 0, 4}}}],
         resolve(?DNAME("none-on-host", "autoip"))),
     ?assertMatch(
-        [],
+        [#dns_rr{data=#dns_rrdata_a{ip = {172, 17, 0, 4}}}],
         resolve(?DNAME("none-on-host", "containerip"))).
 
 none_on_dcos() ->
@@ -96,7 +96,7 @@ ucr_on_host() ->
         [#dns_rr{data=#dns_rrdata_a{ip = {172, 17, 0, 3}}}],
         resolve(?DNAME("ucr-on-host", "autoip"))),
     ?assertMatch(
-        [],
+        [#dns_rr{data=#dns_rrdata_a{ip = {172, 17, 0, 3}}}],
         resolve(?DNAME("ucr-on-host", "containerip"))).
 
 ucr_on_bridge() ->
@@ -129,7 +129,7 @@ docker_on_host() ->
         [#dns_rr{data=#dns_rrdata_a{ip = {172, 17, 0, 4}}}],
         resolve(?DNAME("docker-on-host", "autoip"))),
     ?assertMatch(
-        [],
+        [#dns_rr{data=#dns_rrdata_a{ip = {172, 17, 0, 4}}}],
         resolve(?DNAME("docker-on-host", "containerip"))).
 
 docker_on_bridge() ->
@@ -174,7 +174,7 @@ pod_on_host() ->
         [#dns_rr{data=#dns_rrdata_a{ip = {172, 17, 0, 4}}}],
         resolve(?DNAME("pod-on-host", "autoip"))),
     ?assertMatch(
-        [],
+        [#dns_rr{data=#dns_rrdata_a{ip = {172, 17, 0, 4}}}],
         resolve(?DNAME("pod-on-host", "containerip"))).
 
 pod_on_bridge() ->
