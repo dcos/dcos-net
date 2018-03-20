@@ -436,11 +436,7 @@ handle_task_discovery_port(PortObj) ->
     Result0 = mput(name, Name, Result),
     Result1 = mput(vip, VIPLabels, Result0),
 
-    PortField =
-        case handle_container_scope(Labels) of
-            false -> host_port;
-            true -> port
-        end,
+    PortField = handle_port_scope(Labels),
     mput(PortField, Port, Result1).
 
 -spec(is_discovery_port(task_port()) -> boolean()).
@@ -461,14 +457,16 @@ handle_vip_labels(#{<<"key">> := <<"vip", _/binary>>,
 handle_vip_labels(_Label) ->
     [].
 
--spec(handle_container_scope(jiffy:object()) -> boolean()).
-handle_container_scope(Labels) when is_list(Labels) ->
-    lists:any(fun handle_container_scope/1, Labels);
-handle_container_scope(#{<<"key">> := <<"network-scope">>,
-                         <<"value">> := <<"container">>}) ->
-    true;
-handle_container_scope(_Label) ->
-    false.
+-spec(handle_port_scope(jiffy:object()) -> port | host_port).
+handle_port_scope(Labels) ->
+    NetworkScopes =
+        [ Value || #{<<"key">> := <<"network-scope">>,
+                     <<"value">> := Value} <- Labels ],
+    case NetworkScopes of
+        [<<"container">>] -> port;
+        [<<"host">>] -> host_port;
+        [] -> port
+    end.
 
 -spec(merge_task_ports([task_port()], [task_port()]) -> [task_port()]).
 merge_task_ports([], DiscoveryPorts) ->

@@ -41,7 +41,7 @@ none_on_host(Tasks) ->
         task_ip => [{172, 17, 0, 4}],
         ports => [
             #{name => <<"http">>, protocol => tcp,
-              host_port => 13977}
+              port => 13977}
         ],
         state => running
     }, maps:get(TaskId, Tasks)).
@@ -65,7 +65,7 @@ ucr_on_host(Tasks) ->
         task_ip => [{172, 17, 0, 3}],
         ports => [
             #{name => <<"http">>, protocol => tcp,
-              host_port => 10323}
+              port => 10323}
         ],
         state => running
     }, maps:get(TaskId, Tasks)).
@@ -103,7 +103,7 @@ docker_on_host(Tasks) ->
         task_ip => [{172, 17, 0, 4}],
         ports => [
             #{name => <<"http">>, protocol => tcp,
-              host_port => 31168}
+              port => 31168}
         ],
         state => running
     }, maps:get(TaskId, Tasks)).
@@ -160,7 +160,7 @@ pod_on_host(Tasks) ->
         task_ip => [{172, 17, 0, 4}],
         ports => [
             #{name => <<"http">>, protocol => tcp,
-              host_port => 28064}
+              port => 28064}
         ],
         state => running
     }, maps:get(TaskId, Tasks)).
