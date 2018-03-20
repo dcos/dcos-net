@@ -4,6 +4,7 @@
 
 -export([
     basic_setup/0,
+    hello_overlay_setup/0,
     cleanup/1
 ]).
 
@@ -31,6 +32,18 @@ hello_world_test_() ->
     {setup, fun hello_world_setup/0, fun cleanup/1, {with, [
         fun (Tasks) -> ?assertEqual(#{}, Tasks) end
     ]}}.
+
+hello_overlay_test_() ->
+    {setup, fun hello_overlay_setup/0, fun cleanup/1, {with, [
+        fun hello_overlay_world/1,
+        fun hello_overlay_server/1,
+        fun hello_overlay_vip/1,
+        fun hello_overlay_host_vip/1
+    ]}}.
+
+%%%===================================================================
+%%% Basic Tests
+%%%===================================================================
 
 none_on_host(Tasks) ->
     TaskId = <<"none-on-host.1458594c-2630-11e8-af52-70b3d5800001">>,
@@ -194,6 +207,68 @@ pod_on_dcos(Tasks) ->
     }, maps:get(TaskId, Tasks)).
 
 %%%===================================================================
+%%% Overlay Tests
+%%%===================================================================
+
+hello_overlay_world(Tasks) ->
+    TaskId = <<"hello-world.cea59641-2bea-11e8-93f9-6a3d376ad59c">>,
+    ?assertEqual(#{
+        name => <<"hello-world">>,
+        framework => <<"marathon">>,
+        agent_ip => {10, 0, 0, 49},
+        task_ip => [{10, 0, 0, 49}],
+        ports => [
+            #{name => <<"api">>, protocol => tcp,
+              port => 19630, vip => [<<"/api.hello-world:80">>]}
+        ],
+        state => running
+    }, maps:get(TaskId, Tasks)).
+
+hello_overlay_server(Tasks) ->
+    TaskId = <<"hello-overlay-0-server__7a7fe08f-7870-4def-a3ac-da5f18377dab">>,
+    ?assertEqual(#{
+        name => <<"hello-overlay-0-server">>,
+        framework => <<"hello-world">>,
+        agent_ip => {10, 0, 0, 49},
+        task_ip => [{9, 0, 2, 2}],
+        ports => [
+            #{name => <<"overlay-dummy">>,
+              protocol => tcp, port => 1025},
+            #{name => <<"overlay-dynport">>,
+              protocol => tcp, port => 1026}
+        ],
+        state => running
+    }, maps:get(TaskId, Tasks)).
+
+hello_overlay_vip(Tasks) ->
+    TaskId = <<"hello-overlay-vip-0-server__3b071c4d-ef05-4344-9910-867431def3d7">>,
+    ?assertEqual(#{
+        name => <<"hello-overlay-vip-0-server">>,
+        framework => <<"hello-world">>,
+        agent_ip => {10, 0, 0, 49},
+        task_ip => [{9, 0, 2, 3}],
+        ports => [
+            #{name => <<"overlay-vip">>, protocol => tcp,
+              port => 4044, vip => [<<"overlay-vip:80">>]}
+        ],
+        state => running
+    }, maps:get(TaskId, Tasks)).
+
+hello_overlay_host_vip(Tasks) ->
+    TaskId = <<"hello-host-vip-0-server__2e5e76da-1d8c-4435-b152-70002de6ca9b">>,
+    ?assertEqual(#{
+        name => <<"hello-host-vip-0-server">>,
+        framework => <<"hello-world">>,
+        agent_ip => {10, 0, 0, 49},
+        task_ip => [{10, 0, 0, 49}],
+        ports => [
+            #{name => <<"host-vip">>, protocol => tcp,
+              port => 4044, vip => [<<"host-vip:80">>]}
+        ],
+        state => running
+    }, maps:get(TaskId, Tasks)).
+
+%%%===================================================================
 %%% Setup & cleanup
 %%%===================================================================
 
@@ -202,6 +277,9 @@ basic_setup() ->
 
 hello_world_setup() ->
     setup("hello-world.json").
+
+hello_overlay_setup() ->
+    setup("hello-overlay.json").
 
 setup(FileName) ->
     {ok, Cwd} = file:get_cwd(),

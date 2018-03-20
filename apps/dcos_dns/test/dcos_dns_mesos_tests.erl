@@ -24,7 +24,7 @@
 %%%===================================================================
 
 basic_test_() ->
-    {setup, fun setup/0, fun cleanup/1, [
+    {setup, fun basic_setup/0, fun cleanup/1, [
         {"None on Host", fun none_on_host/0},
         {"None on User", fun none_on_dcos/0},
         {"UCR on Host", fun ucr_on_host/0},
@@ -40,9 +40,17 @@ basic_test_() ->
     ]}.
 
 updates_test_() ->
-    {setup, fun setup/0, fun cleanup/1, [
+    {setup, fun basic_setup/0, fun cleanup/1, [
         {"Add task", fun add_task/0},
         {"Remove task", fun remove_task/0}
+    ]}.
+
+hello_overlay_test_() ->
+    {setup, fun hello_overlay_setup/0, fun cleanup/1, [
+        {"hello-world", fun hello_overlay_world/0},
+        {"hello-overlay-0-server", fun hello_overlay_server/0},
+        {"hello-overlay-vip-0-server", fun hello_overlay_vip/0},
+        {"hello-host-vip-0-server", fun hello_overlay_host_vip/0}
     ]}.
 
 -define(LOCALHOST, {127, 0, 0, 1}).
@@ -63,8 +71,9 @@ resolve(DType, DName) ->
 %%% Basic Tests
 %%%===================================================================
 
--define(DNAME(AppName, Type),
-    <<AppName, ".marathon.", Type, ".dcos.thisdcos.directory">>).
+-define(DNAME(AppName, Type), ?DNAME(AppName, "marathon", Type)).
+-define(DNAME(AppName, Framework, Type),
+    <<AppName, ".", Framework, ".", Type, ".dcos.thisdcos.directory">>).
 
 none_on_host() ->
     ?assertMatch(
@@ -257,16 +266,79 @@ remove_task() ->
         resolve(?DNAME("docker-on-dcos", "containerip"))).
 
 %%%===================================================================
+%%% Overlay Tests
+%%%===================================================================
+
+hello_overlay_world() ->
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {10, 0, 0, 49}}}],
+        resolve(?DNAME("hello-world", "agentip"))),
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {10, 0, 0, 49}}}],
+        resolve(?DNAME("hello-world", "autoip"))),
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {10, 0, 0, 49}}}],
+        resolve(?DNAME("hello-world", "containerip"))).
+
+hello_overlay_server() ->
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {10, 0, 0, 49}}}],
+        resolve(?DNAME("hello-overlay-0-server",
+                       "hello-world", "agentip"))),
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {9, 0, 2, 2}}}],
+        resolve(?DNAME("hello-overlay-0-server",
+                       "hello-world", "autoip"))),
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {9, 0, 2, 2}}}],
+        resolve(?DNAME("hello-overlay-0-server",
+                       "hello-world", "containerip"))).
+
+hello_overlay_vip() ->
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {10, 0, 0, 49}}}],
+        resolve(?DNAME("hello-overlay-vip-0-server",
+                       "hello-world", "agentip"))),
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {9, 0, 2, 3}}}],
+        resolve(?DNAME("hello-overlay-vip-0-server",
+                       "hello-world", "autoip"))),
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {9, 0, 2, 3}}}],
+        resolve(?DNAME("hello-overlay-vip-0-server",
+                       "hello-world", "containerip"))).
+
+hello_overlay_host_vip() ->
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {10, 0, 0, 49}}}],
+        resolve(?DNAME("hello-host-vip-0-server",
+                       "hello-world", "agentip"))),
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {10, 0, 0, 49}}}],
+        resolve(?DNAME("hello-host-vip-0-server",
+                       "hello-world", "autoip"))),
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {10, 0, 0, 49}}}],
+        resolve(?DNAME("hello-host-vip-0-server",
+                       "hello-world", "containerip"))).
+
+%%%===================================================================
 %%% Setup & cleanup
 %%%===================================================================
 
-setup() ->
+basic_setup() ->
+    setup(basic_setup).
+
+hello_overlay_setup() ->
+    setup(hello_overlay_setup).
+
+setup(SetupFun) ->
     meck:new(lashup_kv),
     meck:expect(lashup_kv, value, fun value/1),
     meck:expect(lashup_kv, request_op, fun request_op/2),
 
     {ok, Apps} = ensure_all_started(erldns),
-    Tasks = dcos_net_mesos_state_tests:basic_setup(),
+    Tasks = dcos_net_mesos_state_tests:SetupFun(),
     {ok, Pid} = dcos_dns_mesos:start_link(),
     true =
         lists:any(fun (_) ->
