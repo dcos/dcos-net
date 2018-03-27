@@ -30,10 +30,22 @@ For more information please see DC/OS [documentation](https://dcos.io/docs/lates
 
 ## Development
 
-Once you [got](https://github.com/dcos/dcos-docker) a working DC/OS cluster in
-docker it's possible to use development script to build and run dcos-net in
-DC/OS environment using [`bin/dev.sh`](bin/dev.sh) script. Here are the build
-dependencies:
+You can build, check, and test dcos-net in development image using
+`make docker-compile`, `make docker-check`, and `make docker-test` respectively.
+All makefile targets with `docker-` prefix will build development image with all
+dependencies and run rebar3 commands in that image on the host directory.
+
+To check your dcos-net build on DC/OS you can use DC/OS on Docker a.k.a.
+[dcos-docker](https://github.com/dcos/dcos-docker). To build and run dcos-net on
+dcos-docker please use [`bin/dev.sh`](bin/dev.sh) script. Please make sure that
+`CUSTOM_VOLUMES` variable from `make-config.mk` contains path to dcos-net
+directory and uses `rw` mount option, e.g.
+
+```
+CUSTOM_VOLUMES := -v $(HOME):$(HOME):rw
+```
+
+### Dependencies
 
 * Erlang/OTP 20.x
 

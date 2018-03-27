@@ -3,6 +3,7 @@ VERSION         ?= $(shell git describe --tags)
 BASE_DIR         = $(shell pwd)
 ERLANG_BIN       = $(shell dirname $(shell which erl))
 REBAR            = $(shell pwd)/rebar3
+DOCKER_RUN       = $(shell pwd)/bin/docker.sh
 
 .PHONY: rel deps test
 
@@ -56,3 +57,16 @@ rel:
 
 stage:
 	${REBAR} release -d
+
+##
+## Docker
+##
+
+docker-image:
+	@${DOCKER_RUN} true
+
+docker-%:
+	@${DOCKER_RUN} make $(subst docker-,,$@)
+
+docker:
+	@${DOCKER_RUN} make all
