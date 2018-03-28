@@ -4,6 +4,7 @@
 -export([
     start_link/0,
     subscribe/0,
+    is_leader/0,
     next/1
 ]).
 
@@ -66,6 +67,14 @@ next(Ref) ->
     ?MODULE ! {next, Ref},
     ok.
 
+-spec(is_leader() -> boolean()).
+is_leader() ->
+    try
+        gen_server:call(?MODULE, is_leader)
+    catch _Class:_Error ->
+        false
+    end.
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -74,8 +83,11 @@ init([]) ->
     self() ! init,
     {ok, []}.
 
+handle_call(is_leader, _From, State) ->
+    IsLeader = is_record(State, state),
+    {reply, IsLeader, State};
 handle_call(_Request, _From, State) ->
-    {reply, ok, State}.
+    {noreply, State}.
 
 handle_cast(_Request, State) ->
     {noreply, State}.

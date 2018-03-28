@@ -14,6 +14,7 @@
 
 basic_test_() ->
     {setup, fun basic_setup/0, fun cleanup/1, {with, [
+        fun is_leader/1,
         fun none_on_host/1,
         fun none_on_dcos/1,
         fun ucr_on_host/1,
@@ -44,6 +45,10 @@ hello_overlay_test_() ->
 %%%===================================================================
 %%% Basic Tests
 %%%===================================================================
+
+is_leader(_Tasts) ->
+    IsLeader = dcos_net_mesos_state:is_leader(),
+    ?assertEqual(true, IsLeader).
 
 none_on_host(Tasks) ->
     TaskId = <<"none-on-host.1458594c-2630-11e8-af52-70b3d5800001">>,
