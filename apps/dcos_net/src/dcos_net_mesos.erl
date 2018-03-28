@@ -1,9 +1,10 @@
 -module(dcos_net_mesos).
 
 -export([
+    poll/1,
     request/2,
     request/4,
-    poll/1
+    http_options/0
 ]).
 
 -export_type([response/0]).
@@ -93,16 +94,15 @@ mesos_uri(Path) ->
     Hostname = binary_to_list(dcos_net_dist:hostname()),
     lists:concat([Protocol, "://", Hostname, ":", Port, Path]).
 
+-spec(http_options() -> httpc:http_options()).
+http_options() ->
+    Timeout = application:get_env(dcos_net, mesos_timeout, 30000),
+    CTimeout = application:get_env(dcos_net, mesos_connect_timeout, 5000),
+    [{timeout, Timeout}, {connect_timeout, CTimeout}, {autoredirect, false}].
+
 -spec(mesos_http_options(httpc:http_options()) -> httpc:http_options()).
 mesos_http_options(HTTPOptions) ->
-    Timeout = application:get_env(dcos_net, mesos_timeout, 30000),
-    ConnectionTimeout = application:get_env(dcos_net, mesos_connect_timeout, 5000),
-    HTTPOptions0 = [
-        {timeout, Timeout},
-        {connect_timeout, ConnectionTimeout},
-        {autoredirect, false} |
-        mesos_http_options()
-    ],
+    HTTPOptions0 = http_options() ++ mesos_http_options(),
     lists:foldl(fun ({Key, Value}, Acc) ->
         [{Key, Value}|lists:keydelete(Key, 1, Acc)]
     end, HTTPOptions0, HTTPOptions).
