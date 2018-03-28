@@ -62,11 +62,11 @@ stage:
 ## Docker
 ##
 
+docker:
+	@${DOCKER_RUN}
+
 docker-image:
 	@${DOCKER_RUN} true
 
 docker-%:
 	@${DOCKER_RUN} make $(subst docker-,,$@)
-
-docker:
-	@${DOCKER_RUN} make all
