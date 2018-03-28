@@ -10,7 +10,8 @@
     lager,
     ranch,
     inets,
-    ssl
+    ssl,
+    telemetry
    ]},
   {env,[]},
   {modules, []},
