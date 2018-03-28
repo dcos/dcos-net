@@ -10,7 +10,9 @@
 
 %% API
 -export([
-    start_link/0
+    start_link/0,
+    dns_records/2,
+    push_zone/2
 ]).
 
 %% gen_server callbacks

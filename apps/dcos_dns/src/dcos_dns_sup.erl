@@ -32,7 +32,9 @@ init([true]) ->
     Children1 = maybe_add_udp_servers(Children),
 
     IsMaster = dcos_net_app:is_master(),
-    MChildren = [?CHILD(dcos_dns_mesos) || IsMaster],
+    MChildren =
+        [?CHILD(dcos_dns_mesos_dns) || IsMaster] ++
+        [?CHILD(dcos_dns_mesos) || IsMaster],
 
     sidejob:new_resource(
         dcos_dns_handler_fsm_sj, sidejob_supervisor,

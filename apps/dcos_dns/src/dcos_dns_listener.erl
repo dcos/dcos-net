@@ -90,9 +90,6 @@ zone(ZoneName, LashupValue) ->
     Sha = crypto:hash(sha, term_to_binary(Records)),
     {ZoneName, Sha, Records}.
 
-handle_event(#{key := ?LASHUP_KEY(?DCOS_DIRECTORY("mesos"))}, State) ->
-    % DNAME .mesos.thisdcos.directory -> .mesos
-    State;
 handle_event(#{key := ?LASHUP_KEY(ZoneName), value := Value}, State) ->
     Zone = zone(ZoneName, Value),
     ok = push_zone(Zone),
