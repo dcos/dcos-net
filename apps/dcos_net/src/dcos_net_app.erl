@@ -7,13 +7,13 @@
 
 -behaviour(application).
 
--define(DEFAULT_CONFIG_DIR, "/opt/mesosphere/etc/dcos-net.config.d").
 -define(MASTERS_KEY, {masters, riak_dt_orswot}).
 
 %% Application callbacks
 -export([
     start/2,
     stop/1,
+    config_dir/0,
     load_config_files/1,
     dist_port/0
 ]).
@@ -69,20 +69,18 @@ load_config_files() ->
 
 -spec load_config_files(App :: atom()) -> ok.
 load_config_files(App) ->
-    case file:list_dir(?DEFAULT_CONFIG_DIR) of
+    ConfigDir = config_dir(),
+    case file:list_dir(ConfigDir) of
       {ok, []} ->
-        lager:info("Found an empty config directory: ~p", [?DEFAULT_CONFIG_DIR]);
+        lager:info("Found an empty config directory: ~p", [ConfigDir]);
       {error, enoent} ->
-        lager:info("Couldn't find config directory: ~p", [?DEFAULT_CONFIG_DIR]);
+        lager:info("Couldn't find config directory: ~p", [ConfigDir]);
       {ok, Filenames} ->
-        AbsFilenames = lists:map(fun abs_filename/1, Filenames),
         lists:foreach(fun (Filename) ->
-            load_config_file(App, Filename)
-        end, AbsFilenames)
+            AbsFilename = filename:absname(Filename, ConfigDir),
+            load_config_file(App, AbsFilename)
+        end, Filenames)
     end.
-
-abs_filename(Filename) ->
-    filename:absname(Filename, ?DEFAULT_CONFIG_DIR).
 
 load_config_file(App, Filename) ->
     case file:consult(Filename) of
@@ -115,11 +113,11 @@ load_app_config(_App, _AppOptions) ->
 
 -spec(dist_port() -> {ok, inet:port_number()} | {error, atom()}).
 dist_port() ->
+    ConfigDir = config_dir(),
     try
-        case erl_prim_loader:list_dir(?DEFAULT_CONFIG_DIR) of
+        case erl_prim_loader:list_dir(ConfigDir) of
             {ok, Filenames} ->
-                AbsFilenames = lists:map(fun abs_filename/1, Filenames),
-                dist_port(AbsFilenames);
+                dist_port(Filenames, ConfigDir);
             error ->
                 {error, list_dir}
         end
@@ -127,36 +125,22 @@ dist_port() ->
         {error, Err}
     end.
 
--spec(dist_port([file:filename()]) ->
+-spec(dist_port([file:filename()], file:filename()) ->
     {ok, inet:port_number()} | {error, atom()}).
-dist_port([]) ->
+dist_port([], _Dir) ->
     {error, not_found};
-dist_port([Filename|Filenames]) ->
-    case consult(Filename) of
+dist_port([Filename|Filenames], Dir) ->
+    AbsFilename = filename:absname(Filename, Dir),
+    case consult(AbsFilename) of
         {ok, Data} ->
-            case get_dist_port(Data) of
+            case find(dcos_net, dist_port, Data) of
                 {ok, Port} ->
                     {ok, Port};
-                {error, _Error} ->
-                    dist_port(Filenames)
+                false ->
+                    dist_port(Filenames, Dir)
             end;
         {error, _Error} ->
-            dist_port(Filenames)
-    end.
-
--spec(get_dist_port([{atom(), [{atom(), term()}]}]) ->
-    {ok, inet:port_number()} | {error, atom()}).
-get_dist_port(Data) ->
-    case lists:keyfind(dcos_net, 1, Data) of
-        {dcos_net, Config} ->
-            case lists:keyfind(dist_port, 1, Config) of
-                {dist_port, Port} ->
-                    {ok, Port};
-                false ->
-                    {error, not_found}
-            end;
-        false ->
-            {error, not_found}
+            dist_port(Filenames, Dir)
     end.
 
 -spec(consult(file:filename()) -> {ok, term()} | {error, term()}).
@@ -172,6 +156,95 @@ consult(Filename) ->
             end;
         {error, Error} ->
             {error, Error}
+    end.
+
+-spec(find(App, Key, Data) -> {ok, Value} | false
+    when Data :: [{atom(), [{atom(), term()}]} | file:filename()],
+         App :: atom(), Key :: atom(), Value :: term()).
+find(App, Key, Data) ->
+    case lists:keyfind(App, 1, Data) of
+        {App, Config} ->
+            case lists:keyfind(Key, 1, Config) of
+                {Key, Value} ->
+                    {ok, Value};
+                false ->
+                    false
+            end;
+        false ->
+            false
+    end.
+
+
+%%====================================================================
+%% config dir
+%%====================================================================
+
+-define(TOKEN_DOT, [{dot, erl_anno:new(1)}]).
+-define(DEFAULT_CONFIG_DIR, "/opt/mesosphere/etc/dcos-net.config.d").
+
+-type config_dir_r() :: {ok, file:filename()} | undefined.
+
+-spec(config_dir() -> file:filename()).
+config_dir() ->
+    config_dir([
+        fun config_dir_env/0,
+        fun config_dir_arg/0,
+        fun config_dir_sys/0
+    ]).
+
+-spec(config_dir([fun (() -> config_dir_r())]) -> file:filename()).
+config_dir([]) ->
+    ?DEFAULT_CONFIG_DIR;
+config_dir([Fun|Funs]) ->
+    case Fun() of
+        {ok, ConfigDir} ->
+            ConfigDir;
+        undefined ->
+            config_dir(Funs)
+    end.
+
+-spec(config_dir_env() -> config_dir_r()).
+config_dir_env() ->
+    application:get_env(dcos_net, config_dir).
+
+-spec(config_dir_arg() -> config_dir_r()).
+config_dir_arg() ->
+    case init:get_argument(dcos_net) of
+        {ok, Args} ->
+            Args0 = lists:map(fun list_to_tuple/1, Args),
+            case lists:keyfind("config_dir", 1, Args0) of
+                {"config_dir", Value} ->
+                    {ok, Tokens, _} = erl_scan:string(Value),
+                    {ok, _} = erl_parse:parse_term(Tokens ++ ?TOKEN_DOT);
+                false ->
+                    undefined
+            end;
+        error -> undefined
+    end.
+
+-spec(config_dir_sys() -> config_dir_r()).
+config_dir_sys() ->
+    case init:get_argument(config) of
+        error -> undefined;
+        {ok, [SysConfig|_]} ->
+            get_env(SysConfig, dcos_net, config_dir)
+    end.
+
+-spec(get_env(SysConfig, App, Key) -> {ok, Value} | undefined
+    when SysConfig :: file:filename() | any(),
+         App :: atom(), Key :: atom(), Value :: atom()).
+get_env(SysConfig, App, Key) ->
+    case consult(SysConfig) of
+        {ok, Data} ->
+            case find(App, Key, Data) of
+                {ok, ConfigDir} ->
+                    {ok, ConfigDir};
+                false ->
+                    Filename = lists:last(Data),
+                    get_env(Filename, App, Key)
+            end;
+        {error, _Error} ->
+            undefined
     end.
 
 %%====================================================================
