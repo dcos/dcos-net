@@ -84,6 +84,7 @@ init([]) ->
     {ok, []}.
 
 handle_call(is_leader, _From, State) ->
+    % There is no state if it's not connected
     IsLeader = is_record(State, state),
     {reply, IsLeader, State};
 handle_call(_Request, _From, State) ->
