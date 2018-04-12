@@ -94,7 +94,7 @@
  {<<"recon">>,{pkg,<<"recon">>,<<"2.3.2">>},0},
  {<<"riak_dt">>,
   {git,"https://github.com/dcos/riak_dt.git",
-       {ref,"bf7a6ec27f4ec2bc0fbc03cf4a2bb4f4dd79677e"}},
+       {ref,"b5c3fa058f9e56ec14f33b68d5d07ea6fbb97538"}},
   0},
  {<<"setup">>,{pkg,<<"setup">>,<<"1.8.4">>},0},
  {<<"sidejob">>,{pkg,<<"sidejob">>,<<"2.1.0">>},0},
