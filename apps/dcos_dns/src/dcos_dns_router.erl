@@ -10,7 +10,7 @@
 -export([upstreams_from_questions/1]).
 
 %% @doc Resolvers based on a set of "questions"
--spec(upstreams_from_questions(dns:questions()) -> [upstream()] | erldns).
+-spec(upstreams_from_questions(dns:questions()) -> [upstream()] | internal).
 upstreams_from_questions([#dns_query{name=Name}]) ->
     Labels = dcos_dns_app:parse_upstream_name(Name),
     find_upstream(Labels);
@@ -37,21 +37,21 @@ default_resolvers() ->
     lists:map(fun validate_upstream/1, Resolvers).
 
 %% @private
--spec(find_upstream(Labels :: [binary()]) -> [upstream()] | erldns).
+-spec(find_upstream(Labels :: [binary()]) -> [upstream()] | internal).
 find_upstream([<<"mesos">>|_]) ->
     dcos_dns_config:mesos_resolvers();
 find_upstream([<<"localhost">>|_]) ->
-    erldns;
+    internal;
 find_upstream([<<"zk">>|_]) ->
-    erldns;
+    internal;
 find_upstream([<<"spartan">>|_]) ->
-    erldns;
+    internal;
 find_upstream([<<"directory">>, <<"thisdcos">>|_]) ->
-    erldns;
+    internal;
 find_upstream([<<"global">>, <<"thisdcos">>|_]) ->
-    erldns;
+    internal;
 find_upstream([<<"directory">>, <<"dcos">>|_]) ->
-    erldns;
+    internal;
 find_upstream(Labels) ->
     case find_custom_upstream(Labels) of
         [] ->

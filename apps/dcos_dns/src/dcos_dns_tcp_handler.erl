@@ -2,8 +2,7 @@
 -behaviour(ranch_protocol).
 -behaviour(gen_statem).
 
--export([start_link/4,
-         do_reply/2]).
+-export([start_link/4]).
 
 -export([init/1]).
 
@@ -55,14 +54,14 @@ wait_for_query(timeout, idle_timeout, #state{transport = Transport, socket = Soc
 wait_for_query(info, {tcp_closed, Socket}, #state{socket = Socket}) ->
     {stop, ?SHUTDOWN(tcp_closed)};
 wait_for_query(info, {tcp, Socket, Data}, State0 = #state{socket = Socket}) ->
-    case dcos_dns_handler_fsm:start({?MODULE, self()}, Data) of
+    Fun = {fun do_reply/2, [self()]},
+    case dcos_dns_handler:start(tcp, Data, Fun) of
         {ok, Pid} when is_pid(Pid) ->
             MonRef = erlang:monitor(process, Pid),
             State1 = State0#state{query_pid = Pid, query_monref = MonRef},
             {next_state, waiting_for_reply, State1, {timeout, ?TIMEOUT, query_timeout}};
         {error, overload} ->
             % NOTE: to avoid ddos spartan doesn't reply anything in case of overload
-            dcos_dns_metrics:update([?MODULE, overload], 1, ?COUNTER),
             {stop, overload}
     end;
 wait_for_query(info, {'DOWN', _MonRef, process, _Pid, normal}, State) ->

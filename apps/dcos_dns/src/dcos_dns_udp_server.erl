@@ -2,20 +2,11 @@
 -behaviour(gen_server).
 
 %% API
--export([
-    start_link/1,
-    do_reply/2
-]).
+-export([start_link/1]).
 
 %% gen_server callbacks
--export([
-    init/1,
-    handle_call/3,
-    handle_cast/2,
-    handle_info/2,
-    terminate/2,
-    code_change/3
-]).
+-export([init/1, handle_call/3, handle_cast/2,
+    handle_info/2, terminate/2, code_change/3]).
 
 -include("dcos_dns.hrl").
 
@@ -27,12 +18,6 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-
--spec(do_reply({Socket, IP, Port}, Data :: iodata()) -> not_owner | inet:posix()
-    when Socket :: gen_udp:socket(), IP ::  inet:socket_address() | inet:hostname(),
-         Port :: inet:port_number()).
-do_reply({Socket, IP, Port}, Data) ->
-    gen_udp:send(Socket, IP, Port, Data).
 
 -spec(start_link(LocalIP :: inet:ip4_address()) ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
@@ -61,14 +46,8 @@ handle_cast(_Request, State) ->
 
 handle_info({udp, Socket, FromIP, FromPort, Data},
             State = #state{socket = Socket}) ->
-    From = {Socket, FromIP, FromPort},
-    case dcos_dns_handler_fsm:start({?MODULE, From}, Data) of
-        {ok, Pid} when is_pid(Pid) ->
-            ok;
-        {error, overload} ->
-            dcos_dns_metrics:update([?MODULE, overload], 1, ?COUNTER),
-            error
-    end,
+    Fun = {fun gen_udp:send/4, [Socket, FromIP, FromPort]},
+    _ = dcos_dns_handler:start(udp, Data, Fun),
     {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
