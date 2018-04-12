@@ -104,7 +104,7 @@
   0},
  {<<"telemetry">>,
   {git,"https://github.com/dcos/telemetry-net.git",
-       {ref,"1a2a14949b484bf13a84c9bf1d705cae8ccd4194"}},
+       {ref,"0cbae9d9d39c6ccecad55e3d580627f4667a39d8"}},
   0}]}.
 [
 {pkg_hash,[
