@@ -6,7 +6,10 @@
 -define(TIMEOUT, 5000).
 
 %% API
--export([start/3]).
+-export([
+    start/3,
+    resolve/3
+]).
 
 %% Private functions
 -export([start_link/3, init/4]).
@@ -28,6 +31,27 @@ start(Protocol, Request, Fun) ->
             {error, Error};
         {ok, Pid} ->
             {ok, Pid}
+    end.
+
+-spec(resolve(protocol(), binary(), timeout()) ->
+    {ok, pid()} | {error, atom()}).
+resolve(Protocol, Request, Timeout) ->
+    Ref = make_ref(),
+    Fun = {fun resolve_reply_fun/3, [self(), Ref]},
+    case dcos_dns_handler:start(Protocol, Request, Fun) of
+        {ok, Pid} ->
+            MonRef = erlang:monitor(process, Pid),
+            receive
+                {reply, Ref, Response} ->
+                    erlang:demonitor(MonRef, [flush]),
+                    {ok, Response};
+                {'DOWN', MonRef, process, _Pid, Reason} ->
+                   {error, Reason}
+            after Timeout ->
+                {error, timeout}
+            end;
+        {error, Error} ->
+            {error, Error}
     end.
 
 %%%===================================================================
@@ -65,6 +89,11 @@ reply(Fun, Response) ->
 
 -spec(ok_reply_fun(binary()) -> ok).
 ok_reply_fun(_Response) ->
+    ok.
+
+-spec(resolve_reply_fun(pid(), reference(), binary()) -> ok).
+resolve_reply_fun(Pid, Ref, Response) ->
+    Pid ! {reply, Ref, Response},
     ok.
 
 -spec(report_status([term()]) -> ok).
