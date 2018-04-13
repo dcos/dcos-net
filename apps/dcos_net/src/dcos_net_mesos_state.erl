@@ -303,7 +303,7 @@ add_task(TaskId, TaskPrev, TaskNew, State) ->
 -spec(add_task(task_id(), task(), state()) -> state()).
 add_task(TaskId, #{state := false} = Task, #state{
         tasks=T, waiting_tasks=TW}=State) ->
-    State0 = send_task(TaskId, Task, State),
+    State0 = notify(TaskId, Task, State),
     State0#state{
         tasks=mremove(TaskId, T),
         waiting_tasks=mremove(TaskId, TW)};
@@ -316,7 +316,7 @@ add_task(TaskId, Task, #state{tasks=T, waiting_tasks=TW}=State) ->
             #{framework := {id, _Id}} ->
                 {mput(TaskId, true, TW), State};
             _Task ->
-                St = send_task(TaskId, Task, State),
+                St = notify(TaskId, Task, State),
                 {mremove(TaskId, TW), St}
         end,
     State0#state{
@@ -567,10 +567,10 @@ handle_subscribe(Pid, Ref, State) ->
 handle_unsubscribe(Pid, #state{subs=Subs}=State) ->
     State#state{subs=maps:remove(Pid, Subs)}.
 
--spec(send_task(task_id(), task(), state()) -> state()).
-send_task(_TaskId, _Task, #state{subs=undefined}=State) ->
+-spec(notify(task_id(), task(), state()) -> state()).
+notify(_TaskId, _Task, #state{subs=undefined}=State) ->
     State;
-send_task(TaskId, Task, #state{subs=Subs, timeout=Timeout}=State) ->
+notify(TaskId, Task, #state{subs=Subs, timeout=Timeout}=State) ->
     maps:fold(fun (Pid, Ref, ok) ->
         Pid ! {task_updated, Ref, TaskId, Task},
         ok
