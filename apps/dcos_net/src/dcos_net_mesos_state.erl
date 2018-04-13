@@ -422,7 +422,8 @@ handle_port_mappings(PortMapping) ->
 
 -spec(handle_protocol(jiffy:object()) -> tcp | udp).
 handle_protocol(Obj) ->
-    case mget(<<"protocol">>, Obj) of
+    Protocol = mget(<<"protocol">>, Obj),
+    case cowboy_bstr:to_lower(Protocol) of
         <<"tcp">> -> tcp;
         <<"udp">> -> udp
     end.
