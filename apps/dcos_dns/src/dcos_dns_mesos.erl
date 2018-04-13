@@ -23,7 +23,6 @@
 -type task_id() :: dcos_net_mesos_state:task_id().
 
 -define(DCOS_DNS_TTL, 5).
--define(IS_RUNNING(TS), not is_boolean(TS)).
 
 -record(state, {
     ref :: reference(),
@@ -109,7 +108,7 @@ handle_task_updated(TaskId, Task, #state{tasks=Tasks}=State) ->
          Ops :: [riak_dt_orswot:orswot_op()]).
 task_updated(TaskId, Task, Tasks) ->
     TaskState = maps:get(state, Task),
-    case {?IS_RUNNING(TaskState), maps:is_key(TaskId, Tasks)} of
+    case {is_running(TaskState), maps:is_key(TaskId, Tasks)} of
         {Same, Same} ->
             {Tasks, []};
         {false, true} ->
@@ -124,7 +123,7 @@ task_updated(TaskId, Task, Tasks) ->
 -spec(task_records(#{task_id() => task()}) -> #{task_id() => [dns:dns_rr()]}).
 task_records(Tasks) ->
     maps:fold(fun (TaskId, #{state := TaskState} = Task, Acc) ->
-        case ?IS_RUNNING(TaskState) of
+        case is_running(TaskState) of
             true ->
                 TaskRecords = task_records(TaskId, Task),
                 maps:put(TaskId, TaskRecords, Acc);
@@ -164,6 +163,14 @@ task_autoip(#{name := Name, framework := Fwrk,
             false -> TaskIPs
         end
     ).
+
+-spec(is_running(dcos_net_mesos_state:task_state()) -> boolean()).
+is_running({running, _Healthy}) ->
+    true;
+is_running(running) ->
+    true;
+is_running(_TaskState) ->
+    false.
 
 -spec(is_port_mapping(dcos_net_mesos_state:task_port()) -> boolean()).
 is_port_mapping(#{host_port := _HPort}) ->
