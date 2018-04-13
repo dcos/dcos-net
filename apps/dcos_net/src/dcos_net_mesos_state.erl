@@ -529,9 +529,8 @@ handle_task_status(TaskStatus) ->
 -spec(subscribe(pid()) -> {ok, MonRef, Tasks} | {error, atom()}
     when MonRef :: reference(), Tasks :: #{task_id() => task()}).
 subscribe(Pid) ->
-    Self = self(),
     MonRef = erlang:monitor(process, Pid),
-    Pid ! {subscribe, Self, MonRef},
+    Pid ! {subscribe, self(), MonRef},
     receive
         {'DOWN', MonRef, process, Pid, Reason} ->
             {error, Reason};
