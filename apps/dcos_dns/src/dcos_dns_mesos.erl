@@ -212,6 +212,9 @@ master_records(ZoneName) ->
 
 -spec(leader_records(dns:dname()) -> dns:dns_rr()).
 leader_records(ZoneName) ->
+    % dcos-net connects only to local mesos,
+    % operator API works only on a leader mesos,
+    % so this node is the leader node
     IP = dcos_net_dist:nodeip(),
     dns_record(<<"leader.", ZoneName/binary>>, IP).
 
