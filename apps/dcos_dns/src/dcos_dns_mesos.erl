@@ -84,8 +84,8 @@ handle_init(State) ->
             MRef = start_masters_timer(),
             Tasks = task_records(MTasks),
             {ok, NewRRs, OldRRs} = push_tasks(Tasks),
-            lager:warning(
-                "~p reconds were added, ~p reconds were removed",
+            lager:notice(
+                "~p records were added, ~p records were removed",
                 [length(NewRRs), length(OldRRs)]),
             #state{ref=Ref, tasks=Tasks, masters_ref=MRef};
         {error, _Error} ->
