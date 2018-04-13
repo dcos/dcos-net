@@ -88,6 +88,10 @@ handle_init(State) ->
                 "~p records were added, ~p records were removed",
                 [length(NewRRs), length(OldRRs)]),
             #state{ref=Ref, tasks=Tasks, masters_ref=MRef};
+        {error, timeout} ->
+            exit(timeout);
+        {error, subscribed} ->
+            exit(subscribed);
         {error, _Error} ->
             self() ! init,
             timer:sleep(100),
