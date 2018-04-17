@@ -4,12 +4,12 @@ jobs:
     machine: true
     working_directory: '~/dcos-net'
     environment:
-      - OTP_VERSION: "20.2.2"
-      - OTP_DOWNLOAD_SHA256: "7614a06964fc5022ea4922603ca4bf1d2cc241f9bd6b7321314f510fd74c7304"
+      - OTP_VERSION: "20.3.2"
+      - OTP_DOWNLOAD_SHA256: "9809be52baa23d6fd18ee70b9a9b7c548e44f586db2f46ff5bfe66719cfab10a"
     steps:
       - checkout
       - restore_cache:
-          key: otp-build-20.2.2
+          key: otp-build-20.3.2
       - run:
           name: Building OTP
           command: |
@@ -31,7 +31,7 @@ jobs:
                 && ./configure \
                 && make -j$(getconf _NPROCESSORS_ONLN) )
       - save_cache:
-          key: otp-build-20.2.2
+          key: otp-build-20.3.2
           paths:
             - ~/src/otp
       - run:
