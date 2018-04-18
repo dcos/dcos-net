@@ -33,7 +33,7 @@ init([true]) ->
     Children1 = maybe_add_udp_servers(Children),
 
     sidejob:new_resource(
-        dcos_dns_handler_fsm_sj, sidejob_supervisor,
+        dcos_dns_handler_sj, sidejob_supervisor,
         dcos_dns_config:handler_limit()),
 
     %% The top level sup should never die.
