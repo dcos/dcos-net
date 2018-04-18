@@ -650,7 +650,7 @@ mfind(Keys, Map) ->
 
 -spec(handle_init([]) -> state() | []).
 handle_init(State0) ->
-    Timeout = application:get_env(dcos_net, mesos_reconnect_timeout, 500),
+    Timeout = application:get_env(dcos_net, mesos_reconnect_timeout, 2000),
     case start_stream() of
         {ok, State} ->
             State;
