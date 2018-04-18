@@ -8,3 +8,5 @@ RUN apt-get update && apt-get install -y \
  && dpkg -i libsodium18_1.0.13-1_amd64.deb \
  && dpkg -i libsodium-dev_1.0.13-1_amd64.deb \
  && rm libsodium18_1.0.13-1_amd64.deb libsodium-dev_1.0.13-1_amd64.deb
+
+CMD ["bash"]

@@ -3,7 +3,6 @@ VERSION         ?= $(shell git describe --tags)
 BASE_DIR         = $(shell pwd)
 ERLANG_BIN       = $(shell dirname $(shell which erl))
 REBAR            = $(shell pwd)/rebar3
-DOCKER_RUN       = $(shell pwd)/bin/docker.sh
 
 .PHONY: rel deps test
 
@@ -62,11 +61,29 @@ stage:
 ## Docker
 ##
 
+DOCKER_IMAGE_REV = $(shell git log -n 1 --pretty=format:%h -- ${BASE_DIR}/Dockerfile)
+DOCKER_IMAGE     = "${PACKAGE}:${DOCKER_IMAGE_REV}"
+BUILD_DIR        = "${BASE_DIR}/_build"
+
 docker-image:
-	@${DOCKER_RUN} true
+	@if [ -z "$(shell docker image ls -q ${DOCKER_IMAGE})" ]; then \
+	    echo "Building docker image..." >&2; \
+	    docker build -t ${DOCKER_IMAGE} ${DOCKER_DIR}; \
+	fi
 
-docker-%:
-	@${DOCKER_RUN} make $(subst docker-,,$@)
+docker-%: docker-image
+	@mkdir -p ${BUILD_DIR}
+	@docker run --rm -it --privileged \
+	    -v ${BASE_DIR}:/${PACKAGE} \
+	    -v ${BUILD_DIR}:/root \
+	    -w /${PACKAGE} \
+	    ${DCOS_NET_IMAGE} \
+	    make $(subst docker-,,$@)
 
-docker:
-	@${DOCKER_RUN} make all
+docker: docker-image
+	@mkdir -p ${BUILD_DIR}
+	@docker run --rm -it --privileged \
+	    -v ${BASE_DIR}:/${PACKAGE} \
+	    -v ${BUILD_DIR}:/root \
+	    -w /${PACKAGE} \
+	    ${DCOS_NET_IMAGE}
