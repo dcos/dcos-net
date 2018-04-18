@@ -37,7 +37,7 @@ init([true]) ->
         [?CHILD(dcos_dns_mesos) || IsMaster],
 
     sidejob:new_resource(
-        dcos_dns_handler_fsm_sj, sidejob_supervisor,
+        dcos_dns_handler_sj, sidejob_supervisor,
         dcos_dns_config:handler_limit()),
 
     %% The top level sup should never die.

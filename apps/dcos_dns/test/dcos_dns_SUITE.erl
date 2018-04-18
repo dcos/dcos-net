@@ -217,12 +217,13 @@ multiple_query_test(_Config) ->
 
 overload_test(_Config) ->
     try
-        ok = meck:new(dcos_dns_udp_server, [unstick, passthrough]),
-        ok = meck:expect(
-                dcos_dns_udp_server, do_reply,
-                fun (From, Data) ->
-                    timer:sleep(500),
-                    catch meck:passthrough([From, Data])
+        ok = meck:new(gen_udp, [unstick, passthrough]),
+        ok = meck:expect(gen_udp, send,
+                fun (Socket, IP, Port, Data) ->
+                    Timeout =
+                        case Port of 8053 -> 0; 62053 -> 0; Port -> 200 end,
+                    timer:sleep(Timeout),
+                    catch meck:passthrough([Socket, IP, Port, Data])
                 end),
         Pids = lists:map(fun spawn_link_resolve/1, lists:seq(0, 32)),
         Results = lists:map(fun (Pid) ->
@@ -230,13 +231,13 @@ overload_test(_Config) ->
                 {done, Pid, Result} ->
                     Result
             after
-                1000 ->
+                5000 ->
                     throw(timeout)
             end
         end, Pids),
         ?assertMatch([ok, timeout], lists:usort(Results))
     after
-        ok = meck:unload(dcos_dns_udp_server)
+        ok = meck:unload(gen_udp)
     end.
 
 spawn_link_resolve(_N) ->
