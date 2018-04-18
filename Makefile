@@ -68,7 +68,7 @@ BUILD_DIR        = "${BASE_DIR}/_build"
 docker-image:
 	@if [ -z "$(shell docker image ls -q ${DOCKER_IMAGE})" ]; then \
 	    echo "Building docker image..." >&2; \
-	    docker build -t ${DOCKER_IMAGE} ${DOCKER_DIR}; \
+	    docker build -t ${DOCKER_IMAGE} ${BASE_DIR}; \
 	fi
 
 docker-%: docker-image
@@ -77,7 +77,7 @@ docker-%: docker-image
 	    -v ${BASE_DIR}:/${PACKAGE} \
 	    -v ${BUILD_DIR}:/root \
 	    -w /${PACKAGE} \
-	    ${DCOS_NET_IMAGE} \
+	    ${DOCKER_IMAGE} \
 	    make $(subst docker-,,$@)
 
 docker: docker-image
@@ -86,4 +86,4 @@ docker: docker-image
 	    -v ${BASE_DIR}:/${PACKAGE} \
 	    -v ${BUILD_DIR}:/root \
 	    -w /${PACKAGE} \
-	    ${DCOS_NET_IMAGE}
+	    ${DOCKER_IMAGE}
