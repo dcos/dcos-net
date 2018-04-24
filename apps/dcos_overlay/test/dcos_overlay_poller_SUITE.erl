@@ -40,7 +40,7 @@ init_per_testcase(TestCaseName, Config) ->
     meck:expect(httpc, request, fun(get, _, _, _) ->
         Node = <<"master1@nohost">>,
         Data = dcos_overlay_SUITE:create_data(Node),
-        BinData = mesos_state_overlay_pb:encode_msg(Data),
+        BinData = jiffy:encode(Data),
         {ok, {{"HTTP/1.1", 200, "OK"}, [], BinData}}
     end),
     Config.

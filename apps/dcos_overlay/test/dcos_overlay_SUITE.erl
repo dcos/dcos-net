@@ -24,7 +24,6 @@
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
--include_lib("mesos_state/include/mesos_state_overlay_pb.hrl").
 
 -define(AGENT_COUNT, 3).
 -define(MASTER_COUNT, 1).
@@ -167,7 +166,7 @@ meck_httpc_request(get, {_, Headers}, _, [{sync, false}]) ->
     [Node, _] = string:split(UserAgent, " "),
     io:format(user, "Node: ~p", [Node]),
     Data = ?MODULE:create_data(list_to_binary(Node)),
-    BinData = mesos_state_overlay_pb:encode_msg(Data),
+    BinData = jiffy:encode(Data),
     Ref = make_ref(),
     Response = {{"HTTP/1.1", 200, "OK"}, [], BinData},
     self() ! {http, {Ref, Response}},
@@ -296,34 +295,34 @@ get_node_data(NodeNumber) ->
 create_data(Agent) ->
     Node = integer_to_binary(parse_node(Agent)),
     HexNode = integer_to_binary(binary_to_integer(Node, 16)),
-    #mesos_state_agentinfo{
-        ip = <<"10.0.0.", Node/binary>>,
-        overlays = [
-            #mesos_state_agentoverlayinfo{
-                info = #mesos_state_overlayinfo{
-                    name = <<"dcos">>,
-                    prefix = 24,
-                    subnet = <<"9.0.0.0/8">>
+    #{
+        ip => <<"10.0.0.", Node/binary>>,
+        overlays => [
+            #{
+                info => #{
+                    name => <<"dcos">>,
+                    prefix => 24,
+                    subnet => <<"9.0.0.0/8">>
                 },
-                subnet = <<"9.0.", Node/binary, ".0/24">>,
-                backend = #mesos_state_backendinfo{
-                    vxlan = #mesos_state_vxlaninfo{
-                        vni = 1024,
-                        vtep_ip = <<"44.128.0.", Node/binary, "/20">>,
-                        vtep_mac = <<"70:b3:d5:80:00:", HexNode/binary>>,
-                        vtep_name = <<"vtep1024">>
+                subnet => <<"9.0.", Node/binary, ".0/24">>,
+                backend => #{
+                    vxlan => #{
+                        vni => 1024,
+                        vtep_ip => <<"44.128.0.", Node/binary, "/20">>,
+                        vtep_mac => <<"70:b3:d5:80:00:", HexNode/binary>>,
+                        vtep_name => <<"vtep1024">>
                     }
                 },
-                mesos_bridge = #mesos_state_bridgeinfo{
-                    name = <<"m-dcos">>,
-                    ip = <<"9.0.", Node/binary, ".0/25">>
+                mesos_bridge => #{
+                    name => <<"m-dcos">>,
+                    ip => <<"9.0.", Node/binary, ".0/25">>
                 },
-                docker_bridge = #mesos_state_bridgeinfo{
-                    name = <<"d-dcos">>,
-                    ip = <<"9.0.", Node/binary, ".128/25">>
+                docker_bridge => #{
+                    name => <<"d-dcos">>,
+                    ip => <<"9.0.", Node/binary, ".128/25">>
                 },
-                state = #'mesos_state_agentoverlayinfo.state'{
-                    status = 'STATUS_OK'
+                state => #{
+                    status => <<"STATUS_OK">>
                 }
             }
         ]
