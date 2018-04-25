@@ -164,10 +164,12 @@ maybe_create_vtep(#{<<"backend">> := Backend}, #state{netlink = Pid}) ->
        <<"vtep_name">> := VTEPName
     } = VXLan,
     VTEPIP6 = mget(<<"vtep_ip6">>, VXLan),
+    VTEPMTU = mget(<<"vtep_mtu">>, VXLan),
     VTEPNameStr = binary_to_list(VTEPName),
     ParsedVTEPMAC = list_to_tuple(parse_vtep_mac(VTEPMAC)),
     {ParsedVTEPIP, PrefixLen} = parse_subnet(VTEPIP),
-    dcos_overlay_netlink:iplink_add(Pid, VTEPNameStr, "vxlan", VNI, 64000),
+    VTEPAttr = [{mtu, VTEPMTU} || is_integer(VTEPMTU)],
+    dcos_overlay_netlink:iplink_add(Pid, VTEPNameStr, "vxlan", VNI, 64000, VTEPAttr),
     {ok, _} = dcos_overlay_netlink:iplink_set(Pid, ParsedVTEPMAC, VTEPNameStr),
     {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, inet, ParsedVTEPIP, PrefixLen, VTEPNameStr),
     case VTEPIP6 of
