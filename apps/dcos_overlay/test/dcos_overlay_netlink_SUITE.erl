@@ -89,7 +89,7 @@ mac_ntoa(InMac) ->
 test_ip_cmds_1(Config) ->
     %% Test1: add ip link
     Pid = ?config(pid, Config),
-    {ok, _} = dcos_overlay_netlink:iplink_add(Pid, ?IFNAME, "vxlan", 1026, 64000),
+    {ok, _} = dcos_overlay_netlink:iplink_add(Pid, ?IFNAME, "vxlan", 1026, 64000, []),
     Result1 = os:cmd(lists:flatten(io_lib:format("ip link show ~s", [?IFNAME]))),
     io:format("Result1 ~p~n", [Result1]),
     true = 0 =/= string:str(Result1, ?IFNAME).

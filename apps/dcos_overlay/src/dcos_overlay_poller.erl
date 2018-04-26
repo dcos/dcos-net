@@ -32,7 +32,6 @@
 -define(MAX_POLL_PERIOD, 120000). %% 120 secs
 
 -include_lib("stdlib/include/ms_transform.hrl").
--include_lib("mesos_state/include/mesos_state_overlay_pb.hrl").
 -include_lib("gen_netlink/include/netlink.hrl").
 
 -define(TABLE, 42).
@@ -114,7 +113,7 @@ update_poll_period(_) ->
     ?MAX_POLL_PERIOD.
 
 poll(State0) ->
-    Headers = [{"Accept", "application/x-protobuf"}],
+    Headers = [{"Accept", "application/json"}],
     Response = dcos_net_mesos:request("/overlay-agent/overlay", Headers),
     handle_response(State0, Response).
 
@@ -126,12 +125,12 @@ handle_response(_State0, {ok, {StatusLine, _Headers, _Body}}) ->
     {error, StatusLine}.
 
 parse_response(State0 = #state{known_overlays = KnownOverlays}, Body) ->
-    AgentInfo = #mesos_state_agentinfo{} = mesos_state_overlay_pb:decode_msg(Body, mesos_state_agentinfo),
-    #mesos_state_agentinfo{ip = IP0} = AgentInfo,
+    AgentInfo = jiffy:decode(Body, [return_maps]),
+    IP0 = maps:get(<<"ip">>, AgentInfo),
     IP1 = process_ip(IP0),
     State1 = State0#state{ip = IP1},
-    Overlays = ordsets:from_list(AgentInfo#mesos_state_agentinfo.overlays),
-    NewOverlays = ordsets:subtract(Overlays, KnownOverlays),
+    Overlays = maps:get(<<"overlays">>, AgentInfo),
+    NewOverlays = Overlays -- KnownOverlays,
     State2 = lists:foldl(fun add_overlay/2, State1, NewOverlays),
     {ok, State2}.
 
@@ -141,15 +140,11 @@ process_ip(IPBin0) ->
     {ok, IP} = inet:parse_ipv4_address(IPStr),
     IP.
 
-
-add_overlay(
-  Overlay = #mesos_state_agentoverlayinfo{state = #'mesos_state_agentoverlayinfo.state'{status = 'STATUS_OK'}},
-  State0 = #state{known_overlays = KnownOverlays0}) ->
-    KnownOverlays1 = ordsets:add_element(Overlay, KnownOverlays0),
-    State1 = State0#state{known_overlays = KnownOverlays1},
-    config_overlay(Overlay, State1),
-    maybe_add_overlay_to_lashup(Overlay, State1),
-    State1;
+add_overlay(Overlay=#{<<"state">> := #{<<"status">> := <<"STATUS_OK">>}},
+            State=#state{known_overlays=KnownOverlays}) ->
+    config_overlay(Overlay, State),
+    maybe_add_overlay_to_lashup(Overlay, State),
+    State#state{known_overlays=[Overlay | KnownOverlays]};
 add_overlay(Overlay, State) ->
     lager:warning("Overlay not okay: ~p", [Overlay]),
     State.
@@ -158,20 +153,23 @@ config_overlay(Overlay, State) ->
     maybe_create_vtep(Overlay, State),
     maybe_add_ip_rule(Overlay, State).
 
-maybe_create_vtep(_Overlay = #mesos_state_agentoverlayinfo{backend = Backend},
-  #state{netlink = Pid}) ->
-    #mesos_state_backendinfo{vxlan = VXLan} = Backend,
-    #mesos_state_vxlaninfo{
-        vni = VNI,
-        vtep_ip = VTEPIP,
-        vtep_ip6 = VTEPIP6,
-        vtep_mac = VTEPMAC,
-        vtep_name = VTEPName
+mget(Key, Map) ->
+    maps:get(Key, Map, undefined).
+
+maybe_create_vtep(#{<<"backend">> := Backend}, #state{netlink = Pid}) ->
+    #{<<"vxlan">> := VXLan} = Backend,
+    #{ <<"vni">> := VNI,
+       <<"vtep_ip">> := VTEPIP,
+       <<"vtep_mac">> := VTEPMAC,
+       <<"vtep_name">> := VTEPName
     } = VXLan,
+    VTEPIP6 = mget(<<"vtep_ip6">>, VXLan),
+    VTEPMTU = mget(<<"vtep_mtu">>, VXLan),
     VTEPNameStr = binary_to_list(VTEPName),
     ParsedVTEPMAC = list_to_tuple(parse_vtep_mac(VTEPMAC)),
     {ParsedVTEPIP, PrefixLen} = parse_subnet(VTEPIP),
-    dcos_overlay_netlink:iplink_add(Pid, VTEPNameStr, "vxlan", VNI, 64000),
+    VTEPAttr = [{mtu, VTEPMTU} || is_integer(VTEPMTU)],
+    dcos_overlay_netlink:iplink_add(Pid, VTEPNameStr, "vxlan", VNI, 64000, VTEPAttr),
     {ok, _} = dcos_overlay_netlink:iplink_set(Pid, ParsedVTEPMAC, VTEPNameStr),
     {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, inet, ParsedVTEPIP, PrefixLen, VTEPNameStr),
     case VTEPIP6 of
@@ -195,17 +193,7 @@ try_enable_ipv6(IfName) ->
             ExitCode
     end.
 
-maybe_add_ip_rule(Overlay, #state{netlink = Pid}) ->
-    #mesos_state_agentoverlayinfo{
-      info = #mesos_state_overlayinfo{
-        subnet = Subnet
-      }
-    } = Overlay,
-    maybe_add_ip_rule2(Pid, Subnet).
-
-maybe_add_ip_rule2(_, undefined) ->
-    ok;
-maybe_add_ip_rule2(Pid, Subnet) ->
+maybe_add_ip_rule(#{<<"info">> := #{<<"subnet">> := Subnet}}, #state{netlink = Pid}) ->
     {ParsedSubnetIP, PrefixLen} = parse_subnet(Subnet),
     {ok, Rules} = dcos_overlay_netlink:iprule_show(Pid, inet),
     Rule = dcos_overlay_netlink:make_iprule(inet, ParsedSubnetIP, PrefixLen, ?TABLE),
@@ -214,23 +202,20 @@ maybe_add_ip_rule2(Pid, Subnet) ->
             {ok, _} = dcos_overlay_netlink:iprule_add(Pid, inet, ParsedSubnetIP, PrefixLen, ?TABLE);
         _ ->
             ok
-    end.
+    end;
+maybe_add_ip_rule(_Overlay, _State) ->
+    ok.
 
 maybe_add_overlay_to_lashup(Overlay, State) ->
-    #mesos_state_agentoverlayinfo{
-      backend = #mesos_state_backendinfo{vxlan = VXLan},
-      subnet = AgentSubnet,
-      subnet6 = AgentSubnet6,
-      info = #mesos_state_overlayinfo{
-        subnet = OverlaySubnet,
-        subnet6 = OverlaySubnet6
-      }
-    } = Overlay,
-    #mesos_state_vxlaninfo{
-        vtep_ip = VTEPIPStr,
-        vtep_ip6 = VTEPIP6Str,
-        vtep_mac = VTEPMac
-    } = VXLan,
+    #{<<"info">> := OverlayInfo} = Overlay,
+    #{<<"backend">> := #{<<"vxlan">> := VXLan}} = Overlay,
+    AgentSubnet = mget(<<"subnet">>, Overlay),
+    AgentSubnet6 = mget(<<"subnet6">>, Overlay),
+    OverlaySubnet = mget(<<"subnet">>, OverlayInfo),
+    OverlaySubnet6 = mget(<<"subnet6">>, OverlayInfo),
+    VTEPIPStr = mget(<<"vtep_ip">>, VXLan),
+    VTEPIP6Str = mget(<<"vtep_ip6">>, VXLan),
+    VTEPMac = mget(<<"vtep_mac">>, VXLan),
     maybe_add_overlay_to_lashup(VTEPIPStr, VTEPMac, AgentSubnet, OverlaySubnet, State),
     maybe_add_overlay_to_lashup(VTEPIP6Str, VTEPMac, AgentSubnet6, OverlaySubnet6, State).
 
@@ -290,14 +275,3 @@ parse_vtep_mac(MAC) ->
             binary_to_integer(Component, 16)
         end,
         MACComponents).
-
--ifdef(TEST).
-
-deserialize_overlay_test() ->
-    DataDir = code:priv_dir(dcos_overlay),
-    OverlayFilename = filename:join(DataDir, "overlay.bindata.pb"),
-    {ok, OverlayData} = file:read_file(OverlayFilename),
-    Msg = mesos_state_overlay_pb:decode_msg(OverlayData, mesos_state_agentinfo),
-    ?assertEqual(<<"10.0.0.160:5051">>, Msg#mesos_state_agentinfo.ip).
-
--endif.

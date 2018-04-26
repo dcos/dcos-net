@@ -13,10 +13,7 @@
 %% API
 -export([start_link/1, stop/1, maybe_configure/2]).
 
--include_lib("mesos_state/include/mesos_state_overlay_pb.hrl").
-
 -type config() :: #{key := term(), value := term()}.
--type mesos_state_agentoverlayinfo() :: #mesos_state_agentoverlayinfo{}.
 
 -spec(start_link(config()) -> pid()).
 start_link(Config) ->
@@ -43,14 +40,11 @@ maybe_configure(Config, MyPid) ->
     lager:debug("Done applying config ~p for overlays ~p~n", [Config, KnownOverlays]),
     reply(MyPid, {dcos_overlay_configure, applied_config, Config}).
 
--spec(try_configure_overlay(Pid :: pid(), config(), mesos_state_agentoverlayinfo()) -> term()).
+-spec(try_configure_overlay(Pid :: pid(), config(), jiffy:json_term()) -> term()).
 try_configure_overlay(Pid, Config, Overlay) ->
-    #mesos_state_agentoverlayinfo{
-        info = #mesos_state_overlayinfo{
-            subnet = Subnet,
-            subnet6 = Subnet6
-        }
-    } = Overlay,
+    #{<<"info">> := OverlayInfo} = Overlay,
+    Subnet = maps:get(<<"subnet">>, OverlayInfo, undefined),
+    Subnet6 = maps:get(<<"subnet6">>, OverlayInfo, undefined),
     try_configure_overlay(Pid, Config, Overlay, Subnet),
     try_configure_overlay(Pid, Config, Overlay, Subnet6).
 
@@ -90,13 +84,7 @@ maybe_configure_overlay_entry(Pid, Overlay, {{VTEPIPPrefix, riak_dt_map}, Value}
     end.
 
 configure_overlay_entry(Pid, Overlay, _VTEPIPPrefix = {VTEPIP, _PrefixLen}, LashupValue) ->
-    #mesos_state_agentoverlayinfo{
-        backend = #mesos_state_backendinfo{
-            vxlan = #mesos_state_vxlaninfo{
-                vtep_name = VTEPName
-            }
-        }
-    } = Overlay,
+    #{<<"backend">> := #{<<"vxlan">> := #{<<"vtep_name">> := VTEPName}}} = Overlay,
     {_, MAC} = lists:keyfind({mac, riak_dt_lwwreg}, 1, LashupValue),
     {_, AgentIP} = lists:keyfind({agent_ip, riak_dt_lwwreg}, 1, LashupValue),
     {_, {SubnetIP, SubnetPrefixLen}} = lists:keyfind({subnet, riak_dt_lwwreg}, 1, LashupValue),

@@ -6,7 +6,7 @@
 
 %% Application callbacks
 -export([start_link/0, stop/1, ipneigh_replace/5, iproute_replace/6, bridge_fdb_replace/4,
-        iplink_show/2, iplink_add/5, iplink_set/3, iprule_show/2,
+        iplink_show/2, iplink_add/6, iplink_set/3, iprule_show/2,
         iprule_add/5, make_iprule/4, match_iprules/2, is_iprule_present/2,
         ipaddr_replace/5, if_nametoindex/1]).
 
@@ -81,20 +81,20 @@ iplink_show(Pid, Ifname) ->
   netlink_request(Pid, getlink, [], Link).
 
 %% iplink_add(Pid, "vtep1024", "vxlan", 1024, 64000)
-iplink_add(Pid, Ifname, Kind, Id, DstPort) ->
+iplink_add(Pid, Ifname, Kind, Id, DstPort, Attr) ->
   Vxlan = [{id, Id}, {ttl, 0}, {tos, 0}, {learning, 1}, {proxy, 0},
            {rsc, 0}, {l2miss, 0}, {l3miss, 0}, {udp_csum, 0},
            {udp_zero_csum6_tx, 0}, {udp_zero_csum6_rx, 0},
            {remcsum_tx, 0}, {remcsum_rx, 0}, {port, DstPort}],
   LinkInfo = [{kind, Kind}, {data, Vxlan}],
-  Attr = [{ifname, Ifname}, {linkinfo, LinkInfo}],
+  Attr0 = [{ifname, Ifname}, {linkinfo, LinkInfo}] ++ Attr,
   Link = {
     _Family = inet,
     _Type = arphrd_netrom,
     _Ifindex = 0,
     _Flags = [],
     _Change = [],
-    Attr},
+    Attr0},
   netlink_request(Pid, newlink, [create, excl], Link).
 
 %% iplink_set(Pid, {16#70,16#b3,16#d5,16#80,16#00,16#01}, "vtep1024").
