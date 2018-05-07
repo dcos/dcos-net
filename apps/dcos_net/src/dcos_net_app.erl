@@ -24,6 +24,7 @@
 %%====================================================================
 
 start(_StartType, _StartArgs) ->
+    load_environment_variables(),
     load_config_files(),
     load_plugins(),
     dcos_net_sup:start_link().
@@ -38,6 +39,25 @@ stop(_State) ->
 -spec(is_master() -> boolean()).
 is_master() ->
     application:get_env(dcos_net, is_master, false).
+
+load_environment_variables() ->
+    lists:foreach(fun load_environment_variables/1, [
+        {"STATSD_UDP_HOST", dcos_net, statsd_udp_host, string},
+        {"STATSD_UDP_PORT", dcos_net, statsd_udp_port, integer}
+    ]).
+
+load_environment_variables({Key, App, AppKey, Type}) ->
+    case os:getenv(Key) of
+        false -> ok;
+        Value ->
+            Value0 = var_to_value(Value, Type),
+            application:set_env(App, AppKey, Value0)
+    end.
+
+var_to_value(Value, string) ->
+    Value;
+var_to_value(Value, integer) ->
+    list_to_integer(Value).
 
 load_config_files() ->
     load_config_files(undefined).
