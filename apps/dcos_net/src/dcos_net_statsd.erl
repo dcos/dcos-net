@@ -10,9 +10,13 @@
     handle_info/2, terminate/2, code_change/3]).
 
 -type metric() :: {iodata(), non_neg_integer() | float()}.
+-type swt() :: [{pos_integer(), integer(), integer()}].
+-type sysmon() :: #{}.
 
 -record(state, {
-    tref :: reference()
+    tref :: reference(),
+    sysmon :: sysmon(),
+    swt :: swt()
 }).
 
 -spec(start_link() -> {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
@@ -25,7 +29,9 @@ start_link() ->
 
 init([]) ->
     TRef = start_push_timer(),
-    {ok, #state{tref=TRef}}.
+    SWT = enable_scheduler_wall_time(),
+    SysMon = enable_system_monitor(),
+    {ok, #state{tref=TRef, sysmon=SysMon, swt=SWT}}.
 
 handle_call(_Request, _From, State) ->
     {noreply, State}.
@@ -33,11 +39,16 @@ handle_call(_Request, _From, State) ->
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-handle_info({timeout, TRef0, push},
-        #state{tref=TRef0}=State) ->
-    push_metrics(),
+handle_info({timeout, TRef0, push}, #state{tref=TRef0,
+        sysmon=SysMon, swt=SWTp}=State) ->
+    SWTn = scheduler_wall_time(),
+    ok = push_metrics({SWTp, SWTn}, SysMon),
     TRef = start_push_timer(),
-    {noreply, State#state{tref=TRef}};
+    {noreply, State#state{tref=TRef, sysmon=#{}, swt=SWTn}};
+handle_info({monitor, Pid, Type, Info},
+        #state{sysmon=SysMon}=State) when Pid =:= self() ->
+    SysMon0 = handle_system_monitor(Type, Info, SysMon),
+    {noreply, State#state{sysmon=SysMon0}};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -61,12 +72,13 @@ start_push_timer() ->
 %%% Metrics functions
 %%%===================================================================
 
--spec(push_metrics() -> ok).
-push_metrics() ->
+-spec(push_metrics({swt(), swt()}, sysmon()) -> ok).
+push_metrics(SWTs, SysMon) ->
     MetricsInfo = folsom_metrics:get_metrics_info(),
     MetricsInfo0 = filter_metrics(MetricsInfo),
     Metrics = expand_metrics(MetricsInfo0),
-    send_metrics(Metrics).
+    VmMetrics = expand_vm_metrics(SWTs, SysMon),
+    send_metrics(VmMetrics ++ Metrics).
 
 -spec(filter_metrics(MetricsInfo) -> MetricsInfo
     when MetricsInfo :: [{Name :: term(), Opts :: list()}]).
@@ -176,3 +188,117 @@ hist_statistics(Values) ->
 percentile(Values, Size, Percentile) ->
     Element = round(Percentile * Size),
     lists:nth(Element, Values).
+
+%%%===================================================================
+%%% VM functions
+%%%===================================================================
+
+-define(STATKEYS, [
+    context_switches, garbage_collection, io,
+    reductions, runtime, total_active_tasks_all,
+    total_run_queue_lengths_all
+]).
+
+-define(SYSKEYS, [port_count, process_count]).
+
+-spec(expand_vm_metrics({swt(), swt()}, sysmon()) -> [metric()]).
+expand_vm_metrics(SWTs, SysMon) ->
+    [{"vm.nodes", length(nodes())}] ++
+    lists:flatmap(fun expand_vm_stat/1, ?STATKEYS) ++
+    lists:flatmap(fun expand_vm_sysinfo/1, ?SYSKEYS) ++
+    lists:map(fun expand_vm_memory/1, erlang:memory()) ++
+    expand_vm_utilization(SWTs) ++
+    expand_vm_sysmon(SysMon).
+
+-spec(expand_vm_stat(atom()) -> [metric()]).
+expand_vm_stat(Key) ->
+    Stat = erlang:statistics(Key),
+    expand_vm_stat(Key, Stat).
+
+-spec(expand_vm_stat(atom(), term()) -> [metric()]).
+expand_vm_stat(context_switches, {CxtSwitches, 0}) ->
+    [{"vm.context_switches", CxtSwitches}];
+expand_vm_stat(garbage_collection, {Calls, Words, 0}) ->
+    [{"vm.gc.calls", Calls}, {"vm.gc.words", Words}];
+expand_vm_stat(io, {{input, Input}, {output, Output}}) ->
+    [{"vm.io.input", Input}, {"vm.io.output", Output}];
+expand_vm_stat(reductions, {N, _SinceLastCall}) ->
+    [{"vm.reductions", N}];
+expand_vm_stat(runtime, {N, _SinceLastCall}) ->
+    [{"vm.runtime", N}];
+expand_vm_stat(total_active_tasks_all, N) ->
+    [{"vm.tasks.active", N}];
+expand_vm_stat(total_run_queue_lengths_all, N) ->
+    [{"vm.tasks.queue", N}].
+
+-spec(expand_vm_sysinfo(atom()) -> [metric()]).
+expand_vm_sysinfo(Key) ->
+    Info = erlang:system_info(Key),
+    expand_vm_sysinfo(Key, Info).
+
+-spec(expand_vm_sysinfo(atom(), term()) -> [metric()]).
+expand_vm_sysinfo(port_count, N) ->
+    [{"vm.ports", N}];
+expand_vm_sysinfo(process_count, N) ->
+    [{"vm.processes", N}].
+
+-spec(expand_vm_memory({atom(), non_neg_integer()}) -> metric()).
+expand_vm_memory({K, N}) ->
+    {to_name({vm, memory}, K), N}.
+
+-spec(expand_vm_utilization({swt(), swt()}) -> [metric()]).
+expand_vm_utilization({SWTp, SWTn}) ->
+    {Metrics, A, T} =
+        lists:foldl(fun ({{I, A0, T0}, {I, A1, T1}}, {Mc, Ac, Tc}) ->
+            A = A1 - A0,
+            T = T1 - T0,
+            M = {["vm.utilization.scheduler.", to_bin(I)], A / T},
+            {[M | Mc], Ac + A, Tc + T}
+        end, {[], 0, 0}, lists:zip(SWTp, SWTn)),
+    [{"vm.utilization.total", A / T} | Metrics].
+
+-spec(enable_scheduler_wall_time() -> swt()).
+enable_scheduler_wall_time() ->
+    _ = erlang:system_flag(scheduler_wall_time, true),
+    scheduler_wall_time().
+
+-spec(scheduler_wall_time() -> swt()).
+scheduler_wall_time() ->
+    N = erlang:system_info(schedulers),
+    SWT = lists:keysort(1, erlang:statistics(scheduler_wall_time)),
+    lists:takewhile(fun ({I, _A, _T}) -> I =< N end, SWT).
+
+%%%===================================================================
+%%% System monitor functions
+%%%===================================================================
+
+-spec(enable_system_monitor() -> sysmon()).
+enable_system_monitor() ->
+    erlang:system_monitor(self(), [
+        busy_port, busy_dist_port,
+        {long_gc, application:get_env(dcos_net, long_gc_limit, 50)},
+        {long_schedule, application:get_env(dcos_net, long_gc_limit, 50)}
+    ]),
+    #{}.
+
+-spec(handle_system_monitor(atom(), term(), sysmon()) -> sysmon()).
+handle_system_monitor(Type, _Port, SysMon)
+        when Type =:= busy_port;
+             Type =:= busy_dist_port ->
+    N = maps:get(Type, SysMon, 0),
+    SysMon#{Type => N + 1};
+handle_system_monitor(Type, Info, SysMon)
+        when Type =:= long_gc;
+             Type =:= long_schedule ->
+    N = maps:get(Type, SysMon, 0),
+    case lists:keyfind(timeout, 1, Info) of
+        false -> SysMon;
+        {timeout, Timeout} ->
+            SysMon#{Type => erlang:max(Timeout, N)}
+    end.
+
+-spec(expand_vm_sysmon(sysmon()) -> [metric()]).
+expand_vm_sysmon(SysMon) ->
+    maps:fold(fun (Key, Value, Acc) ->
+        [{to_name({vm, sysmon, Key}), Value} | Acc]
+    end, [], SysMon).
