@@ -36,14 +36,10 @@ All makefile targets with `docker-` prefix will build development image with all
 dependencies and run rebar3 commands in that image on the host directory.
 
 To check your dcos-net build on DC/OS you can use DC/OS on Docker a.k.a.
-[dcos-docker](https://github.com/dcos/dcos-docker). To build and run dcos-net on
-dcos-docker please use [`bin/dev.sh`](bin/dev.sh) script. Please make sure that
+[dcos-docker](https://github.com/dcos/dcos-docker). To build and run dcos-net in dev
+mode on dcos-docker just run `make dcos-docker-dev`. Please make sure that
 `CUSTOM_VOLUMES` variable from `make-config.mk` contains path to dcos-net
-directory and uses `rw` mount option, e.g.
-
-```
-CUSTOM_VOLUMES := -v $(HOME):$(HOME):rw
-```
+directory and uses `rw` mount option, e.g. `-v $(HOME)/dcos-net:$(HOME)/dcos-net:rw`.
 
 ### Dependencies
 
