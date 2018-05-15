@@ -10,7 +10,8 @@
 -export([upstreams_from_questions/1]).
 
 %% @doc Resolvers based on a set of "questions"
--spec(upstreams_from_questions(dns:questions()) -> [upstream()] | internal).
+-spec(upstreams_from_questions(dns:questions()) ->
+    {[dns:label()], [upstream()]} | internal).
 upstreams_from_questions([#dns_query{name=Name}]) ->
     Labels = dcos_dns_app:parse_upstream_name(Name),
     find_upstream(Labels);
@@ -37,9 +38,10 @@ default_resolvers() ->
     lists:map(fun validate_upstream/1, Resolvers).
 
 %% @private
--spec(find_upstream(Labels :: [binary()]) -> [upstream()] | internal).
+-spec(find_upstream(Labels :: [binary()]) ->
+    {[dns:label()], [upstream()]} | internal).
 find_upstream([<<"mesos">>|_]) ->
-    dcos_dns_config:mesos_resolvers();
+    {[<<"mesos">>], dcos_dns_config:mesos_resolvers()};
 find_upstream([<<"localhost">>|_]) ->
     internal;
 find_upstream([<<"zk">>|_]) ->
@@ -54,26 +56,27 @@ find_upstream([<<"directory">>, <<"dcos">>|_]) ->
     internal;
 find_upstream(Labels) ->
     case find_custom_upstream(Labels) of
-        [] ->
-            default_resolvers();
-        Resolvers ->
-            lager:debug("resolving ~p with custom upstream: ~p", [Labels, Resolvers]),
-            Resolvers
+        {[], []} ->
+            {[], default_resolvers()};
+        Result ->
+            Result
     end.
 
--spec(find_custom_upstream(Labels :: [binary()]) -> [upstream()]).
+-spec(find_custom_upstream(Labels :: [binary()]) ->
+    {[dns:label()], [upstream()]}).
 find_custom_upstream(QueryLabels) ->
     ForwardZones = dcos_dns_config:forward_zones(),
     UpstreamFilter = upstream_filter_fun(QueryLabels),
-    maps:fold(UpstreamFilter, [], ForwardZones).
+    maps:fold(UpstreamFilter, {[], []}, ForwardZones).
 
 -spec(upstream_filter_fun([dns:labels()]) ->
-    fun(([dns:labels()], upstream(), [upstream()]) -> [upstream()])).
+    fun(([dns:labels()], upstream(), [upstream()]) ->
+        {[dns:label()], [upstream()]})).
 upstream_filter_fun(QueryLabels) ->
     fun(Labels, Upstream, Acc) ->
         case lists:prefix(Labels, QueryLabels) of
             true ->
-                Upstream;
+                {Labels, Upstream};
             false ->
                 Acc
         end

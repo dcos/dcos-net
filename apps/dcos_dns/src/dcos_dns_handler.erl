@@ -8,7 +8,8 @@
 %% API
 -export([
     start/3,
-    resolve/3
+    resolve/3,
+    init_metrics/0
 ]).
 
 %% Private functions
@@ -16,8 +17,7 @@
 
 -export_type([reply_fun/0, protocol/0]).
 
--type reply_fun() :: fun ((binary()) -> ok | {error, term()})
-                   | {fun ((...) -> ok | {error, term()}), [term()]}.
+-type reply_fun() :: {fun ((...) -> ok | {error, term()}), [term()]}.
 -type protocol() :: udp | tcp.
 
 -spec(start(protocol(), binary(), reply_fun()) ->
@@ -66,30 +66,32 @@ start_link(Protocol, Request, Fun) ->
 -spec(init(pid(), protocol(), binary(), reply_fun()) -> ok).
 init(Parent, Protocol, Request, Fun) ->
     proc_lib:init_ack(Parent, {ok, self()}),
+    Begin = erlang:monotonic_time(millisecond),
     DNSMessage = #dns_message{} = dns:decode_message(Request),
     Questions = DNSMessage#dns_message.questions,
     case dcos_dns_router:upstreams_from_questions(Questions) of
-        [] ->
-            report_status([?APP, no_upstreams_available]),
-            Response = failed_msg(Protocol, DNSMessage),
-            ok = reply(Fun, Response);
         internal ->
-            Response = internal_resolve(Protocol, DNSMessage),
-            ok = reply(Fun, Response);
-        Upstreams ->
+            notify(internal, requests),
+            try
+                Response = internal_resolve(Protocol, DNSMessage),
+                ok = reply(Fun, Response)
+            after
+                notify_response_ms(internal, Begin)
+            end;
+        {Labels, Upstreams} ->
+            notify(Labels, requests),
+            FailMsg = failed_msg(Protocol, DNSMessage),
             Upstreams0 = take_upstreams(Upstreams),
-            resolve(Protocol, Upstreams0, Request, Fun)
+            resolve(Labels, Begin, Protocol, Upstreams0, Request, FailMsg, Fun)
     end.
 
 -spec(reply(reply_fun(), binary()) -> ok | {error, term()}).
 reply({Fun, Args}, Response) ->
-    apply(Fun, Args ++ [Response]);
-reply(Fun, Response) ->
-    Fun(Response).
+    apply(Fun, Args ++ [Response]).
 
--spec(ok_reply_fun(binary()) -> ok).
-ok_reply_fun(_Response) ->
-    ok.
+-spec(skip_reply_fun(binary()) -> {error, skip}).
+skip_reply_fun(_Response) ->
+    {error, skip}.
 
 -spec(resolve_reply_fun(pid(), reference(), binary()) -> ok).
 resolve_reply_fun(Pid, Ref, Response) ->
@@ -111,39 +113,57 @@ internal_resolve(Protocol, DNSMessage) ->
     Response = erldns_handler:do_handle(DNSMessage, ?LOCALHOST),
     encode_message(Protocol, Response).
 
--spec(resolve(protocol(), [upstream()], binary(), reply_fun()) -> ok).
-resolve(Protocol, Upstreams, Request, Fun) ->
+-spec(resolve([dns:label()], Begin :: integer(),
+              protocol(), [upstream()],
+              Request :: binary(), FailMsg :: binary(),
+              reply_fun()) -> ok).
+resolve(Tag, Begin, _Protocol, [], _Request, FailMsg, Fun) ->
+    notify(Tag, failures),
+    report_status([?APP, no_upstreams_available]),
+    ok = reply(Fun, FailMsg),
+    notify_response_ms(Tag, Begin);
+resolve(Tag, Begin, Protocol, Upstreams, Request, FailMsg, Fun) ->
     Workers =
-        lists:map(fun (Upstream) ->
+        lists:foldl(fun (Upstream, Acc) ->
             Pid = start_worker(Protocol, Upstream, Request),
             MonRef = monitor(process, Pid),
-            {Upstream, Pid, MonRef}
-        end, Upstreams),
-    resolve_loop(Workers, Fun).
+            Acc#{Pid => {Upstream, MonRef}}
+        end, #{}, Upstreams),
+    resolve_loop(Tag, Begin, Workers, FailMsg, Fun).
 
--spec(resolve_loop([{upstream(), pid(), reference()}], reply_fun()) -> ok).
-resolve_loop([], _Fun) ->
-    ok;
-resolve_loop(Workers, Fun) ->
+-spec(resolve_loop(Tag, Begin, Workers, FailMsg, reply_fun()) -> ok
+    when Tag :: [dns:label()], Begin :: integer(), FailMsg :: binary(),
+         Workers :: #{pid() => {upstream(), reference()}}).
+resolve_loop(Tag, Begin, Workers, FailMsg, Fun)
+        when map_size(Workers) =:= 0 ->
+    case reply(Fun, FailMsg) of
+        {error, skip} ->
+            ok;
+        ok ->
+            notify(Tag, failures),
+            notify_response_ms(Tag, Begin)
+    end;
+resolve_loop(Tag, Begin, Workers, FailMsg, Fun) ->
     receive
         {reply, Pid, Response} ->
-            {value, {Upstream, Pid, MonRef}, Workers0} =
-                lists:keytake(Pid, 2, Workers),
+            {{Upstream, MonRef}, Workers0} = maps:take(Pid, Workers),
             reply(Fun, Response),
+            notify_response_ms(Tag, Begin),
             erlang:demonitor(MonRef, [flush]),
             report_status([?MODULE, Upstream, successes]),
-            resolve_loop(Workers0, fun ok_reply_fun/1);
+            resolve_loop(Tag, Begin, Workers0,
+                         FailMsg, {fun skip_reply_fun/1, []});
         {'DOWN', MonRef, process, Pid, _Reason} ->
-            {value, {Upstream, Pid, MonRef}, Workers0} =
-                lists:keytake(Pid, 2, Workers),
+            {{Upstream, MonRef}, Workers0} = maps:take(Pid, Workers),
             report_status([?MODULE, Upstream, failures]),
-            resolve_loop(Workers0, Fun)
+            resolve_loop(Tag, Begin, Workers0, FailMsg, Fun)
     after 2 * ?TIMEOUT ->
-        lists:foreach(fun ({Upstream, Pid, MonRef}) ->
+        maps:fold(fun (Pid, {Upstream, MonRef}, _) ->
             erlang:demonitor(MonRef, [flush]),
             report_status([?MODULE, Upstream, failures]),
             Pid ! {timeout, self()}
-        end, Workers)
+        end, ok, Workers),
+        resolve_loop(Tag, Begin, #{}, FailMsg, Fun)
     end.
 
 %%%===================================================================
@@ -271,7 +291,7 @@ upstream_failures(Upstream) ->
 %%% DNS functions
 %%%===================================================================
 
--spec failed_msg(protocol(), dns:message()) -> binary().
+-spec(failed_msg(protocol(), dns:message()) -> binary()).
 failed_msg(Protocol, DNSMessage) ->
     Reply =
         DNSMessage#dns_message{
@@ -279,7 +299,7 @@ failed_msg(Protocol, DNSMessage) ->
         },
     encode_message(Protocol, Reply).
 
--spec encode_message(protocol(), dns:message()) -> binary().
+-spec(encode_message(protocol(), dns:message()) -> binary()).
 encode_message(Protocol, DNSMessage) ->
     Opts = encode_message_opts(Protocol, DNSMessage),
     case erldns_encoder:encode_message(DNSMessage, Opts) of
@@ -293,8 +313,8 @@ encode_message(Protocol, DNSMessage) ->
             EncodedMessage
     end.
 
--spec encode_message_opts(protocol(), dns:message()) ->
-    [dns:encode_message_opt()].
+-spec(encode_message_opts(protocol(), dns:message()) ->
+    [dns:encode_message_opt()]).
 encode_message_opts(tcp, _DNSMessage) ->
     [];
 encode_message_opts(udp, DNSMessage) ->
@@ -304,7 +324,7 @@ encode_message_opts(udp, DNSMessage) ->
 
 %% Determine the max payload size by looking for additional
 %% options passed by the client.
--spec max_payload_size(dns:message()) -> pos_integer().
+-spec(max_payload_size(dns:message()) -> pos_integer()).
 max_payload_size(
         #dns_message{additional =
             [#dns_optrr{udp_payload_size = PayloadSize}
@@ -313,3 +333,47 @@ max_payload_size(
     PayloadSize;
 max_payload_size(_DNSMessage) ->
     ?MAX_PACKET_SIZE.
+
+%%%===================================================================
+%%% Metrics functions
+%%%===================================================================
+
+-define(METRIC(Tag, Event), {dns, forwarder, Tag, Event}).
+-define(SLIDE_WINDOW, 5). % seconds
+-define(SLIDE_SIZE, 1024).
+
+-spec(to_tag(atom() | [dns:label()]) -> atom() | binary()).
+to_tag([]) ->
+    upstream;
+to_tag(Tag) when is_atom(Tag) ->
+    Tag;
+to_tag(Labels) ->
+    Labels0 = lists:reverse(Labels),
+    Labels1 = lists:join(<<"-">>, Labels0),
+    erlang:iolist_to_binary(Labels1).
+
+-spec(notify(atom() | [dns:label()], atom()) -> ok).
+notify(Labels, Event) ->
+    Tag = to_tag(Labels),
+    _ = folsom_metrics_counter:inc(?METRIC(all, Event), 1),
+    _ = folsom_metrics_counter:inc(?METRIC(Tag, Event), 1),
+    ok.
+
+-spec(notify_response_ms(atom() | [dns:label()], Begin :: integer()) -> true).
+notify_response_ms(Labels, Begin) ->
+    Tag = to_tag(Labels),
+    Time = erlang:monotonic_time(millisecond) - Begin,
+    true = folsom_metrics_histogram:update(?METRIC(all, response_ms), Time),
+    true = folsom_metrics_histogram:update(?METRIC(Tag, response_ms), Time).
+
+-spec(init_metrics() -> ok).
+init_metrics() ->
+    ForwardZones = dcos_dns_config:forward_zones(),
+    lists:foreach(fun (Labels) ->
+        Tag = to_tag(Labels),
+        ok = folsom_metrics:new_histogram(
+            ?METRIC(Tag, response_ms), slide_uniform,
+            {?SLIDE_WINDOW, ?SLIDE_SIZE}),
+        ok = folsom_metrics:new_counter(?METRIC(Tag, failures)),
+        ok = folsom_metrics:new_counter(?METRIC(Tag, requests))
+    end, [all, internal, upstream, [<<"mesos">>] | maps:keys(ForwardZones)]).

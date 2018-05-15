@@ -23,8 +23,15 @@
 
 start(_StartType, _StartArgs) ->
     dcos_net_app:load_config_files(dcos_dns),
-    maybe_load_json_config(), %% Maybe load the relevant DCOS configuration
-    maybe_start_dcos_dns(application:get_env(dcos_dns, enable_dns, true)).
+
+    %% Maybe load the relevant DCOS configuration
+    maybe_load_json_config(),
+
+    %% Init metrics.
+    dcos_dns_handler:init_metrics(),
+
+    IsEnabled = application:get_env(dcos_dns, enable_dns, true),
+    maybe_start_dcos_dns(IsEnabled).
 
 maybe_start_dcos_dns(false) ->
     dcos_dns_sup:start_link(false);

@@ -39,6 +39,8 @@
 -include_lib("stdlib/include/ms_transform.hrl").
 -include_lib("dns/include/dns.hrl").
 
+-define(SLIDE_WINDOW, 5). % seconds
+-define(SLIDE_SIZE, 16).
 
 %%%===================================================================
 %%% API
@@ -97,6 +99,7 @@ handle_event(#{key := ?LASHUP_KEY(ZoneName), value := Value}, State) ->
 
 push_zone(Zone = {ZoneName, Sha, Records}) ->
     Size = length(Records),
+    Begin = erlang:monotonic_time(millisecond),
     ok = erldns_zone_cache:put_zone(Zone),
     lager:notice("~s was updated (~p records, sha: ~s)",
                  [ZoneName, Size, bin_to_hex(Sha)]),
@@ -104,7 +107,8 @@ push_zone(Zone = {ZoneName, Sha, Records}) ->
         {no_key, _Zone} -> ok;
         {ok, SignedZone} ->
             ok = erldns_zone_cache:put_zone(SignedZone)
-    end.
+    end,
+    m_notify(ZoneName, Begin, Size).
 
 sign_zone(Zone = {ZoneName, _ZoneSha, Records}) ->
     case dcos_dns_key_mgr:keys() of
@@ -150,6 +154,25 @@ convert_record(Record0 = #dns_rr{name = Name0}, Postfix, NewPostfix) ->
     Name1 = convert_name(Name0, Postfix, NewPostfix),
     Record1 = Record0#dns_rr{name = Name1},
     {true, Record1}.
+
+m_notify(ZoneName, Begin, Size) ->
+    CompactZoneName = compact_zone_name(ZoneName),
+    Name = binary:replace(CompactZoneName, <<".">>, <<"-">>, [global]),
+    Ms = erlang:monotonic_time(millisecond) - Begin,
+    folsom_metrics:notify({dns, zones, Name, records}, Size, gauge),
+    folsom_metrics:notify({dns, zones, Name, updated}, {inc, 1}, counter),
+    folsom_metrics:new_histogram(
+        {dns, zones, Name, push_ms},
+        slide_uniform, {?SLIDE_WINDOW, ?SLIDE_SIZE}),
+    folsom_metrics:notify({dns, zones, Name, push_ms}, Ms, histogram).
+
+compact_zone_name(ZoneName) ->
+    case binary:split(ZoneName, ?DCOS_DIRECTORY("")) of
+        [Name, <<>>] ->
+            Name;
+        [Name] ->
+            Name
+    end.
 
 -spec(bin_to_hex(binary()) -> binary()).
 bin_to_hex(Bin) ->

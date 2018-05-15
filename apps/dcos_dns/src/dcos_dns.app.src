@@ -22,6 +22,7 @@
         ranch,
         sidejob,
         cowboy,
+        folsom,
         dcos_net
     ]},
     {env,[]},
