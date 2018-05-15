@@ -19,8 +19,8 @@
 -export([init/1, handle_call/3, handle_cast/2,
     handle_info/2, terminate/2, code_change/3]).
 
--type task() :: dcos_net_mesos_state:task().
--type task_id() :: dcos_net_mesos_state:task_id().
+-type task() :: dcos_net_mesos_listener:task().
+-type task_id() :: dcos_net_mesos_listener:task_id().
 
 -define(DCOS_DNS_TTL, 5).
 
@@ -56,7 +56,7 @@ handle_info(init, State) ->
     State0 = handle_init(State),
     {noreply, State0};
 handle_info({task_updated, Ref, TaskId, Task}, #state{ref=Ref}=State) ->
-    ok = dcos_net_mesos_state:next(Ref),
+    ok = dcos_net_mesos_listener:next(Ref),
     {noreply, handle_task_updated(TaskId, Task, State)};
 handle_info({'DOWN', Ref, process, _Pid, Info}, #state{ref=Ref}=State) ->
     {stop, Info, State};
@@ -79,7 +79,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 -spec(handle_init(State) -> State when State :: state() | []).
 handle_init(State) ->
-    case dcos_net_mesos_state:subscribe() of
+    case dcos_net_mesos_listener:subscribe() of
         {ok, Ref, MTasks} ->
             MRef = start_masters_timer(),
             Tasks = task_records(MTasks),
@@ -168,7 +168,7 @@ task_autoip(#{name := Name, framework := Fwrk,
         end
     ).
 
--spec(is_running(dcos_net_mesos_state:task_state()) -> boolean()).
+-spec(is_running(dcos_net_mesos_listener:task_state()) -> boolean()).
 is_running({running, _Healthy}) ->
     true;
 is_running(running) ->
@@ -176,7 +176,7 @@ is_running(running) ->
 is_running(_TaskState) ->
     false.
 
--spec(is_port_mapping(dcos_net_mesos_state:task_port()) -> boolean()).
+-spec(is_port_mapping(dcos_net_mesos_listener:task_port()) -> boolean()).
 is_port_mapping(#{host_port := _HPort}) ->
     true;
 is_port_mapping(_Port) ->

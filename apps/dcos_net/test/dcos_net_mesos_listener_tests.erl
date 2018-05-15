@@ -1,4 +1,4 @@
--module(dcos_net_mesos_state_tests).
+-module(dcos_net_mesos_listener_tests).
 
 -include_lib("eunit/include/eunit.hrl").
 
@@ -47,7 +47,7 @@ hello_overlay_test_() ->
 %%%===================================================================
 
 is_leader(_Tasts) ->
-    IsLeader = dcos_net_mesos_state:is_leader(),
+    IsLeader = dcos_net_mesos_listener:is_leader(),
     ?assertEqual(true, IsLeader).
 
 none_on_host(Tasks) ->
@@ -309,14 +309,14 @@ setup(FileName) ->
             Pid ! stream_next
         end),
 
-    {ok, _Pid} = dcos_net_mesos_state:start_link(),
+    {ok, _Pid} = dcos_net_mesos_listener:start_link(),
     stream_wait(),
 
-    {ok, _MonRef, Tasks} = dcos_net_mesos_state:subscribe(),
+    {ok, _MonRef, Tasks} = dcos_net_mesos_listener:subscribe(),
     Tasks.
 
 cleanup(_Tasks) ->
-    Pid = whereis(dcos_net_mesos_state),
+    Pid = whereis(dcos_net_mesos_listener),
     StreamPid = whereis(?MODULE),
 
     unlink(Pid),
@@ -368,7 +368,7 @@ stream_next() ->
         stream_next -> ok
     after
         10000 ->
-            Info = recon:info(dcos_net_mesos_state),
+            Info = recon:info(dcos_net_mesos_listener),
             error({timeout, Info})
     end.
 

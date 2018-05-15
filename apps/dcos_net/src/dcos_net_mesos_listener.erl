@@ -1,4 +1,4 @@
--module(dcos_net_mesos_state).
+-module(dcos_net_mesos_listener).
 
 %% API
 -export([

@@ -338,7 +338,7 @@ setup(SetupFun) ->
     meck:expect(lashup_kv, request_op, fun request_op/2),
 
     {ok, Apps} = ensure_all_started(erldns),
-    Tasks = dcos_net_mesos_state_tests:SetupFun(),
+    Tasks = dcos_net_mesos_listener_tests:SetupFun(),
     {ok, Pid} = dcos_dns_mesos:start_link(),
     true =
         lists:any(fun (_) ->
@@ -356,7 +356,7 @@ cleanup({Tasks, Pid, Apps}) ->
     lists:foreach(fun application:stop/1, Apps),
     lists:foreach(fun application:unload/1, Apps),
 
-    dcos_net_mesos_state_tests:cleanup(Tasks).
+    dcos_net_mesos_listener_tests:cleanup(Tasks).
 
 ensure_all_started(erldns) ->
     ok = application:load(lager),

@@ -179,8 +179,8 @@ setup() ->
             {ok, Ref}
         end),
 
-    meck:new(dcos_net_mesos_state),
-    meck:expect(dcos_net_mesos_state, is_leader, fun () -> true end),
+    meck:new(dcos_net_mesos_listener),
+    meck:expect(dcos_net_mesos_listener, is_leader, fun () -> true end),
 
     {ok, Apps} = ensure_all_started(erldns),
     {ok, Pid} = dcos_dns_mesos_dns:start_link(),
@@ -202,7 +202,7 @@ cleanup({Pid, Apps}) ->
     meck:unload([
         lashup_kv,
         httpc,
-        dcos_net_mesos_state
+        dcos_net_mesos_listener
     ]).
 
 ensure_all_started(erldns) ->
