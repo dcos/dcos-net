@@ -115,13 +115,16 @@ handle_info({subscribe, Pid, Ref}, State) ->
 handle_info({http, {Ref, stream, Data}}, #state{ref=Ref}=State) ->
     handle_stream(Data, State);
 handle_info({timeout, TRef, httpc}, #state{ref=Ref, timeout_ref=TRef}=State) ->
+    ok = m_notify({received, failures}, {inc, 1}, counter),
     ok = httpc:cancel_request(Ref),
     lager:error("Mesos timeout"),
     {stop, {httpc, timeout}, State};
 handle_info({http, {Ref, {error, Error}}}, #state{ref=Ref}=State) ->
+    ok = m_notify({received, failures}, {inc, 1}, counter),
     lager:error("Mesos connection terminated: ~p", [Error]),
     {stop, Error, State};
 handle_info({'DOWN', _MonRef, process, Pid, Info}, #state{pid=Pid}=State) ->
+    ok = m_notify({received, failures}, {inc, 1}, counter),
     lager:error("Mesos http client: ~p", [Info]),
     {stop, Info, State};
 handle_info({'DOWN', _MonRef, process, Pid, _Info}, State) ->
@@ -758,22 +761,29 @@ handle_unsubscribe(Pid, #state{subs=Subs}=State) ->
 notify(_TaskId, _Task, #state{subs=undefined}=State) ->
     State;
 notify(TaskId, Task, #state{subs=Subs, timeout=Timeout}=State) ->
+    ok = m_notify({pubsub, messages}, {inc, 1}, counter),
     maps:fold(fun (Pid, Ref, ok) ->
         Pid ! {task_updated, Ref, TaskId, Task},
         ok
     end, ok, Subs),
 
-    maps:fold(fun (Pid, Ref, St) ->
-        receive
-            {next, Ref} ->
-                St;
-            {'DOWN', _MonRef, process, Pid, _Info} ->
-                handle_unsubscribe(Pid, St)
-        after Timeout div 3 ->
-            exit(Pid, {?MODULE, timeout}),
-            St
-        end
-    end, State, Subs).
+    Begin = erlang:monotonic_time(millisecond),
+    try
+        maps:fold(fun (Pid, Ref, St) ->
+            receive
+                {next, Ref} ->
+                    St;
+                {'DOWN', _MonRef, process, Pid, _Info} ->
+                    handle_unsubscribe(Pid, St)
+            after Timeout div 3 ->
+                exit(Pid, {?MODULE, timeout}),
+                St
+            end
+        end, State, Subs)
+    after
+        Ms = erlang:monotonic_time(millisecond) - Begin,
+        ok = m_notify({pubsub, next_ms}, Ms, gauge)
+    end.
 
 %%%===================================================================
 %%% Maps Functions
@@ -837,15 +847,18 @@ mfind(Keys, Map) ->
 
 -spec(handle_init([]) -> state() | []).
 handle_init(State0) ->
+    ok = init_metrics(),
     Timeout = application:get_env(dcos_net, mesos_reconnect_timeout, 2000),
     case start_stream() of
         {ok, State} ->
             State;
         {error, redirect} ->
+            ok = m_notify({received, redirects}, {inc, 1}, counter),
             % It's not a leader, don't log anything
             erlang:send_after(Timeout, self(), init),
             State0;
         {error, Error} ->
+            ok = m_notify({received, failures}, {inc, 1}, counter),
             lager:error("Couldn't connect to mesos: ~p", [Error]),
             erlang:send_after(Timeout, self(), init),
             State0
@@ -870,13 +883,17 @@ start_stream() ->
 -spec(handle_stream(binary(), state()) ->
     {noreply, state()} | {stop, term(), state()}).
 handle_stream(Data, State) ->
+    ok = m_notify({received, bytes}, {inc, size(Data)}, counter),
     case stream(Data, State) of
         {next, State0} ->
             {noreply, State0};
         {next, Obj, State0} ->
+            ok = m_notify({received, messages}, {inc, size(Data)}, counter),
             State1 = handle(Obj, State0),
-            handle_stream(<<>>, State1);
+            State2 = handle_metrics(State1),
+            handle_stream(<<>>, State2);
         {error, Error} ->
+            ok = m_notify({received, failures}, {inc, 1}, counter),
             lager:error("Mesos protocol error: ~p", [Error]),
             {stop, Error, State}
     end.
@@ -912,3 +929,36 @@ stream(Data, #state{pid=Pid, size=Size, buf=Buf}=State) ->
             httpc:stream_next(Pid),
             {next, State#state{buf=Buf0}}
     end.
+
+%%%===================================================================
+%%% Metrics functions
+%%%===================================================================
+
+-spec(init_metrics() -> ok).
+init_metrics() ->
+    ok = m_notify(agents, 0, gauge),
+    ok = m_notify(frameworks, 0, gauge),
+    ok = m_notify(tasks, 0, gauge),
+    ok = m_notify({wait, tasks}, 0, gauge),
+    ok = m_notify({pubsub, messages}, clear, counter),
+    ok = m_notify({pubsub, next_ms}, 0, gauge),
+    ok = m_notify({received, bytes}, clear, counter),
+    ok = m_notify({received, failures}, {inc, 0}, counter),
+    ok = m_notify({received, messages}, clear, counter),
+    ok = m_notify({received, redirect}, clear, counter).
+
+-spec(handle_metrics(state()) -> state()).
+handle_metrics(#state{agents=A, frameworks=F,
+        tasks=T, waiting_tasks=TW}=State) ->
+    ok = m_notify(agents, maps:size(A), gauge),
+    ok = m_notify(frameworks, maps:size(F), gauge),
+    ok = m_notify(tasks, maps:size(T), gauge),
+    ok = m_notify({wait, tasks}, maps:size(TW), gauge),
+    State.
+
+-spec(m_notify(Key :: atom() | {atom(), atom()},
+               Value :: any(), Type :: atom()) -> ok).
+m_notify({KeyA, KeyB}, Value, Type) ->
+    folsom_metrics:notify({mesos, listener, KeyA, KeyB}, Value, Type);
+m_notify(Key, Value, Type) ->
+    folsom_metrics:notify({mesos, listener, Key}, Value, Type).
