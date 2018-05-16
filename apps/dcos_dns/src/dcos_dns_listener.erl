@@ -104,7 +104,7 @@ push_zone(Zone) ->
     end.
 
 sign_zone(Zone = {ZoneName, _ZoneSha, Records}) ->
-    case dcos_dns:key() of
+    case dcos_dns_key_mgr:keys() of
         false ->
             {no_key, Zone};
         #{public_key := PublicKey} ->

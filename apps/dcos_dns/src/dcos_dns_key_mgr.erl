@@ -16,7 +16,10 @@
 -endif.
 
 %% API
--export([start_link/0]).
+-export([
+    start_link/0,
+    keys/0
+]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -50,6 +53,17 @@
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+
+-spec keys() -> #{public_key => binary(), secret_key => binary()} | false.
+keys() ->
+    MaybeNavstarKey = lashup_kv:value(?LASHUP_KEY),
+    case {lists:keyfind({secret_key, riak_dt_lwwreg}, 1, MaybeNavstarKey),
+        lists:keyfind({public_key, riak_dt_lwwreg}, 1, MaybeNavstarKey)} of
+        {{_, SecretKey}, {_, PublicKey}} ->
+            #{public_key => PublicKey, secret_key => SecretKey};
+        _ ->
+            false
+    end.
 
 %%%===================================================================
 %%% gen_server callbacks
