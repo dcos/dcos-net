@@ -129,7 +129,7 @@ parse_response(State0 = #state{known_overlays = KnownOverlays}, Body) ->
     IP0 = maps:get(<<"ip">>, AgentInfo),
     IP1 = process_ip(IP0),
     State1 = State0#state{ip = IP1},
-    Overlays = maps:get(<<"overlays">>, AgentInfo),
+    Overlays = maps:get(<<"overlays">>, AgentInfo, []),
     NewOverlays = Overlays -- KnownOverlays,
     State2 = lists:foldl(fun add_overlay/2, State1, NewOverlays),
     {ok, State2}.
