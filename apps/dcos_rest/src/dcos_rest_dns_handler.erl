@@ -1,18 +1,24 @@
 -module(dcos_rest_dns_handler).
 
 -export([
-    init/3,
+    init/2,
     rest_init/2,
     allowed_methods/2,
     content_types_provided/2,
-    process/2
+
+    version/2,
+    config/2,
+    hosts/2,
+    services/2,
+    enumerate/2,
+    records/2
 ]).
 
 -include_lib("dns/include/dns.hrl").
 -include_lib("erldns/include/erldns.hrl").
 
-init(_Transport, Req, Opts) ->
-    {upgrade, protocol, cowboy_rest, Req, Opts}.
+init(Req, Opts) ->
+    {cowboy_rest, Req, Opts}.
 
 rest_init(Req, Opts) ->
     {ok, Req, Opts}.
@@ -20,82 +26,80 @@ rest_init(Req, Opts) ->
 allowed_methods(Req, State) ->
     {[<<"GET">>], Req, State}.
 
-content_types_provided(Req, State) ->
+content_types_provided(Req, [Fun]) ->
     {[
-        {{<<"application">>, <<"json">>, []}, process}
-    ], Req, State}.
+        {{<<"application">>, <<"json">>, []}, Fun}
+    ], Req, []}.
 
-process(Req, State = [version]) ->
+version(Req, State) ->
     Applications = application:which_applications(),
     {dcos_dns, _V, Version} = lists:keyfind(dcos_dns, 1, Applications),
     Body =
         jsx:encode(#{
-            <<"Service">> => <<"dcos_dns">>,
+            <<"Service">> => <<"dcos-dns">>,
             <<"Version">> => list_to_binary(Version)
         }),
-    {Body, Req, State};
+    {Body, Req, State}.
 
-process(Req, State = [config]) ->
-    reply_halt(501, Req, State); % TODO
+config(Req, State) ->
+    % TODO
+    Req0 = cowboy_req:reply(501, Req),
+    {stop, Req0, State}.
 
-process(Req, State = [hosts]) ->
-    {Host, Req0} = cowboy_req:binding(host, Req),
+hosts(Req, State) ->
+    Host = cowboy_req:binding(host, Req),
     DNSQuery = #dns_query{name = Host, type = ?DNS_TYPE_A},
     #dns_message{answers = Answers} = handle(DNSQuery, Host),
     Data =
         [ #{<<"host">> => Name, <<"ip">> => ntoa(Ip)}
         || #dns_rr{name = Name, type = ?DNS_TYPE_A,
                    data = #dns_rrdata_a{ip = Ip}} <- Answers],
-    {jsx:encode(Data), Req0, State};
+    {jsx:encode(Data), Req, State}.
 
-process(Req, State = [services]) ->
-    {Service, Req0} = cowboy_req:binding(service, Req),
+services(Req, State) ->
+    Service = cowboy_req:binding(service, Req),
     DNSQuery = #dns_query{name = Service, type = ?DNS_TYPE_SRV},
     #dns_message{answers = Answers} = handle(DNSQuery, Service),
     Data = lists:map(fun srv_record_to_term/1, Answers),
-    {jsx:encode(Data), Req0, State};
+    {jsx:encode(Data), Req, State}.
 
-process(Req, State = [enumerate]) ->
-    reply_halt(501, Req, State); % TODO
+enumerate(Req, State) ->
+    % TODO
+    Req0 = cowboy_req:reply(501, Req),
+    {stop, Req0, State}.
 
-process(Req, State = [records]) ->
-    {{chunked, records_fun()}, Req, State}.
+records(Req, State) ->
+    Req0 = cowboy_req:stream_reply(200, Req),
+    ok = cowboy_req:stream_body("[", nofin, Req0),
+    ZonesV = erldns_zone_cache:zone_names_and_versions(),
+    Zones = [Z || {Z, _} <- ZonesV],
+    ok = records_loop(Req0, [], Zones, 0),
+    ok = cowboy_req:stream_body("]", fin, Req0),
+    {stop, Req0, State}.
 
-records_fun() ->
-    fun (SendFun) ->
-        ok = SendFun("["),
-        ZonesV = erldns_zone_cache:zone_names_and_versions(),
-        Zones = [Z || {Z, _} <- ZonesV],
-        records_fun(SendFun, [], Zones, 0),
-        ok = SendFun("]")
-    end.
-
-records_fun(_SendFun, [], [], N) ->
-    N;
-records_fun(SendFun, [], [Zone|Zones], N) ->
+records_loop(_Req, [], [], _N) ->
+    ok;
+records_loop(Req, [], [Zone|Zones], N) ->
     case erldns_zone_cache:get_zone_with_records(Zone) of
         {ok, #zone{records = Records}} ->
-            records_fun(SendFun, Records, Zones, N);
+            records_loop(Req, Records, Zones, N);
         {error, zone_not_found} ->
-            records_fun(SendFun, [], Zones, N)
+            records_loop(Req, [], Zones, N)
     end;
-records_fun(SendFun, [Record|Records], Zones, 0) ->
-    {ok, Inc} = send_record(SendFun, "", Record),
-    records_fun(SendFun, Records, Zones, Inc);
-records_fun(SendFun, [Record|Records], Zones, N) ->
-    {ok, Inc} = send_record(SendFun, ",\n", Record),
-    records_fun(SendFun, Records, Zones, N + Inc).
+records_loop(Req, [Record|Records], Zones, 0) ->
+    Inc = send_record(Req, "", Record),
+    records_loop(Req, Records, Zones, Inc);
+records_loop(Req, [Record|Records], Zones, N) ->
+    Inc = send_record(Req, ",\n", Record),
+    records_loop(Req, Records, Zones, N + Inc).
 
-reply_halt(StatusCode, Req, State) ->
-    {ok, Req0} = cowboy_req:reply(StatusCode, Req),
-    {halt, Req0, State}.
-
-send_record(SendFun, Prefix, RR) ->
+send_record(Req, Prefix, RR) ->
     try jsx:encode(record_to_term(RR)) of
         Data ->
-            {SendFun([Prefix, Data]), 1}
+            ok = cowboy_req:stream_body([Prefix, Data], nofin, Req),
+            1
     catch throw:unknown_record_type ->
-        {ok, 0}
+        0
     end.
 
 -spec handle(dns:query(), binary()) -> dns:message().

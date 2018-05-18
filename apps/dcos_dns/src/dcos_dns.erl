@@ -11,21 +11,10 @@
 
 %% API
 -export([
-    key/0,
     family/1,
     get_leader_addr/0,
     resolve_mesos/1
 ]).
-
-key() ->
-    MaybeNavstarKey = lashup_kv:value([navstar, key]),
-    case {lists:keyfind({secret_key, riak_dt_lwwreg}, 1, MaybeNavstarKey),
-        lists:keyfind({public_key, riak_dt_lwwreg}, 1, MaybeNavstarKey)} of
-        {{_, SecretKey}, {_, PublicKey}} ->
-            #{public_key => PublicKey, secret_key => SecretKey};
-        _ ->
-            false
-    end.
 
 -spec family(inet:ip_address()) -> inet | inet6.
 family(IP) when size(IP) == 4 ->

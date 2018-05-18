@@ -17,7 +17,6 @@ setup_cowboy() ->
             {"/lashup/kv/[...]", dcos_rest_lashup_handler, []},
             {"/lashup/key", dcos_rest_key_handler, []},
             {"/v1/vips", dcos_rest_vips_handler, []},
-            {"/status", dcos_rest_status_handler, []},
 
             {"/v1/version", dcos_rest_dns_handler, [version]},
             {"/v1/config", dcos_rest_dns_handler, [config]},
@@ -29,6 +28,7 @@ setup_cowboy() ->
     ]),
     {ok, Ip} = application:get_env(dcos_rest, ip),
     {ok, Port} = application:get_env(dcos_rest, port),
-    {ok, _} = cowboy:start_http(http, 100, [{ip, Ip}, {port, Port}], [
-        {env, [{dispatch, Dispatch}]}
-    ]).
+    {ok, _} = cowboy:start_clear(
+        http, [{ip, Ip}, {port, Port}], #{
+            env => #{dispatch => Dispatch}
+        }).

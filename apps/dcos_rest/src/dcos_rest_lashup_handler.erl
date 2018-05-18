@@ -9,14 +9,18 @@
 -module(dcos_rest_lashup_handler).
 -author("sdhillon").
 
--include("dcos_rest.hrl").
 %% API
--export([init/3]).
--export([content_types_provided/2, allowed_methods/2, content_types_accepted/2]).
--export([to_json/2, perform_op/2]).
+-export([
+    init/2,
+    content_types_provided/2,
+    allowed_methods/2,
+    content_types_accepted/2,
+    to_json/2,
+    perform_op/2
+]).
 
-init(_Transport, Req, Opts) ->
-    {upgrade, protocol, cowboy_rest, Req, Opts}.
+init(Req, Opts) ->
+    {cowboy_rest, Req, Opts}.
 
 content_types_provided(Req, State) ->
     {[
@@ -32,18 +36,19 @@ content_types_accepted(Req, State) ->
     ], Req, State}.
 
 perform_op(Req, State) ->
-    {Key, Req0} = key(Req),
-    case cowboy_req:header(<<"clock">>, Req0, <<>>) of
-        {<<>>, Req1} ->
-            {{false, <<"Missing clock">>}, Req1, State};
-        {Clock0, Req1} ->
-            Clock1 = binary_to_term(base64:decode(Clock0)),
-            {ok, Body0, Req2} = cowboy_req:body(Req1),
-            Body1 = binary_to_list(Body0),
-            {ok, Scanned, _} = erl_scan:string(Body1),
+    Key = key(Req),
+    case cowboy_req:header(<<"clock">>, Req, <<>>) of
+        <<>> ->
+            {{false, <<"Missing clock">>}, Req, State};
+        Clock ->
+            Clock0 = binary_to_term(base64:decode(Clock)),
+            {ok, Body, Req0} = cowboy_req:read_body(Req),
+            Body0 = binary_to_list(Body),
+            {ok, Scanned, _} = erl_scan:string(Body0),
             {ok, Parsed} = erl_parse:parse_exprs(Scanned),
-            {value, Update, _Bindings} = erl_eval:exprs(Parsed, erl_eval:new_bindings()),
-            perform_op(Key, Update, Clock1, Req2, State)
+            {value, Update, _Bindings} =
+                erl_eval:exprs(Parsed, erl_eval:new_bindings()),
+            perform_op(Key, Update, Clock0, Req0, State)
     end.
 
 perform_op(Key, Update, Clock, Req, State) ->
@@ -55,12 +60,9 @@ perform_op(Key, Update, Clock, Req, State) ->
             {{false, <<"Concurrent update">>}, Req, State}
     end.
 
-    %io:format("HeaderVal: ~p", [HeaderVal]),
-
-
 to_json(Req, State) ->
-    {Key, Req0} = key(Req),
-    fetch_key(Key, Req0, State).
+    Key = key(Req),
+    fetch_key(Key, Req, State).
 
 fetch_key(Key, Req, State) ->
     {Value, Clock} = lashup_kv:value2(Key),
@@ -70,9 +72,9 @@ fetch_key(Key, Req, State) ->
     {jsx:encode(Value0), Req0, State}.
 
 key(Req) ->
-    {KeyHandler, Req0} = cowboy_req:header(<<"key-handler">>, Req),
-    {KeyData, Req1} = cowboy_req:path_info(Req0),
-    {key(KeyData, KeyHandler), Req1}.
+    KeyHandler = cowboy_req:header(<<"key-handler">>, Req),
+    KeyData = cowboy_req:path_info(Req),
+    key(KeyData, KeyHandler).
 
 key([], _) ->
     erlang:throw(invalid_key);
