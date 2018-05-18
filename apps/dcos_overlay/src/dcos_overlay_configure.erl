@@ -44,9 +44,13 @@ maybe_configure(Config, MyPid) ->
 try_configure_overlay(Pid, Config, Overlay) ->
     #{<<"info">> := OverlayInfo} = Overlay,
     Subnet = maps:get(<<"subnet">>, OverlayInfo, undefined),
-    Subnet6 = maps:get(<<"subnet6">>, OverlayInfo, undefined),
     try_configure_overlay(Pid, Config, Overlay, Subnet),
-    try_configure_overlay(Pid, Config, Overlay, Subnet6).
+    case application:get_env(dcos_overlay, enable_ipv6, true) of
+      true ->
+        Subnet6 = maps:get(<<"subnet6">>, OverlayInfo, undefined),
+        try_configure_overlay(Pid, Config, Overlay, Subnet6);
+      false -> ok
+    end.
 
 try_configure_overlay(_Pid, _Config, _Overlay, undefined) ->
     ok;

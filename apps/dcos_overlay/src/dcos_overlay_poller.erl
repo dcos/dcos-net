@@ -172,8 +172,10 @@ maybe_create_vtep(#{<<"backend">> := Backend}, #state{netlink = Pid}) ->
     dcos_overlay_netlink:iplink_add(Pid, VTEPNameStr, "vxlan", VNI, 64000, VTEPAttr),
     {ok, _} = dcos_overlay_netlink:iplink_set(Pid, ParsedVTEPMAC, VTEPNameStr),
     {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, inet, ParsedVTEPIP, PrefixLen, VTEPNameStr),
-    case VTEPIP6 of
-      undefined ->
+    case {application:get_env(dcos_overlay, enable_ipv6, true), VTEPIP6} of
+      {false, _} ->
+          ok;
+      {_, undefined} ->
           ok;
       _ ->
           ok = try_enable_ipv6(VTEPNameStr),
