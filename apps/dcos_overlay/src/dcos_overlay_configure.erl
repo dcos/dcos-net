@@ -52,7 +52,11 @@ try_configure_overlay(Pid, Config, Overlay) ->
         }
     } = Overlay,
     try_configure_overlay(Pid, Config, Overlay, Subnet),
-    try_configure_overlay(Pid, Config, Overlay, Subnet6).
+    case application:get_env(dcos_overlay, enable_ipv6, true) of
+      true ->
+        try_configure_overlay(Pid, Config, Overlay, Subnet6);
+      false -> ok
+    end.
 
 try_configure_overlay(_Pid, _Config, _Overlay, undefined) ->
     ok;
