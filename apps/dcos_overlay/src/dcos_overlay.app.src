@@ -7,9 +7,9 @@
             [
                 kernel,
                 stdlib,
-                mesos_state,
                 lashup,
                 inets,
+                folsom,
                 gen_netlink
             ]},
         {env,[]},

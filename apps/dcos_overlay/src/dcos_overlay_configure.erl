@@ -68,14 +68,13 @@ parse_subnet(Subnet) ->
     true = 0 =< PrefixLen andalso PrefixLen =< 128,
     {IP, PrefixLen}.
 
-try_configure_overlay2(Pid,
-  _Config = #{key := [navstar, overlay, Subnet], value := LashupValue},
-  Overlay, ParsedSubnet) when Subnet == ParsedSubnet ->
-    lists:map(
-        fun(Value) -> maybe_configure_overlay_entry(Pid, Overlay, Value) end,
-        LashupValue
-    );
-try_configure_overlay2(_Pid, _Config, _Overlay, _ParsedSubnet) ->
+try_configure_overlay2(Pid, #{key := [navstar, overlay, Subnet],
+                              value := Config}, Overlay, Subnet) ->
+    ok = collect_metrics(Subnet, Config),
+    lists:foreach(fun (Value) ->
+        maybe_configure_overlay_entry(Pid, Overlay, Value)
+    end, Config);
+try_configure_overlay2(_Pid, _Config, _Overlay, _Subnet) ->
     ok.
 
 maybe_configure_overlay_entry(Pid, Overlay, {{VTEPIPPrefix, riak_dt_map}, Value}) ->
@@ -126,3 +125,22 @@ maybe_print_parameters(Parameters) ->
 maybe_print_parameters(_) ->
     ok.
 -endif.
+
+%%%===================================================================
+%%% Metrics functions
+%%%===================================================================
+
+-spec(collect_metrics(Subnet | undefined | binary(), OverlayConfig) -> ok
+    when Subnet :: dcos_overlay_poller:subnet(), OverlayConfig :: list()).
+collect_metrics(undefined, _Config) ->
+    ok;
+collect_metrics(Name, Config) when is_binary(Name) ->
+    folsom_metrics:notify(
+        {overlay, network, Name, updated},
+        {inc, 1}, counter),
+    folsom_metrics:notify(
+        {overlay, network, Name, routes},
+        length(Config), gauge);
+collect_metrics(Subnet, Config) ->
+    Name = dcos_overlay_poller:subnet2name(Subnet),
+    collect_metrics(Name, Config).

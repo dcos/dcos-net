@@ -12,16 +12,18 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, ip/0, overlays/0]).
+-export([
+    ip/0,
+    overlays/0,
+    start_link/0,
+    subnet2name/1
+]).
 
 %% gen_server callbacks
--export([init/1,
-    handle_call/3,
-    handle_cast/2,
-    handle_info/2,
-    terminate/2,
-    code_change/3]).
+-export([init/1, handle_call/3, handle_cast/2,
+    handle_info/2, terminate/2, code_change/3]).
 
+-export_type([subnet/0]).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -43,6 +45,8 @@
     netlink :: undefined | pid()
 }).
 
+-type subnet() :: {inet:ip_address(), 0..32 | 0..128}.
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -57,7 +61,21 @@ overlays() ->
 -spec(start_link() ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link() ->
+    try
+        ets:new(?MODULE, [named_table, public, {read_concurrency, true}])
+    catch error:badarg ->
+        ?MODULE
+    end,
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+
+-spec subnet2name(subnet()) -> undefined | binary().
+subnet2name(Subnet) ->
+    try ets:lookup(?MODULE, Subnet) of
+        [{Subnet, Name}] -> Name;
+        [] -> undefined
+    catch error:badarg ->
+        undefined
+    end.
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -84,11 +102,13 @@ handle_info(init, []) ->
     {noreply, #state{netlink = Pid}};
 handle_info(poll, State0) ->
     State1 =
-        case dcos_net_mesos:poll("/overlay-agent/overlay") of
+        case poll() of
             {error, Reason} ->
+                ok = m_notify({poller, failures}, {inc, 1}, counter),
                 lager:warning("Overlay Poller could not poll: ~p~n", [Reason]),
                 State0#state{poll_period = ?MIN_POLL_PERIOD};
             {ok, Data} ->
+                ok = m_notify({poller, responses}, {inc, 1}, counter),
                 NewState = parse_response(State0, Data),
                 NewPollPeriod = update_poll_period(NewState#state.poll_period),
                 NewState#state{poll_period = NewPollPeriod}
@@ -108,16 +128,29 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
+-spec(update_poll_period(pos_integer()) -> pos_integer()).
 update_poll_period(OldPollPeriod) when OldPollPeriod*2 =< ?MAX_POLL_PERIOD ->
     OldPollPeriod*2;
 update_poll_period(_) ->
     ?MAX_POLL_PERIOD.
+
+-spec(poll() ->
+    {ok, jiffy:json_term()} | {error, Reason :: term()}).
+poll() ->
+    Begin = erlang:monotonic_time(millisecond),
+    try
+        dcos_net_mesos:poll("/overlay-agent/overlay")
+    after
+        Ms = erlang:monotonic_time(millisecond) - Begin,
+        ok = m_notify({poller, response_ms}, Ms, gauge)
+    end.
 
 parse_response(State0 = #state{known_overlays = KnownOverlays}, AgentInfo) ->
     IP0 = maps:get(<<"ip">>, AgentInfo),
     IP1 = process_ip(IP0),
     State1 = State0#state{ip = IP1},
     Overlays = maps:get(<<"overlays">>, AgentInfo, []),
+    ok = m_notify(networks, length(Overlays), gauge),
     NewOverlays = Overlays -- KnownOverlays,
     lists:foldl(fun add_overlay/2, State1, NewOverlays).
 
@@ -200,20 +233,32 @@ maybe_add_overlay_to_lashup(Overlay, State) ->
     #{<<"backend">> := #{<<"vxlan">> := VXLan}} = Overlay,
     AgentSubnet = mget(<<"subnet">>, Overlay),
     AgentSubnet6 = mget(<<"subnet6">>, Overlay),
+    OverlayName = mget(<<"name">>, OverlayInfo),
     OverlaySubnet = mget(<<"subnet">>, OverlayInfo),
     OverlaySubnet6 = mget(<<"subnet6">>, OverlayInfo),
     VTEPIPStr = mget(<<"vtep_ip">>, VXLan),
     VTEPIP6Str = mget(<<"vtep_ip6">>, VXLan),
     VTEPMac = mget(<<"vtep_mac">>, VXLan),
-    maybe_add_overlay_to_lashup(VTEPIPStr, VTEPMac, AgentSubnet, OverlaySubnet, State),
-    maybe_add_overlay_to_lashup(VTEPIP6Str, VTEPMac, AgentSubnet6, OverlaySubnet6, State).
+    maybe_add_overlay_to_lashup(
+        VTEPIPStr, VTEPMac, AgentSubnet,
+        OverlaySubnet, OverlayName, State),
+    maybe_add_overlay_to_lashup(
+        VTEPIP6Str, VTEPMac, AgentSubnet6,
+        OverlaySubnet6, OverlayName, State).
 
-maybe_add_overlay_to_lashup(_VTEPIPStr, _VTEPMac, _AgentSubnet, undefined, _State) ->
+maybe_add_overlay_to_lashup(
+        _VTEPIPStr, _VTEPMac, _AgentSubnet,
+        undefined, _OverlayName, _State) ->
     ok;
-maybe_add_overlay_to_lashup(undefined, _VTEPMac, _AgentSubnet, _OverlaySubnet, _State) ->
+maybe_add_overlay_to_lashup(
+        undefined, _VTEPMac, _AgentSubnet,
+        _OverlaySubnet, _OverlayName, _State) ->
     ok;
-maybe_add_overlay_to_lashup(VTEPIPStr, VTEPMac, AgentSubnet, OverlaySubnet, State) ->
+maybe_add_overlay_to_lashup(
+        VTEPIPStr, VTEPMac, AgentSubnet,
+        OverlaySubnet, OverlayName, State) ->
     ParsedSubnet = parse_subnet(OverlaySubnet),
+    ets:insert(?MODULE, {ParsedSubnet, OverlayName}),
     Key = [navstar, overlay, ParsedSubnet],
     LashupValue = lashup_kv:value(Key),
     case check_subnet(VTEPIPStr, VTEPMac, AgentSubnet, LashupValue, State) of
@@ -224,8 +269,7 @@ maybe_add_overlay_to_lashup(VTEPIPStr, VTEPMac, AgentSubnet, OverlaySubnet, Stat
             {ok, _} = lashup_kv:request_op(Key, {update, [Updates]})
     end.
 
--type prefix_len() :: 0..32 | 0..128.
--spec(parse_subnet(Subnet :: binary()) -> {inet:ip_address(), prefix_len()}).
+-spec(parse_subnet(Subnet :: binary()) -> subnet()).
 parse_subnet(Subnet) ->
     [IPBin, PrefixLenBin] = binary:split(Subnet, <<"/">>),
     {ok, IP} = inet:parse_address(binary_to_list(IPBin)),
@@ -264,3 +308,14 @@ parse_vtep_mac(MAC) ->
             binary_to_integer(Component, 16)
         end,
         MACComponents).
+
+%%%===================================================================
+%%% Metrics functions
+%%%===================================================================
+
+-spec(m_notify(Key :: atom() | {atom(), atom()},
+               Value :: any(), Type :: atom()) -> ok).
+m_notify({KeyA, KeyB}, Value, Type) ->
+    folsom_metrics:notify({overlay, KeyA, KeyB}, Value, Type);
+m_notify(Key, Value, Type) ->
+    folsom_metrics:notify({overlay, Key}, Value, Type).
