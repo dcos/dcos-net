@@ -85,7 +85,7 @@ push_metrics(SWTs, SysMon) ->
 filter_metrics(MetricsInfo) ->
     MetricsPrefixes = application:get_env(
         dcos_net, metrics_prefixes,
-        [vm, mesos, dns, overlay, l4lb]),
+        [vm, mesos, dns, overlay, l4lb, lashup]),
     [{Name, Opts} || {Name, Opts} <- MetricsInfo, is_tuple(Name),
      lists:member(element(1, Name), MetricsPrefixes)].
 
