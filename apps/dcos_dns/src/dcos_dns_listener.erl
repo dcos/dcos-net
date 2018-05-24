@@ -95,8 +95,11 @@ handle_event(#{key := ?LASHUP_KEY(ZoneName), value := Value}, State) ->
     ok = push_zone(Zone),
     State.
 
-push_zone(Zone) ->
+push_zone(Zone = {ZoneName, Sha, Records}) ->
+    Size = length(Records),
     ok = erldns_zone_cache:put_zone(Zone),
+    lager:notice("~s was updated (~p records, sha: ~s)",
+                 [ZoneName, Size, bin_to_hex(Sha)]),
     case sign_zone(Zone) of
         {no_key, _Zone} -> ok;
         {ok, SignedZone} ->
@@ -148,6 +151,10 @@ convert_record(Record0 = #dns_rr{name = Name0}, Postfix, NewPostfix) ->
     Record1 = Record0#dns_rr{name = Name1},
     {true, Record1}.
 
+-spec(bin_to_hex(binary()) -> binary()).
+bin_to_hex(Bin) ->
+    Bin0 = << <<(integer_to_binary(N, 16))/binary>> || <<N:4>> <= Bin >>,
+    cowboy_bstr:to_lower(Bin0).
 
 -ifdef(TEST).
 zone_convert_test() ->
