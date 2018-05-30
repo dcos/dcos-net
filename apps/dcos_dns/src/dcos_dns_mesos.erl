@@ -29,7 +29,7 @@
     tasks :: #{ task_id() => [dns:dns_rr()] },
     masters_ref :: reference(),
     masters = [] :: [dns:dns_rr()],
-    ops_ref = make_ref() :: reference(),
+    ops_ref = undefined :: reference() | undefined,
     ops = [] :: [riak_dt_orswot:orswot_op()]
 }).
 -type state() :: #state{}.
@@ -296,6 +296,8 @@ push_diff(ZoneName, New, Old) ->
     end.
 
 -spec(push_ops(dns:dname(), [riak_dt_orswot:orswot_op()]) -> ok).
+push_ops(_ZoneName, []) ->
+    ok;
 push_ops(ZoneName, Ops) ->
     % TODO: use lww
     Key = ?LASHUP_KEY(ZoneName),
@@ -334,24 +336,17 @@ zone_records(ZoneName) ->
 -spec(handle_push_ops([riak_dt_orswot:orswot_op()], state()) -> state()).
 handle_push_ops([], State) ->
     State;
-handle_push_ops(Ops, #state{ops=[], ops_ref=Ref}=State) ->
+handle_push_ops(Ops, #state{ops=[], ops_ref=undefined}=State) ->
     % NOTE: push data to lashup 1 time per second
-    case erlang:read_timer(Ref) of
-        false ->
-            ok = push_ops(?DCOS_DOMAIN, Ops),
-            State#state{ops_ref=start_push_ops_timer()};
-        _Timeout ->
-            State#state{ops=Ops}
-    end;
+    ok = push_ops(?DCOS_DOMAIN, Ops),
+    State#state{ops_ref=start_push_ops_timer()};
 handle_push_ops(Ops, #state{ops=Buf}=State) ->
     State#state{ops=Buf ++ Ops}.
 
 -spec(handle_push_ops(state()) -> state()).
-handle_push_ops(#state{ops=[]}=State) ->
-    State;
 handle_push_ops(#state{ops=Ops}=State) ->
     ok = push_ops(?DCOS_DOMAIN, Ops),
-    State#state{ops=[]}.
+    State#state{ops=[], ops_ref=undefined}.
 
 -spec(start_push_ops_timer() -> reference()).
 start_push_ops_timer() ->
