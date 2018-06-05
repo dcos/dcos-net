@@ -4,10 +4,6 @@
 -include("dcos_dns.hrl").
 -include_lib("dns/include/dns.hrl").
 
--ifdef(TEST).
--include_lib("eunit/include/eunit.hrl").
--endif.
-
 %% API
 -export([
     start_link/0,
@@ -191,7 +187,7 @@ handle_masters(#state{masters=MRRs}=State) ->
     ZoneName = ?DCOS_DOMAIN,
     MRRs0 = master_records(ZoneName),
 
-    {NewRRs, OldRRs} = complement(MRRs0, MRRs),
+    {NewRRs, OldRRs} = dcos_net_utils:complement(MRRs0, MRRs),
     lists:foreach(fun (#dns_rr{data=#dns_rrdata_a{ip = IP}}) ->
         lager:notice("master ~p was added", [IP])
     end, NewRRs),
@@ -286,7 +282,7 @@ push_zone(ZoneName, Records) ->
 -spec(push_diff(dns:dname(), [dns:dns_rr()], [dns:dns_rr()]) ->
     {ok, New :: [dns:dns_rr()], Old :: [dns:dns_rr()]}).
 push_diff(ZoneName, New, Old) ->
-    case complement(New, Old) of
+    case dcos_net_utils:complement(New, Old) of
         {[], []} ->
             {ok, [], []};
         {AddRecords, RemoveRecords} ->
@@ -352,42 +348,3 @@ handle_push_ops(#state{ops=Ops}=State) ->
 start_push_ops_timer() ->
     Timeout = application:get_env(dcos_dns, push_ops_timeout, 1000),
     erlang:start_timer(Timeout, self(), push_ops).
-
-%%%===================================================================
-%%% Complement functions
-%%%===================================================================
-
-%% @doc Return {A\B, B\A}
--spec(complement([A], [B]) -> {[A], [B]}
-    when A :: term(), B :: term()).
-complement(ListA, ListB) ->
-    complement(
-        lists:sort(ListA),
-        lists:sort(ListB),
-        [], []).
-
--spec(complement([A], [B], [A], [B]) -> {[A], [B]}
-    when A :: term(), B :: term()).
-complement([], ListB, Acc, Bcc) ->
-    {Acc, ListB ++ Bcc};
-complement(ListA, [], Acc, Bcc) ->
-    {ListA ++ Acc, Bcc};
-complement([A|ListA], [A|ListB], Acc, Bcc) ->
-    complement(ListA, ListB, Acc, Bcc);
-complement([A|_]=ListA, [B|ListB], Acc, Bcc) when A > B ->
-    complement(ListA, ListB, Acc, [B|Bcc]);
-complement([A|ListA], [B|_]=ListB, Acc, Bcc) when A < B ->
-    complement(ListA, ListB, [A|Acc], Bcc).
-
--ifdef(TEST).
-
-complement_test() ->
-    {A, B} =
-        complement(
-            [a, 0, b, 1, c, 2],
-            [e, 0, d, 1, f, 2]),
-    ?assertEqual(
-        {[a, b, c], [d, e, f]},
-        {lists:sort(A), lists:sort(B)}).
-
--endif.
