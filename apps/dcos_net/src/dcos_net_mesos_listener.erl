@@ -5,7 +5,9 @@
     start_link/0,
     subscribe/0,
     is_leader/0,
-    next/1
+    next/1,
+    poll/0,
+    from_state/1
 ]).
 
 %% gen_server callbacks
@@ -74,6 +76,19 @@ is_leader() ->
     catch _Class:_Error ->
         false
     end.
+
+-spec(poll() -> {ok, #{task_id() => task()}} | {error, term()}).
+poll() ->
+    case poll_imp() of
+        {ok, Obj} ->
+            {ok, from_state(Obj)};
+        {error, Error} ->
+            {error, Error}
+    end.
+
+-spec(from_state(jiffy:object()) -> #{task_id() => task()}).
+from_state(Data) ->
+    from_state_imp(Data).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -216,9 +231,8 @@ handle_framework_added(Obj, State) ->
 
 -spec(handle_framework_updated(jiffy:object(), state()) -> state()).
 handle_framework_updated(Obj, #state{frameworks=F}=State) ->
-    Info = mget([<<"framework">>, <<"framework_info">>], Obj),
-    Id = mget([<<"id">>, <<"value">>], Info),
-    Name = mget(<<"name">>, Info, undefined),
+    FObj = mget(<<"framework">>, Obj),
+    #{id := Id, name := Name} = handle_framework(FObj),
 
     lager:notice("Framework ~s added, ~s", [Id, Name]),
     State0 = State#state{frameworks=mput(Id, Name, F)},
@@ -226,32 +240,44 @@ handle_framework_updated(Obj, #state{frameworks=F}=State) ->
 
 -spec(handle_framework_removed(jiffy:object(), state()) -> state()).
 handle_framework_removed(Obj, #state{frameworks=F}=State) ->
-    Id = mget([<<"framework_info">>, <<"id">>, <<"value">>], Obj),
+    #{id := Id} = handle_framework(Obj),
     lager:notice("Framework ~s removed", [Id]),
     State#state{frameworks=mremove(Id, F)}.
 
+-spec(handle_framework(jiffy:object()) ->
+    #{id => binary(), name => binary() | undefined}).
+handle_framework(Obj) ->
+    Info = mget(<<"framework_info">>, Obj),
+    Id = mget([<<"id">>, <<"value">>], Info),
+    Name = mget(<<"name">>, Info, undefined),
+    #{id => Id, name => Name}.
+
 -spec(handle_agent_added(jiffy:object(), state()) -> state()).
 handle_agent_added(Obj, #state{agents=A}=State) ->
-    Info = mget([<<"agent">>, <<"agent_info">>], Obj),
-    Id = mget([<<"id">>, <<"value">>], Info),
-    {ok, Host} =
-        try mget(<<"hostname">>, Info) of Hostname ->
-            lager:notice("Agent ~s added, ~s", [Id, Hostname]),
-            Hostname0 = binary_to_list(Hostname),
-            inet:parse_ipv4strict_address(Hostname0)
-        catch error:{badkey, _} ->
-            lager:notice("Agent ~s added", [Id]),
-            {ok, undefined}
-        end,
-
-    State0 = State#state{agents=mput(Id, Host, A)},
-    handle_waiting_tasks(agent_ip, Id, Host, State0).
+    AObj = mget(<<"agent">>, Obj),
+    #{id := Id, ip := IP} = handle_agent(AObj),
+    lager:notice("Agent ~s added, ~p", [Id, IP]),
+    State0 = State#state{agents=mput(Id, IP, A)},
+    handle_waiting_tasks(agent_ip, Id, IP, State0).
 
 -spec(handle_agent_removed(jiffy:object(), state()) -> state()).
 handle_agent_removed(Obj, #state{agents=A}=State) ->
     Id = mget([<<"agent_id">>, <<"value">>], Obj),
     lager:notice("Agent ~s removed", [Id]),
     State#state{agents=mremove(Id, A)}.
+
+-spec(handle_agent(jiffy:object()) ->
+    #{id => binary(), ip => inet:ip4_address() | undefined}).
+handle_agent(Obj) ->
+    Info = mget(<<"agent_info">>, Obj),
+    Id = mget([<<"id">>, <<"value">>], Info),
+    try mget(<<"hostname">>, Info) of Hostname ->
+        IPStr = binary_to_list(Hostname),
+        {ok, IP} = inet:parse_ipv4strict_address(IPStr),
+        #{id => Id, ip => IP}
+    catch error:{badkey, _} ->
+        #{id => Id, ip => undefined}
+    end.
 
 %%%===================================================================
 %%% Handle task functions
@@ -267,34 +293,34 @@ handle_task(TaskObj, #state{tasks=T}=State) ->
     task_id(), jiffy:object(),
     task(), state()) -> state()).
 handle_task(TaskId, TaskObj, Task,
-        #state{frameworks=F, agents=A}=State) ->
+            State=#state{agents=A, frameworks=F}) ->
+    Task0 = task(TaskObj, Task, A, F),
+    add_task(TaskId, Task, Task0, State).
+
+-spec(task(TaskObj, task(), Agent, Framework) -> task()
+    when TaskObj :: jiffy:object(),
+         Agent :: #{binary() => inet:ip4_address()},
+         Framework :: #{binary() => binary()}).
+task(TaskObj, Task, Agents, Frameworks) ->
     AgentId = mget([<<"agent_id">>, <<"value">>], TaskObj),
-    Agent = mget(AgentId, A, {id, AgentId}),
+    Agent = mget(AgentId, Agents, {id, AgentId}),
 
     FrameworkId = mget([<<"framework_id">>, <<"value">>], TaskObj),
-    Framework = mget(FrameworkId, F, {id, FrameworkId}),
+    Framework = mget(FrameworkId, Frameworks, {id, FrameworkId}),
 
     Fields = #{
-        name => {mget, <<"name">>},
-        framework => {value, Framework},
-        agent_ip => {value, Agent},
         task_ip => fun handle_task_ip/2,
         state => fun handle_task_state/2,
         ports => fun handle_task_ports/2
     },
-    Task0 =
-        maps:fold(
-            fun (Key, {value, Value}, Acc) ->
-                    mput(Key, Value, Acc);
-                (Key, Fun, Acc) when is_function(Fun) ->
-                    Value = Fun(TaskObj, Acc),
-                    mput(Key, Value, Acc);
-                (Key, {mget, Path}, Acc) ->
-                    Value = mget(Path, TaskObj, undefined),
-                    mput(Key, Value, Acc)
-            end, Task, Fields),
-
-    add_task(TaskId, Task, Task0, State).
+    Name = mget(<<"name">>, TaskObj, undefined),
+    Task0 = mput(name, Name, Task),
+    Task1 = mput(agent_ip, Agent, Task0),
+    Task2 = mput(framework, Framework, Task1),
+    maps:fold(fun (Key, Fun, Acc) ->
+        Value = Fun(TaskObj, Acc),
+        mput(Key, Value, Acc)
+    end, Task2, Fields).
 
 -spec(add_task(task_id(), task(), task(), state()) -> state()).
 add_task(TaskId, TaskPrev, TaskNew, State) ->
@@ -527,6 +553,63 @@ handle_task_status(#{<<"statuses">> := TaskStatuses}) ->
     TaskStatus;
 handle_task_status(TaskStatus) ->
     TaskStatus.
+
+%%%===================================================================
+%%% Poll Functions
+%%%===================================================================
+
+-spec(poll_imp() -> {ok, jiffy:object()} | {error, term()}).
+poll_imp() ->
+    IsMaster = dcos_net_app:is_master(),
+    case dcos_net_mesos:call(#{type => <<"GET_STATE">>}) of
+        {ok, Obj} when IsMaster ->
+            {ok, Obj};
+        {ok, #{<<"get_state">> := State} = Obj} ->
+            case dcos_net_mesos:call(#{type => <<"GET_AGENT">>}) of
+                {ok, #{<<"get_agent">> := Agent}} ->
+                    GetAgents = #{<<"agents">> => [Agent]},
+                    State0 = State#{<<"get_agents">> => GetAgents},
+                    Obj0 = Obj#{<<"get_state">> => State0},
+                    {ok, Obj0};
+                {error, Error} ->
+                    {error, Error}
+            end;
+        {error, Error} ->
+            {error, Error}
+    end.
+
+-spec(from_state_imp(jiffy:object()) -> #{task_id() => task()}).
+from_state_imp(Data) ->
+    State = mget(<<"get_state">>, Data, #{}),
+
+    AgentObjs = mget([<<"get_agents">>, <<"agents">>], State, []),
+    Agents =
+        lists:foldl(fun (AObj, Acc) ->
+            #{id := Id, ip := IP} = handle_agent(AObj),
+            mput(Id, IP, Acc)
+        end, #{}, AgentObjs),
+
+    FrameworkObjs = mget([<<"get_frameworks">>, <<"frameworks">>], State, []),
+    Frameworks =
+        lists:foldl(fun (FObj, Acc) ->
+            #{id := Id, name := Name} = handle_framework(FObj),
+            mput(Id, Name, Acc)
+        end, #{}, FrameworkObjs),
+
+    TaskObjs = mget([<<"get_tasks">>, <<"launched_tasks">>], State, []),
+    TaskObjs0 = mget([<<"get_tasks">>, <<"tasks">>], State, TaskObjs),
+    Tasks =
+        lists:foldl(fun (TaskObj, Acc) ->
+            Id = mget([<<"task_id">>, <<"value">>], TaskObj),
+            Task = task(TaskObj, #{}, Agents, Frameworks),
+            mput(Id, Task, Acc)
+        end, #{}, TaskObjs0),
+
+    maps:filter(
+        fun (_TaskId, #{agent_ip := {id, _}}) -> false;
+            (_TaskId, #{framework := {id, _}}) -> false;
+            (_TaskId, _Task) -> true
+        end, Tasks).
 
 %%%===================================================================
 %%% Subscribe Functions

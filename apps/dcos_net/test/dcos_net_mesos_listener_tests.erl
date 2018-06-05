@@ -15,6 +15,7 @@
 basic_test_() ->
     {setup, fun basic_setup/0, fun cleanup/1, {with, [
         fun is_leader/1,
+        fun basic_from_state/1,
         fun none_on_host/1,
         fun none_on_dcos/1,
         fun ucr_on_host/1,
@@ -49,6 +50,9 @@ hello_overlay_test_() ->
 is_leader(_Tasts) ->
     IsLeader = dcos_net_mesos_listener:is_leader(),
     ?assertEqual(true, IsLeader).
+
+basic_from_state(Tasks) ->
+    from_state("operator-api.json", Tasks).
 
 none_on_host(Tasks) ->
     TaskId = <<"none-on-host.1458594c-2630-11e8-af52-70b3d5800001">>,
@@ -274,8 +278,99 @@ hello_overlay_host_vip(Tasks) ->
     }, maps:get(TaskId, Tasks)).
 
 %%%===================================================================
+%%% From State Tests
+%%%===================================================================
+
+from_state(FileName, ExpectedTasks) ->
+    Lines = read_lines(FileName),
+    State = from_state_merge(Lines),
+    Tasks = dcos_net_mesos_listener:from_state(State),
+    ?assertEqual(ExpectedTasks, Tasks).
+
+-define(FPATH, [<<"get_state">>, <<"get_frameworks">>, <<"frameworks">>]).
+-define(TPATH, [<<"get_state">>, <<"get_tasks">>, <<"tasks">>]).
+
+from_state_merge(Lines) ->
+    lists:foldl(fun (Line, Acc) ->
+        Obj = jiffy:decode(Line, [return_maps]),
+        from_state_merge(Obj, Acc)
+    end, #{<<"type">> => <<"GET_STATE">>}, Lines).
+
+from_state_merge(#{<<"type">> := <<"SUBSCRIBED">>,
+                  <<"subscribed">> := #{<<"get_state">> := State}}, Acc) ->
+    Acc#{<<"get_state">> => State};
+from_state_merge(#{<<"type">> := <<"FRAMEWORK_UPDATED">>,
+                  <<"framework_updated">> :=
+                        #{<<"framework">> := FObj}}, Acc) ->
+    Path = [<<"framework_info">>, <<"id">>, <<"value">>],
+    from_state_merge(Path, ?FPATH, FObj, Acc);
+from_state_merge(#{<<"type">> := <<"TASK_ADDED">>,
+                  <<"task_added">> := #{<<"task">> := TObj}}, Acc) ->
+    Tasks = mget(?TPATH, Acc, []),
+    mput(?TPATH, [TObj | Tasks], Acc);
+from_state_merge(#{<<"type">> := <<"TASK_UPDATED">>,
+                  <<"task_updated">> := #{<<"status">> := TObj}}, Acc) ->
+    Path = [<<"task_id">>, <<"value">>],
+    from_state_merge(Path, ?TPATH, TObj, Acc).
+
+from_state_merge(Path, ObjPath, Obj, Acc) ->
+    Id = mget(Path, Obj),
+    Objs = mget(ObjPath, Acc, []),
+    case mpartition(Path, Id, Objs) of
+        {[], Objs} ->
+            mput(ObjPath, [Obj | Objs], Acc);
+        {[O], Objs0} ->
+            Objs1 = [mmerge(O, Obj) | Objs0],
+            mput(ObjPath, Objs1, Acc)
+    end.
+
+mget([Key], Obj) ->
+    maps:get(Key, Obj);
+mget([Key | Tail], Obj) ->
+    Obj0 = maps:get(Key, Obj),
+    mget(Tail, Obj0).
+
+mget(Key, Obj, Default) ->
+    try
+        mget(Key, Obj)
+    catch error:{badkey, _BadKey} ->
+        Default
+    end.
+
+mput([Key], Value, Obj) ->
+    maps:put(Key, Value, Obj);
+mput([Key | Tail], Value, Obj) ->
+    Child = maps:get(Key, Obj),
+    Child0 = mput(Tail, Value, Child),
+    maps:put(Key, Child0, Obj).
+
+mpartition(Path, Value, List) ->
+    lists:partition(fun (X) ->
+        mget(Path, X) =:= Value
+    end, List).
+
+mmerge(#{} = A, #{} = B) ->
+    maps:fold(fun (Key, ValueB, Acc) ->
+        case maps:find(Key, Acc) of
+            {ok, ValueA} ->
+                Acc#{Key => mmerge(ValueA, ValueB)};
+            error ->
+                Acc#{Key => ValueB}
+        end
+    end, A, B);
+mmerge(_A, B) ->
+    B.
+
+%%%===================================================================
 %%% Setup & cleanup
 %%%===================================================================
+
+read_lines(FileName) ->
+    {ok, Cwd} = file:get_cwd(),
+    DataFile = filename:join([Cwd, "apps/dcos_net/test/", FileName]),
+    {ok, Data} = file:read_file(DataFile),
+    Lines = binary:split(Data, <<"\n">>, [global]),
+    [ Line || Line <- Lines, Line =/= <<>> ].
 
 basic_setup() ->
     setup("operator-api.json").
@@ -287,10 +382,7 @@ hello_overlay_setup() ->
     setup("hello-overlay.json").
 
 setup(FileName) ->
-    {ok, Cwd} = file:get_cwd(),
-    DataFile = filename:join([Cwd, "apps/dcos_net/test/", FileName]),
-    {ok, Data} = file:read_file(DataFile),
-    Lines = binary:split(Data, <<"\n">>, [global]),
+    Lines = read_lines(FileName),
 
     application:load(dcos_net),
     application:set_env(dcos_net, is_master, true),
@@ -354,8 +446,6 @@ stream_loop(Ref, Pid, []) ->
     timer:sleep(500),
     Line = jiffy:encode(#{type => <<"HEARTBEAT">>}),
     stream_loop(Ref, Pid, [Line]);
-stream_loop(Ref, Pid, [<<>>|Lines]) ->
-    stream_loop(Ref, Pid, Lines);
 stream_loop(Ref, Pid, [Line|Lines]) ->
     Size = integer_to_binary(size(Line)),
     Data = <<Size/binary, "\n", Line/binary>>,
