@@ -43,6 +43,30 @@ hello_overlay_test_() ->
         fun hello_overlay_host_vip/1
     ]}}.
 
+vip_labels_test() ->
+    [RawData] = read_lines("vip-labels.json"),
+    Data = jiffy:decode(RawData, [return_maps]),
+    ?assertEqual(#{
+        <<"app.c9e19be4-6a94-11e8-bfc9-70b3d5800002">> => #{
+            name => <<"app">>,
+            framework => <<"marathon">>,
+            agent_ip => {172, 17, 0, 3},
+            task_ip => [{172, 17, 0, 3}],
+            ports => [
+                #{name => <<"foo">>, protocol => tcp,
+                  port => 9999, vip => [<<"/abc:80">>, <<"/cbd:80">>,
+                                        <<"def:80">>]},
+                #{name => <<"bar">>, protocol => tcp,
+                  port => 10000, vip => [<<"jkl:80">>]},
+                #{name => <<"baz">>, protocol => tcp,
+                  port => 10001, vip => [<<"/xyz:443">>]},
+                #{name => <<"qux">>, protocol => tcp,
+                  port => 10002}
+            ],
+            state => {running, true}
+        }
+    }, dcos_net_mesos_listener:from_state(Data)).
+
 %%%===================================================================
 %%% Basic Tests
 %%%===================================================================

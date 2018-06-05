@@ -308,16 +308,16 @@ task(TaskObj, Task, Agents, Frameworks) ->
     FrameworkId = mget([<<"framework_id">>, <<"value">>], TaskObj),
     Framework = mget(FrameworkId, Frameworks, {id, FrameworkId}),
 
-    Fields = #{
-        task_ip => fun handle_task_ip/2,
-        state => fun handle_task_state/2,
-        ports => fun handle_task_ports/2
-    },
+    Fields = [
+        {task_ip, fun handle_task_ip/2},
+        {state, fun handle_task_state/2},
+        {ports, fun handle_task_ports/2}
+    ],
     Name = mget(<<"name">>, TaskObj, undefined),
     Task0 = mput(name, Name, Task),
     Task1 = mput(agent_ip, Agent, Task0),
     Task2 = mput(framework, Framework, Task1),
-    maps:fold(fun (Key, Fun, Acc) ->
+    lists:foldl(fun ({Key, Fun}, Acc) ->
         Value = Fun(TaskObj, Acc),
         mput(Key, Value, Acc)
     end, Task2, Fields).
@@ -417,8 +417,10 @@ handle_task_ip(TaskObj, _Task) ->
 -spec(handle_task_ports(jiffy:object(), task()) -> [task_port()] | undefined).
 handle_task_ports(TaskObj, Task) ->
     PortMappings = handle_task_port_mappings(TaskObj),
+    PortResources = handle_task_port_resources(TaskObj),
     DiscoveryPorts = handle_task_discovery_ports(TaskObj, Task),
-    merge_task_ports(PortMappings, DiscoveryPorts).
+    Ports = merge_task_ports(PortMappings, PortResources, DiscoveryPorts),
+    merge_host_ports(Task, Ports).
 
 -spec(handle_task_port_mappings(jiffy:object()) -> [task_port()]).
 handle_task_port_mappings(TaskObj) ->
@@ -459,6 +461,64 @@ handle_protocol(Obj) ->
         <<"tcp">> -> tcp;
         <<"udp">> -> udp
     end.
+
+-spec(handle_task_port_resources(jiffy:object()) -> [task_port()]).
+handle_task_port_resources(TaskObj) ->
+    TaskLabels = mget([<<"labels">>, <<"labels">>], TaskObj, []),
+    TaskVIPLabels = handle_task_vip_labels(TaskLabels),
+    Resources = mget(<<"resources">>, TaskObj, []),
+    Ports = [P || #{<<"name">> := <<"ports">>} = P <- Resources],
+    Ports0 = expand_ports(Ports),
+    handle_task_port_resources(Ports0, TaskVIPLabels).
+
+-spec(expand_ports([jiffy:object()]) -> [inet:port_number()]).
+expand_ports([]) ->
+    [];
+expand_ports([#{<<"type">> := <<"RANGES">>,
+                <<"ranges">> := #{<<"range">> := Ranges}}]) ->
+    lists:flatmap(fun (#{<<"begin">> := Begin, <<"end">> := End}) ->
+        lists:seq(Begin, End)
+    end, Ranges);
+expand_ports([#{<<"type">> := <<"SCALAR">>,
+                <<"scalar">> := #{<<"value">> := Port}}]) ->
+    [Port].
+
+-spec(handle_task_port_resources(Ports, TaskVIPLabels) -> [task_port()]
+    when Ports :: [inet:port_number()],
+         TaskVIPLabels :: [{tcp | udp, non_neg_integer(), binary()}]).
+handle_task_port_resources(Ports, TaskVIPLabels) ->
+    lists:map(fun ({Idx, Protocol, Label}) ->
+        Port = lists:nth(Idx + 1, Ports),
+        #{host_port => Port, protocol => Protocol, vip => [Label]}
+    end, TaskVIPLabels).
+
+-spec(handle_task_vip_labels([jiffy:object()]) ->
+    [{tcp | udp, non_neg_integer(), binary()}]).
+handle_task_vip_labels(Labels) when is_list(Labels) ->
+    lists:flatmap(fun handle_task_vip_label/1, Labels).
+
+-spec(handle_task_vip_label(jiffy:object()) ->
+    [{tcp | udp, non_neg_integer(), binary()}]).
+handle_task_vip_label(#{<<"key">> := Key, <<"value">> := Value}) ->
+    case cowboy_bstr:to_lower(Key) of
+        <<"vip_port", Index/binary>> ->
+            try binary_to_integer(Index) of
+                Idx when Idx < 0 -> [];
+                Idx -> handle_task_vip_label(Idx, Value)
+            catch error:badarg ->
+                []
+            end;
+        _Key -> []
+    end.
+
+-spec(handle_task_vip_label(Idx, Label) -> [{Idx, tcp | udp, Label}]
+    when Idx :: non_neg_integer(), Label :: binary()).
+handle_task_vip_label(Idx, <<"tcp://", Label/binary>>) ->
+    [{Idx, tcp, Label}];
+handle_task_vip_label(Idx, <<"udp://", Label/binary>>) ->
+    [{Idx, udp, Label}];
+handle_task_vip_label(_Idx, _Label) ->
+    [].
 
 -spec(handle_task_discovery_ports(jiffy:object(), task()) -> [task_port()]).
 handle_task_discovery_ports(TaskObj, Task) ->
@@ -514,6 +574,13 @@ handle_port_scope(Labels) ->
         [] -> port
     end.
 
+-spec(merge_task_ports(Ports, Ports, Ports) -> Ports
+    when Ports :: [task_port()]).
+merge_task_ports(PortMappings, PortResources, DiscoveryPorts) ->
+    merge_task_ports(
+        merge_task_ports(PortMappings, PortResources),
+        DiscoveryPorts).
+
 -spec(merge_task_ports([task_port()], [task_port()]) -> [task_port()]).
 merge_task_ports([], DiscoveryPorts) ->
     DiscoveryPorts;
@@ -535,13 +602,44 @@ merge_task_ports(PortMappings, DiscoveryPorts) ->
             KeyC = {A, B, C},
             case mfind([KeyA, KeyB, KeyC], Acc) of
                 {ok, Key, TP} ->
-                    TP0 = maps:merge(TP, TaskPort),
+                    TP0 = merge_ports(TP, TaskPort),
                     maps:put(Key, TP0, Acc);
                 error ->
                     maps:put(KeyC, TaskPort, Acc)
             end
         end, Ports, PortMappings),
     maps:values(Ports0).
+
+-spec(merge_ports(task_port(), task_port()) -> task_port()).
+merge_ports(#{vip := VIPA} = PortA, #{vip := VIPB} = PortB) ->
+    Port = maps:merge(PortA, PortB),
+    VIP = lists:usort(VIPA ++ VIPB),
+    maps:put(vip, VIP, Port);
+merge_ports(PortA, PortB) ->
+    maps:merge(PortA, PortB).
+
+-spec(merge_host_ports(task(), [task_port()]) -> [task_port()]).
+merge_host_ports(#{state := true}, Ports) ->
+    Ports;
+merge_host_ports(#{state := false}, Ports) ->
+    Ports;
+merge_host_ports(#{agent_ip := AgentIP, task_ip := [AgentIP]}, Ports) ->
+    PortsMap = merge_host_ports(Ports),
+    maps:values(PortsMap);
+merge_host_ports(_Task, Ports) ->
+    Ports.
+
+-spec(merge_host_ports([task_port()]) -> #{inet:port_number() => [task_port()]}).
+merge_host_ports(Ports) ->
+    lists:foldl(fun (Port, Acc) ->
+        #{port := Key} = PortA =
+            case maps:take(host_port, Port) of
+                {K, P} -> P#{port => K};
+                error -> Port
+            end,
+        PortB = maps:get(Key, Acc, #{}),
+        Acc#{Key => merge_ports(PortA, PortB)}
+    end, #{}, Ports).
 
 -spec(handle_task_status(jiffy:object()) -> jiffy:object()).
 handle_task_status(#{<<"statuses">> := TaskStatuses}) ->
