@@ -672,28 +672,18 @@ handle_init(State0) ->
 
 -spec(start_stream() -> {ok, state()} | {error, term()}).
 start_stream() ->
-    Body = jiffy:encode(#{type => <<"SUBSCRIBE">>}),
-    ContentType = "application/json",
-    Request = {"/api/v1", [], ContentType, Body},
-    {ok, Ref} =
-        dcos_net_mesos:request(
-            post, Request, [{timeout, infinity}],
-            [{sync, false}, {stream, {self, once}}]),
-    receive
-        {http, {Ref, {{_HTTPVersion, 307, _StatusStr}, _Headers, _Body}}} ->
-            {error, redirect};
-        {http, {Ref, {{_HTTPVersion, Status, _StatusStr}, _Headers, _Body}}} ->
-            {error, {http_status, Status}};
-        {http, {Ref, {error, Error}}} ->
-            {error, Error};
-        {http, {Ref, stream_start, _Headers, Pid}} ->
+    Opts = [{stream, {self, once}}],
+    Request = #{type => <<"SUBSCRIBE">>},
+    case dcos_net_mesos:call(Request, [{timeout, infinity}], Opts) of
+        {ok, Ref, Pid} ->
             httpc:stream_next(Pid),
             erlang:monitor(process, Pid),
             State = #state{pid=Pid, ref=Ref},
-            {ok, handle_heartbeat(State)}
-    after 5000 ->
-        ok = httpc:cancel_request(Ref),
-        {error, timeout}
+            {ok, handle_heartbeat(State)};
+        {error, {http_status, {_HTTPVersion, 307, _StatusStr}, _Data}} ->
+            {error, redirect};
+        {error, Error} ->
+            {error, Error}
     end.
 
 -spec(handle_stream(binary(), state()) ->

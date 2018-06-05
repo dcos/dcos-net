@@ -2,6 +2,8 @@
 
 -export([
     poll/1,
+    call/1,
+    call/3,
     request/2,
     request/4,
     http_options/0
@@ -16,6 +18,33 @@
 poll(URIPath) ->
     Response = request(URIPath, [{"Accept", "application/json"}]),
     handle_response(Response).
+
+-spec(call(jiffy:json_term()) ->
+    {ok, jiffy:json_term()} | {error, Reason :: term()}).
+call(Request) ->
+    call(Request, [], []).
+
+-spec(call(jiffy:json_term(), httpc:http_options(), httpc:options()) ->
+    {ok, jiffy:json_term()} | {ok, reference(), pid()} | {error, term()}).
+call(Request, HTTPOptions, Opts) ->
+    ContentType = "application/json",
+    HTTPRequest = {"/api/v1", [], ContentType, jiffy:encode(Request)},
+    Opts0 = [{sync, false}|Opts],
+    {ok, Ref} = dcos_net_mesos:request(post, HTTPRequest, HTTPOptions, Opts0),
+    Timeout = application:get_env(dcos_net, mesos_timeout, 30000),
+    receive
+        {http, {Ref, stream_start, _Headers, Pid}} ->
+            {ok, Ref, Pid};
+        {http, {Ref, {{_Version, 200, _Reason}, _Headers, Data}}} ->
+            {ok, jiffy:decode(Data, [return_maps])};
+        {http, {Ref, {StatusLine, _Headers, Data}}} ->
+            {error, {http_status, StatusLine, Data}};
+        {http, {Ref, {error, Error}}} ->
+            {error, Error}
+    after Timeout ->
+        ok = httpc:cancel_request(Ref),
+        {error, timeout}
+    end.
 
 -spec(request(string(), httpc:headers()) ->
     {ok, response()} | {error, Reason :: term()}).
