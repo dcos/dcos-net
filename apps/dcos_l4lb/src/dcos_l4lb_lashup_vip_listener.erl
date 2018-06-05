@@ -25,10 +25,9 @@
     name_to_ip/2,
     code_change/3]).
 
--include_lib("stdlib/include/ms_transform.hrl").
 -include("dcos_l4lb.hrl").
--include_lib("mesos_state/include/mesos_state.hrl").
 -include_lib("dns/include/dns.hrl").
+-include_lib("stdlib/include/ms_transform.hrl").
 
 -ifdef(TEST).
 -include_lib("proper/include/proper.hrl").
@@ -47,10 +46,9 @@
     }).
 -type state() :: #state{}.
 
--type ip_vip() :: {tcp | udp, inet:ip_address(), inet:port_number()}.
--type vip_name() :: binary().
--type named_vip() :: {tcp | udp, {name, {vip_name(), framework_name()}}, inet:port_number()}.
--type vip2() :: {ip_vip() | named_vip(), [{inet:ip_address(), ip_port()}]}.
+-type key() :: dcos_l4lb_mesos_poller:key().
+-type backend() :: dcos_l4lb_mesos_poller:backend().
+-type vip2() :: {key(), [backend()]}.
 
 %%%===================================================================
 %%% API
@@ -162,7 +160,7 @@ categories_BE({{_Protocol, _Name, _PortNumber}, BEs}) ->
     lists:usort(Families).
 
 %% @doc Extracts name based vips. Binds names
--spec(rebind_names(family(), [vip2()], state()) -> [ip_vip()]).
+-spec(rebind_names(family(), [vip2()], state()) -> [key()]).
 rebind_names(_Family, [], _State) ->
     [];
 rebind_names(Family, VIPs, State) ->
@@ -172,7 +170,7 @@ rebind_names(Family, VIPs, State) ->
     update_name_mapping(Family, Names2, State),
     lists:map(fun(VIP) -> rewrite_name(Family, VIP) end, VIPs).
 
--spec(rewrite_name(family(), vip2()) -> ip_vip()).
+-spec(rewrite_name(family(), vip2()) -> key()).
 rewrite_name(Family, {{Protocol, {name, {Name, FWName}}, PortNum}, BEs}) ->
     FullName = binary_to_name([Name, FWName]),
     [{_, IP}] = name_to_ip(Family, FullName),

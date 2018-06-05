@@ -485,7 +485,7 @@ expand_ports([#{<<"type">> := <<"SCALAR">>,
 
 -spec(handle_task_port_resources(Ports, TaskVIPLabels) -> [task_port()]
     when Ports :: [inet:port_number()],
-         TaskVIPLabels :: [{tcp | udp, non_neg_integer(), binary()}]).
+         TaskVIPLabels :: [{non_neg_integer(), tcp | udp, binary()}]).
 handle_task_port_resources(Ports, TaskVIPLabels) ->
     lists:map(fun ({Idx, Protocol, Label}) ->
         Port = lists:nth(Idx + 1, Ports),
@@ -493,12 +493,12 @@ handle_task_port_resources(Ports, TaskVIPLabels) ->
     end, TaskVIPLabels).
 
 -spec(handle_task_vip_labels([jiffy:object()]) ->
-    [{tcp | udp, non_neg_integer(), binary()}]).
-handle_task_vip_labels(Labels) when is_list(Labels) ->
+    [{non_neg_integer(), tcp | udp, binary()}]).
+handle_task_vip_labels(Labels) ->
     lists:flatmap(fun handle_task_vip_label/1, Labels).
 
 -spec(handle_task_vip_label(jiffy:object()) ->
-    [{tcp | udp, non_neg_integer(), binary()}]).
+    [{non_neg_integer(), tcp | udp, binary()}]).
 handle_task_vip_label(#{<<"key">> := Key, <<"value">> := Value}) ->
     case cowboy_bstr:to_lower(Key) of
         <<"vip_port", Index/binary>> ->
