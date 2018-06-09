@@ -13,8 +13,7 @@
 
 -type response() :: {httpc:status_line(), httpc:headers(), Body :: binary()}.
 
--spec(poll(string()) -> {ok, MesosState} | {error, Reason :: term()}
-    when MesosState :: mesos_state_client:mesos_agent_state()).
+-spec(poll(string()) -> {ok, jiffy:json_term()} | {error, Reason :: term()}).
 poll(URIPath) ->
     Response = request(URIPath, [{"Accept", "application/json"}]),
     handle_response(Response).
@@ -80,11 +79,11 @@ request(Method, Request, HTTPOptions, Opts) ->
 %%%===================================================================
 
 -spec(handle_response({ok, response()} | {error, Reason :: term()}) ->
-    {ok, mesos_state_client:mesos_agent_state()} | {error, Reason :: term()}).
+    {ok, jiffy:json_term()} | {error, Reason :: term()}).
 handle_response({error, Reason}) ->
     {error, Reason};
 handle_response({ok, {_StatusLine = {_HTTPVersion, 200 = _StatusCode, _ReasonPhrase}, _Headers, Body}}) ->
-    mesos_state_client:parse_response(Body);
+    {ok, jiffy:decode(Body, [return_maps])};
 handle_response({ok, {StatusLine, _Headers, _Body}}) ->
     {error, StatusLine}.
 
