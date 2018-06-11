@@ -50,6 +50,9 @@
 -type backend() :: dcos_l4lb_mesos_poller:backend().
 -type vip2() :: {key(), [backend()]}.
 
+-define(SLIDE_WINDOW, 30). % seconds
+-define(SLIDE_SIZE, 64).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -58,6 +61,9 @@
 -spec(start_link() ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link() ->
+    folsom_metrics:new_histogram(
+        {l4lb, push_zones_ms}, slide_uniform,
+        {?SLIDE_WINDOW, ?SLIDE_SIZE}),
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 %%%===================================================================
@@ -123,6 +129,7 @@ handle_lookup_vip({name, Name}) when is_binary(Name) ->
 handle_lookup_vip(Arg)  -> {badmatch, Arg}.
 
 handle_event(_Event = #{value := VIPs}, State) ->
+    folsom_metrics:notify({l4lb, events, updates}, {inc, 1}, counter),
     handle_value(VIPs, State).
 
 handle_value(VIPs0, State0) ->
@@ -180,10 +187,16 @@ rewrite_name(_, Else) ->
 
 push_state_to_dcos_dns(State) ->
     ZoneNames = ?ZONE_NAMES,
-    lists:foreach(fun (ZoneName) ->
-        Zone = zone(ZoneName, State),
-        ok = erldns_zone_cache:put_zone(Zone)
-    end, ZoneNames).
+    Begin = erlang:monotonic_time(millisecond),
+    try
+        lists:foreach(fun (ZoneName) ->
+            Zone = zone(ZoneName, State),
+            ok = erldns_zone_cache:put_zone(Zone)
+        end, ZoneNames)
+    after
+        Ms = erlang:monotonic_time(millisecond) - Begin,
+        folsom_metrics:notify({l4lb, push_zones_ms}, Ms, histogram)
+    end.
 
 -spec(zone([binary()], state()) -> {Name :: binary(), Sha :: binary(), [dns:rr()]}).
 zone(ZoneComponents, State) ->

@@ -34,9 +34,19 @@
     {BackendIP :: inet:ip_address(), BackendPort :: inet:port_number() }
 }.
 
+-define(SLIDE_WINDOW, 30). % seconds
+-define(SLIDE_SIZE, 64).
+
+
 -spec(start_link() ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link() ->
+    folsom_metrics:new_histogram(
+        {l4lb, poll, request_ms}, slide_uniform,
+        {?SLIDE_WINDOW, ?SLIDE_SIZE}),
+    folsom_metrics:new_histogram(
+        {l4lb, poll, process_ms}, slide_uniform,
+        {?SLIDE_WINDOW, ?SLIDE_SIZE}),
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 %%%===================================================================
@@ -84,11 +94,28 @@ handle_poll() ->
 handle_poll(false) ->
     ok;
 handle_poll(true) ->
-    case dcos_net_mesos_listener:poll() of
+    case poll() of
         {error, Error} ->
             lager:warning("Unable to poll agent: ~p", [Error]);
         {ok, Tasks} ->
-            handle_poll_state(Tasks)
+            Begin = erlang:monotonic_time(millisecond),
+            try
+                handle_poll_state(Tasks)
+            after
+                Ms = erlang:monotonic_time(millisecond) - Begin,
+                folsom_metrics:notify({l4lb, poll, process_ms}, Ms, histogram)
+            end
+    end.
+
+-spec(poll() -> {ok, #{task_id() => task()}} | {error, term()}).
+poll() ->
+    Begin = erlang:monotonic_time(millisecond),
+    try
+        dcos_net_mesos_listener:poll()
+    after
+        folsom_metrics:notify({l4lb, poll, calls}, {inc, 1}, counter),
+        Ms = erlang:monotonic_time(millisecond) - Begin,
+        folsom_metrics:notify({l4lb, poll, request_ms}, Ms, histogram)
     end.
 
 -spec(handle_poll_state(#{task_id() => task()}) -> ok).

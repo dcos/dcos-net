@@ -133,6 +133,7 @@ reconcile(cast, {vips, VIPs}, State0) ->
     State1 = do_reconcile(VIPs, State0),
     {next_state, maintain, State1};
 reconcile(info, {lashup_gm_route_events, #{ref := Ref, tree := Tree}}, State0 = #state{route_events_ref = Ref}) ->
+    folsom_metrics:notify({l4lb, events, membership}, {inc, 1}, counter),
     State1 = State0#state{tree = Tree},
     {keep_state, State1};
 reconcile(info, {lashup_kv_events, Event = #{ref := Ref}}, State0 = #state{kv_ref = Ref}) ->
@@ -201,6 +202,7 @@ push_services(Namespace, State = #state{last_configured_vips = VIPs}) ->
     lists:foreach(fun({VIP, BEs}) -> add_service(VIP, BEs, Namespace, State) end, VIPs).
 
 do_reconcile(VIPs, State0 = #state{ns = Namespaces}) ->
+    folsom_metrics:notify({l4lb, vips}, length(VIPs), gauge),
     VIPs0 = vips_port_mappings(VIPs),
     VIPs1 = process_reachability(VIPs0, State0),
     Routes = ordsets:from_list([VIP || {{_Proto, VIP, _Port}, _Backends} <- VIPs1]),
@@ -285,8 +287,15 @@ add_service({Protocol, IP, Port}, BEs, Namespace, #state{ipvs_mgr = IPVSMgr}) ->
       end,
       BEs).
 
-process_reachability(VIPs0, State) ->
-    lists:map(fun({VIP, BEs0}) -> {VIP, reachable_backends(BEs0, State)} end, VIPs0).
+process_reachability(VIPs, State) ->
+    {VIPs0, RCount, UCount} =
+        lists:foldl(fun({VIP, BEs}, {Acc, RCount, UCount}) ->
+            {BEs0, RC, UC} = reachable_backends(BEs, State),
+            {[{VIP, BEs0} | Acc], RCount + RC, UCount + UC}
+        end, {[], 0, 0}, VIPs),
+    folsom_metrics:notify({l4lb, backends, reachable}, RCount, gauge),
+    folsom_metrics:notify({l4lb, backends, unreachable}, UCount, gauge),
+    VIPs0.
 
 maintain(VIPs, State = #state{ns = Namespaces, routes = Routes, last_configured_vips = LastConfigured}) ->
     VIPs0 = vips_port_mappings(VIPs),
@@ -332,9 +341,9 @@ reachable_backends(Backends, State) ->
     reachable_backends(Backends, [], [], State).
 
 reachable_backends([], _OpenBackends = [], ClosedBackends, _State) ->
-    ClosedBackends;
-reachable_backends([], OpenBackends, _ClosedBackends, _State) ->
-    OpenBackends;
+    {ClosedBackends, 0, length(ClosedBackends)};
+reachable_backends([], OpenBackends, ClosedBackends, _State) ->
+    {OpenBackends, length(OpenBackends), length(ClosedBackends)};
 reachable_backends([BE = {IP, {_BEIP, _BEPort}}|Rest], OB, CB, State = #state{ip_mapping = IPMapping, tree = Tree}) ->
     case IPMapping of
         #{IP := NodeName} ->

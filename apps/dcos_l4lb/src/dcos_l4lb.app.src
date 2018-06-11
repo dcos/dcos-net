@@ -20,6 +20,7 @@
                   tcp_metrics,
                   gen_netlink,
                   inotify,
+                  folsom,
                   dcos_net
                  ]},
   {mod, { dcos_l4lb_app, []}},
