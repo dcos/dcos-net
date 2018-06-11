@@ -191,7 +191,8 @@ mappend(Key, Value, Map) ->
 push_vips(LocalVIPs) ->
     VIPs = lashup_kv:value(?VIPS_KEY2),
     Ops = generate_ops(LocalVIPs, VIPs),
-    push_ops(?VIPS_KEY2, Ops).
+    push_ops(?VIPS_KEY2, Ops),
+    log_ops(Ops).
 
 -spec(generate_ops(#{key() => [backend()]}, [{lkey(), [backend()]}]) ->
     [riak_dt_map:map_field_update()]).
@@ -235,3 +236,23 @@ push_ops(_Key, []) ->
 push_ops(Key, Ops) ->
     {ok, _} = lashup_kv:request_op(Key, {update, Ops}),
     ok.
+
+-spec(log_ops([riak_dt_map:map_field_update()]) -> ok).
+log_ops(Ops) ->
+    lists:foreach(fun ({update, {VIPKey, riak_dt_orswot}, VIPOps}) ->
+        log_ops(VIPKey, VIPOps)
+    end, Ops).
+
+-spec(log_ops(key(), riak_dt_orswot:orswot_op()) -> ok).
+log_ops(Key, {update, Ops}) ->
+    lists:foreach(fun (Op) ->
+        log_ops(Key, Op)
+    end, Ops);
+log_ops(Key, {add_all, Backends}) ->
+    lists:foreach(fun ({_AgentIP, Backend}) ->
+        lager:notice("VIP updated: ~p, added: ~p", [Key, Backend])
+    end, Backends);
+log_ops(Key, {remove_all, Backends}) ->
+    lists:foreach(fun ({_AgentIP, Backend}) ->
+        lager:notice("VIP updated: ~p, removed: ~p", [Key, Backend])
+    end, Backends).
