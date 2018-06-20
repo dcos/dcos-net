@@ -45,20 +45,12 @@ jobs:
               curl -LO https://launchpad.net/ubuntu/+archive/primary/+files/libsodium-dev_1.0.13-1_amd64.deb
               sudo dpkg -i libsodium18_1.0.13-1_amd64.deb
               sudo dpkg -i libsodium-dev_1.0.13-1_amd64.deb
-      - restore_cache:
-          key: rebar3
       - run:
           name: Updating rebar3
           command: ./rebar3 update
-      - restore_cache:
-          key: rebar3-deps-{{ checksum "rebar.lock" }}
       - run:
           name: Fetching dependencies
           command: ./rebar3 get-deps
-      - save_cache:
-          key: rebar3-deps-{{ checksum "rebar.lock" }}
-          paths:
-            - _build/default/lib
       - run:
           name: Building
           command: ./rebar3 compile
@@ -96,10 +88,6 @@ jobs:
       - run:
           name: Generating cover report
           command: ./rebar3 covertool generate
-      - save_cache:
-          key: rebar3
-          paths:
-            - ~/.cache/rebar3
       - run:
           name: Installing codecov
           command: pip install codecov
