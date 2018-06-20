@@ -202,7 +202,13 @@ handle_task_updated(Obj, State) ->
     Task = mget(<<"status">>, Obj),
     FrameworkId = mget(<<"framework_id">>, Obj),
     Task0 = mput(<<"framework_id">>, FrameworkId, Task),
-    handle_task(Task0, State).
+
+    % NOTE: Always depend on TaskState, it is more accurate
+    % JIRA: https://jira.mesosphere.com/browse/DCOS_OSS-3539
+    TaskState = mget(<<"state">>, Obj),
+    Task1 = mput(<<"state">>, TaskState, Task0),
+
+    handle_task(Task1, State).
 
 -spec(handle_framework_added(jiffy:object(), state()) -> state()).
 handle_framework_added(Obj, State) ->
