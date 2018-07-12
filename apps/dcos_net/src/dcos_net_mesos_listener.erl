@@ -1,11 +1,13 @@
--module(dcos_net_mesos_state).
+-module(dcos_net_mesos_listener).
 
 %% API
 -export([
     start_link/0,
     subscribe/0,
     is_leader/0,
-    next/1
+    next/1,
+    poll/0,
+    from_state/1
 ]).
 
 %% gen_server callbacks
@@ -74,6 +76,19 @@ is_leader() ->
     catch _Class:_Error ->
         false
     end.
+
+-spec(poll() -> {ok, #{task_id() => task()}} | {error, term()}).
+poll() ->
+    case poll_imp() of
+        {ok, Obj} ->
+            {ok, from_state(Obj)};
+        {error, Error} ->
+            {error, Error}
+    end.
+
+-spec(from_state(jiffy:object()) -> #{task_id() => task()}).
+from_state(Data) ->
+    from_state_imp(Data).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -216,9 +231,8 @@ handle_framework_added(Obj, State) ->
 
 -spec(handle_framework_updated(jiffy:object(), state()) -> state()).
 handle_framework_updated(Obj, #state{frameworks=F}=State) ->
-    Info = mget([<<"framework">>, <<"framework_info">>], Obj),
-    Id = mget([<<"id">>, <<"value">>], Info),
-    Name = mget(<<"name">>, Info, undefined),
+    FObj = mget(<<"framework">>, Obj),
+    #{id := Id, name := Name} = handle_framework(FObj),
 
     lager:notice("Framework ~s added, ~s", [Id, Name]),
     State0 = State#state{frameworks=mput(Id, Name, F)},
@@ -226,32 +240,44 @@ handle_framework_updated(Obj, #state{frameworks=F}=State) ->
 
 -spec(handle_framework_removed(jiffy:object(), state()) -> state()).
 handle_framework_removed(Obj, #state{frameworks=F}=State) ->
-    Id = mget([<<"framework_info">>, <<"id">>, <<"value">>], Obj),
+    #{id := Id} = handle_framework(Obj),
     lager:notice("Framework ~s removed", [Id]),
     State#state{frameworks=mremove(Id, F)}.
 
+-spec(handle_framework(jiffy:object()) ->
+    #{id => binary(), name => binary() | undefined}).
+handle_framework(Obj) ->
+    Info = mget(<<"framework_info">>, Obj),
+    Id = mget([<<"id">>, <<"value">>], Info),
+    Name = mget(<<"name">>, Info, undefined),
+    #{id => Id, name => Name}.
+
 -spec(handle_agent_added(jiffy:object(), state()) -> state()).
 handle_agent_added(Obj, #state{agents=A}=State) ->
-    Info = mget([<<"agent">>, <<"agent_info">>], Obj),
-    Id = mget([<<"id">>, <<"value">>], Info),
-    {ok, Host} =
-        try mget(<<"hostname">>, Info) of Hostname ->
-            lager:notice("Agent ~s added, ~s", [Id, Hostname]),
-            Hostname0 = binary_to_list(Hostname),
-            inet:parse_ipv4strict_address(Hostname0)
-        catch error:{badkey, _} ->
-            lager:notice("Agent ~s added", [Id]),
-            {ok, undefined}
-        end,
-
-    State0 = State#state{agents=mput(Id, Host, A)},
-    handle_waiting_tasks(agent_ip, Id, Host, State0).
+    AObj = mget(<<"agent">>, Obj),
+    #{id := Id, ip := IP} = handle_agent(AObj),
+    lager:notice("Agent ~s added, ~p", [Id, IP]),
+    State0 = State#state{agents=mput(Id, IP, A)},
+    handle_waiting_tasks(agent_ip, Id, IP, State0).
 
 -spec(handle_agent_removed(jiffy:object(), state()) -> state()).
 handle_agent_removed(Obj, #state{agents=A}=State) ->
     Id = mget([<<"agent_id">>, <<"value">>], Obj),
     lager:notice("Agent ~s removed", [Id]),
     State#state{agents=mremove(Id, A)}.
+
+-spec(handle_agent(jiffy:object()) ->
+    #{id => binary(), ip => inet:ip4_address() | undefined}).
+handle_agent(Obj) ->
+    Info = mget(<<"agent_info">>, Obj),
+    Id = mget([<<"id">>, <<"value">>], Info),
+    try mget(<<"hostname">>, Info) of Hostname ->
+        IPStr = binary_to_list(Hostname),
+        {ok, IP} = inet:parse_ipv4strict_address(IPStr),
+        #{id => Id, ip => IP}
+    catch error:{badkey, _} ->
+        #{id => Id, ip => undefined}
+    end.
 
 %%%===================================================================
 %%% Handle task functions
@@ -267,34 +293,34 @@ handle_task(TaskObj, #state{tasks=T}=State) ->
     task_id(), jiffy:object(),
     task(), state()) -> state()).
 handle_task(TaskId, TaskObj, Task,
-        #state{frameworks=F, agents=A}=State) ->
+            State=#state{agents=A, frameworks=F}) ->
+    Task0 = task(TaskObj, Task, A, F),
+    add_task(TaskId, Task, Task0, State).
+
+-spec(task(TaskObj, task(), Agent, Framework) -> task()
+    when TaskObj :: jiffy:object(),
+         Agent :: #{binary() => inet:ip4_address()},
+         Framework :: #{binary() => binary()}).
+task(TaskObj, Task, Agents, Frameworks) ->
     AgentId = mget([<<"agent_id">>, <<"value">>], TaskObj),
-    Agent = mget(AgentId, A, {id, AgentId}),
+    Agent = mget(AgentId, Agents, {id, AgentId}),
 
     FrameworkId = mget([<<"framework_id">>, <<"value">>], TaskObj),
-    Framework = mget(FrameworkId, F, {id, FrameworkId}),
+    Framework = mget(FrameworkId, Frameworks, {id, FrameworkId}),
 
-    Fields = #{
-        name => {mget, <<"name">>},
-        framework => {value, Framework},
-        agent_ip => {value, Agent},
-        task_ip => fun handle_task_ip/2,
-        state => fun handle_task_state/2,
-        ports => fun handle_task_ports/2
-    },
-    Task0 =
-        maps:fold(
-            fun (Key, {value, Value}, Acc) ->
-                    mput(Key, Value, Acc);
-                (Key, Fun, Acc) when is_function(Fun) ->
-                    Value = Fun(TaskObj, Acc),
-                    mput(Key, Value, Acc);
-                (Key, {mget, Path}, Acc) ->
-                    Value = mget(Path, TaskObj, undefined),
-                    mput(Key, Value, Acc)
-            end, Task, Fields),
-
-    add_task(TaskId, Task, Task0, State).
+    Fields = [
+        {task_ip, fun handle_task_ip/2},
+        {state, fun handle_task_state/2},
+        {ports, fun handle_task_ports/2}
+    ],
+    Name = mget(<<"name">>, TaskObj, undefined),
+    Task0 = mput(name, Name, Task),
+    Task1 = mput(agent_ip, Agent, Task0),
+    Task2 = mput(framework, Framework, Task1),
+    lists:foldl(fun ({Key, Fun}, Acc) ->
+        Value = Fun(TaskObj, Acc),
+        mput(Key, Value, Acc)
+    end, Task2, Fields).
 
 -spec(add_task(task_id(), task(), task(), state()) -> state()).
 add_task(TaskId, TaskPrev, TaskNew, State) ->
@@ -391,8 +417,10 @@ handle_task_ip(TaskObj, _Task) ->
 -spec(handle_task_ports(jiffy:object(), task()) -> [task_port()] | undefined).
 handle_task_ports(TaskObj, Task) ->
     PortMappings = handle_task_port_mappings(TaskObj),
+    PortResources = handle_task_port_resources(TaskObj),
     DiscoveryPorts = handle_task_discovery_ports(TaskObj, Task),
-    merge_task_ports(PortMappings, DiscoveryPorts).
+    Ports = merge_task_ports(PortMappings, PortResources, DiscoveryPorts),
+    merge_host_ports(Task, Ports).
 
 -spec(handle_task_port_mappings(jiffy:object()) -> [task_port()]).
 handle_task_port_mappings(TaskObj) ->
@@ -433,6 +461,64 @@ handle_protocol(Obj) ->
         <<"tcp">> -> tcp;
         <<"udp">> -> udp
     end.
+
+-spec(handle_task_port_resources(jiffy:object()) -> [task_port()]).
+handle_task_port_resources(TaskObj) ->
+    TaskLabels = mget([<<"labels">>, <<"labels">>], TaskObj, []),
+    TaskVIPLabels = handle_task_vip_labels(TaskLabels),
+    Resources = mget(<<"resources">>, TaskObj, []),
+    Ports = [P || #{<<"name">> := <<"ports">>} = P <- Resources],
+    Ports0 = expand_ports(Ports),
+    handle_task_port_resources(Ports0, TaskVIPLabels).
+
+-spec(expand_ports([jiffy:object()]) -> [inet:port_number()]).
+expand_ports([]) ->
+    [];
+expand_ports([#{<<"type">> := <<"RANGES">>,
+                <<"ranges">> := #{<<"range">> := Ranges}}]) ->
+    lists:flatmap(fun (#{<<"begin">> := Begin, <<"end">> := End}) ->
+        lists:seq(Begin, End)
+    end, Ranges);
+expand_ports([#{<<"type">> := <<"SCALAR">>,
+                <<"scalar">> := #{<<"value">> := Port}}]) ->
+    [Port].
+
+-spec(handle_task_port_resources(Ports, TaskVIPLabels) -> [task_port()]
+    when Ports :: [inet:port_number()],
+         TaskVIPLabels :: [{non_neg_integer(), tcp | udp, binary()}]).
+handle_task_port_resources(Ports, TaskVIPLabels) ->
+    lists:map(fun ({Idx, Protocol, Label}) ->
+        Port = lists:nth(Idx + 1, Ports),
+        #{host_port => Port, protocol => Protocol, vip => [Label]}
+    end, TaskVIPLabels).
+
+-spec(handle_task_vip_labels([jiffy:object()]) ->
+    [{non_neg_integer(), tcp | udp, binary()}]).
+handle_task_vip_labels(Labels) ->
+    lists:flatmap(fun handle_task_vip_label/1, Labels).
+
+-spec(handle_task_vip_label(jiffy:object()) ->
+    [{non_neg_integer(), tcp | udp, binary()}]).
+handle_task_vip_label(#{<<"key">> := Key, <<"value">> := Value}) ->
+    case cowboy_bstr:to_lower(Key) of
+        <<"vip_port", Index/binary>> ->
+            try binary_to_integer(Index) of
+                Idx when Idx < 0 -> [];
+                Idx -> handle_task_vip_label(Idx, Value)
+            catch error:badarg ->
+                []
+            end;
+        _Key -> []
+    end.
+
+-spec(handle_task_vip_label(Idx, Label) -> [{Idx, tcp | udp, Label}]
+    when Idx :: non_neg_integer(), Label :: binary()).
+handle_task_vip_label(Idx, <<"tcp://", Label/binary>>) ->
+    [{Idx, tcp, Label}];
+handle_task_vip_label(Idx, <<"udp://", Label/binary>>) ->
+    [{Idx, udp, Label}];
+handle_task_vip_label(_Idx, _Label) ->
+    [].
 
 -spec(handle_task_discovery_ports(jiffy:object(), task()) -> [task_port()]).
 handle_task_discovery_ports(TaskObj, Task) ->
@@ -488,6 +574,13 @@ handle_port_scope(Labels) ->
         [] -> port
     end.
 
+-spec(merge_task_ports(Ports, Ports, Ports) -> Ports
+    when Ports :: [task_port()]).
+merge_task_ports(PortMappings, PortResources, DiscoveryPorts) ->
+    merge_task_ports(
+        merge_task_ports(PortMappings, PortResources),
+        DiscoveryPorts).
+
 -spec(merge_task_ports([task_port()], [task_port()]) -> [task_port()]).
 merge_task_ports([], DiscoveryPorts) ->
     DiscoveryPorts;
@@ -509,13 +602,44 @@ merge_task_ports(PortMappings, DiscoveryPorts) ->
             KeyC = {A, B, C},
             case mfind([KeyA, KeyB, KeyC], Acc) of
                 {ok, Key, TP} ->
-                    TP0 = maps:merge(TP, TaskPort),
+                    TP0 = merge_ports(TP, TaskPort),
                     maps:put(Key, TP0, Acc);
                 error ->
                     maps:put(KeyC, TaskPort, Acc)
             end
         end, Ports, PortMappings),
     maps:values(Ports0).
+
+-spec(merge_ports(task_port(), task_port()) -> task_port()).
+merge_ports(#{vip := VIPA} = PortA, #{vip := VIPB} = PortB) ->
+    Port = maps:merge(PortA, PortB),
+    VIP = lists:usort(VIPA ++ VIPB),
+    maps:put(vip, VIP, Port);
+merge_ports(PortA, PortB) ->
+    maps:merge(PortA, PortB).
+
+-spec(merge_host_ports(task(), [task_port()]) -> [task_port()]).
+merge_host_ports(#{state := true}, Ports) ->
+    Ports;
+merge_host_ports(#{state := false}, Ports) ->
+    Ports;
+merge_host_ports(#{agent_ip := AgentIP, task_ip := [AgentIP]}, Ports) ->
+    PortsMap = merge_host_ports(Ports),
+    maps:values(PortsMap);
+merge_host_ports(_Task, Ports) ->
+    Ports.
+
+-spec(merge_host_ports([task_port()]) -> #{inet:port_number() => [task_port()]}).
+merge_host_ports(Ports) ->
+    lists:foldl(fun (Port, Acc) ->
+        #{port := Key} = PortA =
+            case maps:take(host_port, Port) of
+                {K, P} -> P#{port => K};
+                error -> Port
+            end,
+        PortB = maps:get(Key, Acc, #{}),
+        Acc#{Key => merge_ports(PortA, PortB)}
+    end, #{}, Ports).
 
 -spec(handle_task_status(jiffy:object()) -> jiffy:object()).
 handle_task_status(#{<<"statuses">> := TaskStatuses}) ->
@@ -527,6 +651,63 @@ handle_task_status(#{<<"statuses">> := TaskStatuses}) ->
     TaskStatus;
 handle_task_status(TaskStatus) ->
     TaskStatus.
+
+%%%===================================================================
+%%% Poll Functions
+%%%===================================================================
+
+-spec(poll_imp() -> {ok, jiffy:object()} | {error, term()}).
+poll_imp() ->
+    IsMaster = dcos_net_app:is_master(),
+    case dcos_net_mesos:call(#{type => <<"GET_STATE">>}) of
+        {ok, Obj} when IsMaster ->
+            {ok, Obj};
+        {ok, #{<<"get_state">> := State} = Obj} ->
+            case dcos_net_mesos:call(#{type => <<"GET_AGENT">>}) of
+                {ok, #{<<"get_agent">> := Agent}} ->
+                    GetAgents = #{<<"agents">> => [Agent]},
+                    State0 = State#{<<"get_agents">> => GetAgents},
+                    Obj0 = Obj#{<<"get_state">> => State0},
+                    {ok, Obj0};
+                {error, Error} ->
+                    {error, Error}
+            end;
+        {error, Error} ->
+            {error, Error}
+    end.
+
+-spec(from_state_imp(jiffy:object()) -> #{task_id() => task()}).
+from_state_imp(Data) ->
+    State = mget(<<"get_state">>, Data, #{}),
+
+    AgentObjs = mget([<<"get_agents">>, <<"agents">>], State, []),
+    Agents =
+        lists:foldl(fun (AObj, Acc) ->
+            #{id := Id, ip := IP} = handle_agent(AObj),
+            mput(Id, IP, Acc)
+        end, #{}, AgentObjs),
+
+    FrameworkObjs = mget([<<"get_frameworks">>, <<"frameworks">>], State, []),
+    Frameworks =
+        lists:foldl(fun (FObj, Acc) ->
+            #{id := Id, name := Name} = handle_framework(FObj),
+            mput(Id, Name, Acc)
+        end, #{}, FrameworkObjs),
+
+    TaskObjs = mget([<<"get_tasks">>, <<"launched_tasks">>], State, []),
+    TaskObjs0 = mget([<<"get_tasks">>, <<"tasks">>], State, TaskObjs),
+    Tasks =
+        lists:foldl(fun (TaskObj, Acc) ->
+            Id = mget([<<"task_id">>, <<"value">>], TaskObj),
+            Task = task(TaskObj, #{}, Agents, Frameworks),
+            mput(Id, Task, Acc)
+        end, #{}, TaskObjs0),
+
+    maps:filter(
+        fun (_TaskId, #{agent_ip := {id, _}}) -> false;
+            (_TaskId, #{framework := {id, _}}) -> false;
+            (_TaskId, _Task) -> true
+        end, Tasks).
 
 %%%===================================================================
 %%% Subscribe Functions
@@ -672,28 +853,18 @@ handle_init(State0) ->
 
 -spec(start_stream() -> {ok, state()} | {error, term()}).
 start_stream() ->
-    Body = jiffy:encode(#{type => <<"SUBSCRIBE">>}),
-    ContentType = "application/json",
-    Request = {"/api/v1", [], ContentType, Body},
-    {ok, Ref} =
-        dcos_net_mesos:request(
-            post, Request, [{timeout, infinity}],
-            [{sync, false}, {stream, {self, once}}]),
-    receive
-        {http, {Ref, {{_HTTPVersion, 307, _StatusStr}, _Headers, _Body}}} ->
-            {error, redirect};
-        {http, {Ref, {{_HTTPVersion, Status, _StatusStr}, _Headers, _Body}}} ->
-            {error, {http_status, Status}};
-        {http, {Ref, {error, Error}}} ->
-            {error, Error};
-        {http, {Ref, stream_start, _Headers, Pid}} ->
+    Opts = [{stream, {self, once}}],
+    Request = #{type => <<"SUBSCRIBE">>},
+    case dcos_net_mesos:call(Request, [{timeout, infinity}], Opts) of
+        {ok, Ref, Pid} ->
             httpc:stream_next(Pid),
             erlang:monitor(process, Pid),
             State = #state{pid=Pid, ref=Ref},
-            {ok, handle_heartbeat(State)}
-    after 5000 ->
-        ok = httpc:cancel_request(Ref),
-        {error, timeout}
+            {ok, handle_heartbeat(State)};
+        {error, {http_status, {_HTTPVersion, 307, _StatusStr}, _Data}} ->
+            {error, redirect};
+        {error, Error} ->
+            {error, Error}
     end.
 
 -spec(handle_stream(binary(), state()) ->

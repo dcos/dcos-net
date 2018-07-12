@@ -71,7 +71,7 @@ start_poll_timer(Timeout) ->
 
 -spec(handle_poll(state()) -> state()).
 handle_poll(State) ->
-    IsLeader = dcos_net_mesos_state:is_leader(),
+    IsLeader = dcos_net_mesos_listener:is_leader(),
     handle_poll(IsLeader, State).
 
 -spec(handle_poll(IsLeader :: boolean(), state()) -> state()).

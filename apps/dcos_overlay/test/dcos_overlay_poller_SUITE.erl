@@ -60,9 +60,10 @@ start_get_kill_poller() ->
     {ok, NetlinkPid} = gen_netlink_client:start_link(?NETLINK_ROUTE),
     {ok, Rules} =
         try
-            {ok, _Rules} = dcos_overlay_netlink:iprule_show(NetlinkPid, inet)
+            dcos_overlay_netlink:iprule_show(NetlinkPid, inet)
         after
             gen_netlink_client:stop(NetlinkPid),
+            erlang:unregister(dcos_overlay_poller),
             erlang:unlink(Pid),
             erlang:exit(Pid, kill)
         end,
@@ -71,6 +72,7 @@ start_get_kill_poller() ->
 maybe_kill_poller() ->
     try
         Pid = whereis(dcos_overlay_poller),
+        erlang:unregister(dcos_overlay_poller),
         erlang:unlink(Pid),
         erlang:exit(Pid, kill)
     catch _:_ ->

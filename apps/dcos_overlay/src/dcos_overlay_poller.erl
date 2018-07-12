@@ -84,11 +84,12 @@ handle_info(init, []) ->
     {noreply, #state{netlink = Pid}};
 handle_info(poll, State0) ->
     State1 =
-        case poll(State0) of
+        case dcos_net_mesos:poll("/overlay-agent/overlay") of
             {error, Reason} ->
                 lager:warning("Overlay Poller could not poll: ~p~n", [Reason]),
                 State0#state{poll_period = ?MIN_POLL_PERIOD};
-            {ok, NewState} ->
+            {ok, Data} ->
+                NewState = parse_response(State0, Data),
                 NewPollPeriod = update_poll_period(NewState#state.poll_period),
                 NewState#state{poll_period = NewPollPeriod}
         end,
@@ -112,27 +113,13 @@ update_poll_period(OldPollPeriod) when OldPollPeriod*2 =< ?MAX_POLL_PERIOD ->
 update_poll_period(_) ->
     ?MAX_POLL_PERIOD.
 
-poll(State0) ->
-    Headers = [{"Accept", "application/json"}],
-    Response = dcos_net_mesos:request("/overlay-agent/overlay", Headers),
-    handle_response(State0, Response).
-
-handle_response(_State0, {error, Reason}) ->
-    {error, Reason};
-handle_response(State0, {ok, {_StatusLine = {_HTTPVersion, 200 = _StatusCode, _ReasonPhrase}, _Headers, Body}}) ->
-    parse_response(State0, Body);
-handle_response(_State0, {ok, {StatusLine, _Headers, _Body}}) ->
-    {error, StatusLine}.
-
-parse_response(State0 = #state{known_overlays = KnownOverlays}, Body) ->
-    AgentInfo = jiffy:decode(Body, [return_maps]),
+parse_response(State0 = #state{known_overlays = KnownOverlays}, AgentInfo) ->
     IP0 = maps:get(<<"ip">>, AgentInfo),
     IP1 = process_ip(IP0),
     State1 = State0#state{ip = IP1},
-    Overlays = maps:get(<<"overlays">>, AgentInfo),
+    Overlays = maps:get(<<"overlays">>, AgentInfo, []),
     NewOverlays = Overlays -- KnownOverlays,
-    State2 = lists:foldl(fun add_overlay/2, State1, NewOverlays),
-    {ok, State2}.
+    lists:foldl(fun add_overlay/2, State1, NewOverlays).
 
 process_ip(IPBin0) ->
     [IPBin1|_MaybePort] = binary:split(IPBin0, <<":">>),
