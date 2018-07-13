@@ -4,10 +4,6 @@
 -include("dcos_dns.hrl").
 -include_lib("dns/include/dns.hrl").
 
--ifdef(TEST).
--include_lib("eunit/include/eunit.hrl").
--endif.
-
 %% API
 -export([
     start_link/0,
@@ -19,8 +15,8 @@
 -export([init/1, handle_call/3, handle_cast/2,
     handle_info/2, terminate/2, code_change/3]).
 
--type task() :: dcos_net_mesos_state:task().
--type task_id() :: dcos_net_mesos_state:task_id().
+-type task() :: dcos_net_mesos_listener:task().
+-type task_id() :: dcos_net_mesos_listener:task_id().
 
 -define(DCOS_DNS_TTL, 5).
 
@@ -56,7 +52,7 @@ handle_info(init, State) ->
     State0 = handle_init(State),
     {noreply, State0};
 handle_info({task_updated, Ref, TaskId, Task}, #state{ref=Ref}=State) ->
-    ok = dcos_net_mesos_state:next(Ref),
+    ok = dcos_net_mesos_listener:next(Ref),
     {noreply, handle_task_updated(TaskId, Task, State)};
 handle_info({'DOWN', Ref, process, _Pid, Info}, #state{ref=Ref}=State) ->
     {stop, Info, State};
@@ -79,7 +75,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 -spec(handle_init(State) -> State when State :: state() | []).
 handle_init(State) ->
-    case dcos_net_mesos_state:subscribe() of
+    case dcos_net_mesos_listener:subscribe() of
         {ok, Ref, MTasks} ->
             MRef = start_masters_timer(),
             Tasks = task_records(MTasks),
@@ -168,7 +164,7 @@ task_autoip(#{name := Name, framework := Fwrk,
         end
     ).
 
--spec(is_running(dcos_net_mesos_state:task_state()) -> boolean()).
+-spec(is_running(dcos_net_mesos_listener:task_state()) -> boolean()).
 is_running({running, _Healthy}) ->
     true;
 is_running(running) ->
@@ -176,7 +172,7 @@ is_running(running) ->
 is_running(_TaskState) ->
     false.
 
--spec(is_port_mapping(dcos_net_mesos_state:task_port()) -> boolean()).
+-spec(is_port_mapping(dcos_net_mesos_listener:task_port()) -> boolean()).
 is_port_mapping(#{host_port := _HPort}) ->
     true;
 is_port_mapping(_Port) ->
@@ -191,7 +187,7 @@ handle_masters(#state{masters=MRRs}=State) ->
     ZoneName = ?DCOS_DOMAIN,
     MRRs0 = master_records(ZoneName),
 
-    {NewRRs, OldRRs} = complement(MRRs0, MRRs),
+    {NewRRs, OldRRs} = dcos_net_utils:complement(MRRs0, MRRs),
     lists:foreach(fun (#dns_rr{data=#dns_rrdata_a{ip = IP}}) ->
         lager:notice("master ~p was added", [IP])
     end, NewRRs),
@@ -286,7 +282,7 @@ push_zone(ZoneName, Records) ->
 -spec(push_diff(dns:dname(), [dns:dns_rr()], [dns:dns_rr()]) ->
     {ok, New :: [dns:dns_rr()], Old :: [dns:dns_rr()]}).
 push_diff(ZoneName, New, Old) ->
-    case complement(New, Old) of
+    case dcos_net_utils:complement(New, Old) of
         {[], []} ->
             {ok, [], []};
         {AddRecords, RemoveRecords} ->
@@ -352,42 +348,3 @@ handle_push_ops(#state{ops=Ops}=State) ->
 start_push_ops_timer() ->
     Timeout = application:get_env(dcos_dns, push_ops_timeout, 1000),
     erlang:start_timer(Timeout, self(), push_ops).
-
-%%%===================================================================
-%%% Complement functions
-%%%===================================================================
-
-%% @doc Return {A\B, B\A}
--spec(complement([A], [B]) -> {[A], [B]}
-    when A :: term(), B :: term()).
-complement(ListA, ListB) ->
-    complement(
-        lists:sort(ListA),
-        lists:sort(ListB),
-        [], []).
-
--spec(complement([A], [B], [A], [B]) -> {[A], [B]}
-    when A :: term(), B :: term()).
-complement([], ListB, Acc, Bcc) ->
-    {Acc, ListB ++ Bcc};
-complement(ListA, [], Acc, Bcc) ->
-    {ListA ++ Acc, Bcc};
-complement([A|ListA], [A|ListB], Acc, Bcc) ->
-    complement(ListA, ListB, Acc, Bcc);
-complement([A|_]=ListA, [B|ListB], Acc, Bcc) when A > B ->
-    complement(ListA, ListB, Acc, [B|Bcc]);
-complement([A|ListA], [B|_]=ListB, Acc, Bcc) when A < B ->
-    complement(ListA, ListB, [A|Acc], Bcc).
-
--ifdef(TEST).
-
-complement_test() ->
-    {A, B} =
-        complement(
-            [a, 0, b, 1, c, 2],
-            [e, 0, d, 1, f, 2]),
-    ?assertEqual(
-        {[a, b, c], [d, e, f]},
-        {lists:sort(A), lists:sort(B)}).
-
--endif.
