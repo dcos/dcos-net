@@ -467,21 +467,22 @@ handle_task_port_resources(TaskObj) ->
     TaskLabels = mget([<<"labels">>, <<"labels">>], TaskObj, []),
     TaskVIPLabels = handle_task_vip_labels(TaskLabels),
     Resources = mget(<<"resources">>, TaskObj, []),
-    Ports = [P || #{<<"name">> := <<"ports">>} = P <- Resources],
-    Ports0 = expand_ports(Ports),
-    handle_task_port_resources(Ports0, TaskVIPLabels).
+    Ports = lists:flatmap(fun expand_ports/1, Resources),
+    handle_task_port_resources(Ports, TaskVIPLabels).
 
--spec(expand_ports([jiffy:object()]) -> [inet:port_number()]).
-expand_ports([]) ->
-    [];
-expand_ports([#{<<"type">> := <<"RANGES">>,
-                <<"ranges">> := #{<<"range">> := Ranges}}]) ->
+-spec(expand_ports(jiffy:object()) -> [inet:port_number()]).
+expand_ports(#{<<"name">> := <<"ports">>,
+               <<"type">> := <<"RANGES">>,
+               <<"ranges">> := #{<<"range">> := Ranges}}) ->
     lists:flatmap(fun (#{<<"begin">> := Begin, <<"end">> := End}) ->
         lists:seq(Begin, End)
     end, Ranges);
-expand_ports([#{<<"type">> := <<"SCALAR">>,
-                <<"scalar">> := #{<<"value">> := Port}}]) ->
-    [Port].
+expand_ports(#{<<"name">> := <<"ports">>,
+               <<"type">> := <<"SCALAR">>,
+               <<"scalar">> := #{<<"value">> := Port}}) ->
+    [Port];
+expand_ports(_Obj) ->
+    [].
 
 -spec(handle_task_port_resources(Ports, TaskVIPLabels) -> [task_port()]
     when Ports :: [inet:port_number()],
