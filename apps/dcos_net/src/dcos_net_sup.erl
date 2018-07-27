@@ -13,7 +13,8 @@ init([]) ->
         undefined -> ok
     end,
     {ok, {#{intensity => 10000, period => 1}, [
-        ?CHILD(dcos_net_masters)
+        ?CHILD(dcos_net_masters),
+        ?CHILD(dcos_net_killer)
     ]}}.
 
 start_epmd(Port) ->
