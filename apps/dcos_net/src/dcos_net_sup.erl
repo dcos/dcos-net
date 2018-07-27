@@ -16,7 +16,8 @@ init([]) ->
     IsMaster = dcos_net_app:is_master(),
     MChildren = [?CHILD(dcos_net_mesos_listener) || IsMaster],
     {ok, {#{intensity => 10000, period => 1}, [
-        ?CHILD(dcos_net_masters) | MChildren
+        ?CHILD(dcos_net_masters),
+        ?CHILD(dcos_net_killer) | MChildren
     ]}}.
 
 start_epmd(Port) ->
