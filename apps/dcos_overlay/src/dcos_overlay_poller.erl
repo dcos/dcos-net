@@ -159,7 +159,7 @@ config_overlay(Overlay, State) ->
     maybe_add_ip_rule(Overlay, State).
 
 maybe_create_vtep(_Overlay = #mesos_state_agentoverlayinfo{backend = Backend},
-  #state{netlink = Pid}) ->
+  State=#state{netlink = Pid}) ->
     #mesos_state_backendinfo{vxlan = VXLan} = Backend,
     #mesos_state_vxlaninfo{
         vni = VNI,
@@ -171,19 +171,75 @@ maybe_create_vtep(_Overlay = #mesos_state_agentoverlayinfo{backend = Backend},
     VTEPNameStr = binary_to_list(VTEPName),
     ParsedVTEPMAC = list_to_tuple(parse_vtep_mac(VTEPMAC)),
     {ParsedVTEPIP, PrefixLen} = parse_subnet(VTEPIP),
-    dcos_overlay_netlink:iplink_add(Pid, VTEPNameStr, "vxlan", VNI, 64000),
-    {ok, _} = dcos_overlay_netlink:iplink_set(Pid, ParsedVTEPMAC, VTEPNameStr),
-    {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, inet, ParsedVTEPIP, PrefixLen, VTEPNameStr),
-    case {application:get_env(dcos_overlay, enable_ipv6, true), VTEPIP6} of
+    case vxlan_interface_present(Pid, VXLan) of
+        false ->
+            dcos_overlay_netlink:iplink_add(Pid, VTEPNameStr, "vxlan", VNI, 64000),
+            {ok, _} = dcos_overlay_netlink:iplink_set(Pid, ParsedVTEPMAC, VTEPNameStr);
+        {true, match} ->
+            lager:debug("Attributes of ~p is up-to-date.", [VTEPNameStr]);
+        {true, notmatch} ->
+            lager:debug("Attributes of ~p are not update-to-date, and will be recreated.", [VTEPNameStr]),
+            dcos_overlay_netlink:iplink_delete(Pid, VTEPNameStr),
+            dcos_overlay_netlink:iplink_add(Pid, VTEPNameStr, "vxlan", VNI, 64000),
+            {ok, _} = dcos_overlay_netlink:iplink_set(Pid, ParsedVTEPMAC, VTEPNameStr)
+    end,
+
+    config_l3(VTEPNameStr, ParsedVTEPIP, PrefixLen, VTEPIP6, State).
+
+config_l3(IfName, IPAddressV4, PrefixLen, IPAddressV6, #state{netlink = Pid}) ->
+    {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, inet, IPAddressV4, PrefixLen, IfName),
+    case {application:get_env(dcos_overlay, enable_ipv6, true), IPAddressV6} of
       {false, _} ->
           ok;
       {_, undefined} ->
           ok;
       _ ->
-          ok = try_enable_ipv6(VTEPNameStr),
-          {ParsedVTEPIP6, PrefixLen6} = parse_subnet(VTEPIP6),
-          {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, inet6, ParsedVTEPIP6, PrefixLen6, VTEPNameStr)
+          ok = try_enable_ipv6(IfName),
+          {ParsedVTEPIP6, PrefixLen6} = parse_subnet(IPAddressV6),
+          {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, inet6, ParsedVTEPIP6, PrefixLen6, IfName)
     end.
+
+vxlan_interface_present(Pid, VXLan) ->
+    #mesos_state_vxlaninfo{vtep_name = VTEPName} = VXLan,
+    VTEPNameStr = binary_to_list(VTEPName),
+    case dcos_overlay_netlink:iplink_show_interface(Pid, VTEPNameStr) of
+        {ok, DeviceLinkInfo} ->
+            Match = vxlan_attributes_match(DeviceLinkInfo, VXLan),
+            {true, Match};
+        {error, ErrorCode, ResponseMsg} ->
+            lager:debug("Failed to find ~p for error_code: ~p, msg: ~p", [VTEPNameStr, ErrorCode, ResponseMsg]),
+            false
+    end.
+
+vxlan_attributes_match([{address, Address} |Right], VXLan) ->
+    #mesos_state_vxlaninfo{vtep_mac = VTEPMAC} = VXLan,
+    ParsedVTEPMAC = binary:list_to_bin(parse_vtep_mac(VTEPMAC)),
+    lager:debug("After parse ~p ~p", [ParsedVTEPMAC, Address]),
+    case ParsedVTEPMAC of
+        Address -> vxlan_attributes_match(Right, VXLan);
+        _ -> notmatch
+    end;
+
+vxlan_attributes_match([{linkinfo, [{kind, LinkKind}, {data, LinkData}]} |Right], VXLan) ->
+    #mesos_state_vxlaninfo{vni = VNI} = VXLan,
+    lager:debug("After parse ~p", [LinkKind]),
+    case LinkKind of
+        "vxlan" ->
+        MapLinkData = maps:from_list(LinkData),
+            #{id := ID, port := Port} = MapLinkData,
+            if
+                VNI == ID, 64000 == Port -> vxlan_attributes_match(Right, VXLan); 
+                true -> notmatch
+            end;
+        _ ->
+            notmatch
+  end;
+
+vxlan_attributes_match([_Left| Right], VXLan) ->
+    vxlan_attributes_match(Right, VXLan);
+
+vxlan_attributes_match([], _VXLan) ->
+    match.
 
 try_enable_ipv6(IfName) ->
     Var = lists:flatten(io_lib:format("net.ipv6.conf.~s.disable_ipv6=0", [IfName])),
