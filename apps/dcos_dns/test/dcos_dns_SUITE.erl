@@ -17,7 +17,8 @@
          zk_test/1,
          http_hosts_test/1,
          http_services_test/1,
-         http_records_test/1
+         http_records_test/1,
+         dns_cache_test/1
         ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -71,7 +72,8 @@ all() ->
      http_hosts_test,
      http_services_test,
      http_records_test,
-     overload_test
+     overload_test,
+     dns_cache_test
     ].
 
 meck_mods(Mods) when is_list(Mods) ->
@@ -89,14 +91,7 @@ generate_fixture_mesos_zone() ->
             ttl = 5,
             data = #dns_rrdata_a{ip = {127, 0, 0, 1}}
         },
-        #dns_rr{
-            name = <<"spartan">>,
-            type = ?DNS_TYPE_NS,
-            ttl = 3600,
-            data = #dns_rrdata_ns{
-                dname = <<"ns.spartan">>
-            }
-        }
+        generate_ns()
     ],
     Sha = crypto:hash(sha, term_to_binary(Records)),
     ok = erldns_zone_cache:put_zone({<<"mesos">>, Sha, Records}).
@@ -119,14 +114,7 @@ generate_thisdcos_directory_records() ->
             ttl = 5,
             data = #dns_rrdata_a{ip = {127, 0, 0, 1}}
         },
-        #dns_rr{
-            name = <<"spartan">>,
-            type = ?DNS_TYPE_NS,
-            ttl = 3600,
-            data = #dns_rrdata_ns{
-                dname = <<"ns.spartan">>
-            }
-        }
+        generate_ns()
     ].
 
 generate_thisdcos_directory_srv_records() ->
@@ -171,6 +159,17 @@ generate_soa_ns(Name) ->
         }
     }.
 
+generate_ns() ->
+    #dns_rr{
+        name = <<"spartan">>,
+        type = ?DNS_TYPE_NS,
+        ttl = 3600,
+        data = #dns_rrdata_ns{
+            dname = <<"ns.spartan">>
+        }
+    }.
+
+
 %% ===================================================================
 %% tests
 %% ===================================================================
@@ -179,8 +178,7 @@ generate_soa_ns(Name) ->
 upstream_test(_Config) ->
     {ok, DnsMsg} = inet_res:resolve("www.google.com", in, a, resolver_options()),
     Answers = inet_dns:msg(DnsMsg, anlist),
-    ?assert(length(Answers) > 0),
-    ok.
+    ?assert(length(Answers) > 0).
 
 %% @doc Assert we can resolve Mesos records.
 %%
@@ -191,20 +189,12 @@ upstream_test(_Config) ->
 %%      upstream_test/1.
 %%
 mesos_test(_Config) ->
-    {ok, DnsMsg} = inet_res:resolve("master.mesos", in, a, resolver_options()),
-    [Answer] = inet_dns:msg(DnsMsg, anlist),
-    Data = inet_dns:rr(Answer, data),
-    ?assertMatch({127, 0, 0, 1}, Data),
-    ok.
+    ?assertMatch({127, 0, 0, 1}, resolve("master.mesos")).
 
 %% @doc Assert we can resolve the Zookeeper records.
 zk_test(_Config) ->
     gen_server:call(dcos_dns_zk_record_server, refresh),
-    {ok, DnsMsg} = inet_res:resolve("zk-1.zk", in, a, resolver_options()),
-    [Answer] = inet_dns:msg(DnsMsg, anlist),
-    Data = inet_dns:rr(Answer, data),
-    ?assertMatch({127, 0, 0, 1}, Data),
-    ok.
+    ?assertMatch({127, 0, 0, 1}, resolve("zk-1.zk")).
 
 multiple_query_test(_Config) ->
     Expected = "1.1.1.1\n2.2.2.2\n127.0.0.1\n",
@@ -299,6 +289,32 @@ http_records_test(_Config) ->
                                 <<"_service._tcp.commontest.thisdcos.directory">>])
         end, Records),
     ?assertMatch(8, length(Records0)).
+
+%% @doc Assert if we can read newly added record
+dns_cache_test(_Config) ->
+    Name = "myapp.commontest.thisdcos.directory",
+    ?assertError(_, resolve(Name)),
+    add_record(Name),
+    ?assertMatch({127, 0, 0, 1}, resolve(Name)).
+
+add_record(Name) ->
+    Records = [
+        generate_soa_ns(<<"thisdcos.directory">>),
+        #dns_rr{
+            name = list_to_binary(Name),
+            type = ?DNS_TYPE_A,
+            ttl = 5,
+            data = #dns_rrdata_a{ip = {127, 0, 0, 1}}
+        },
+        generate_ns()
+    ],
+    Sha = crypto:hash(sha, term_to_binary(Records)),
+    ok = erldns_zone_cache:put_zone({<<"thisdcos.directory">>, Sha, Records}).
+
+resolve(Name) ->
+    {ok, DnsMsg} = inet_res:resolve(Name, in, a, resolver_options()),
+    [Answer] = inet_dns:msg(DnsMsg, anlist),
+    inet_dns:rr(Answer, data).
 
 request(Url) ->
     {ok, {_, _, Data}} =
