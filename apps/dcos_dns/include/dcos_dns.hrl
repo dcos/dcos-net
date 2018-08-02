@@ -13,6 +13,7 @@
 -define(DCOS_DIRECTORY(Prefix), <<Prefix, ".thisdcos.directory">>).
 -define(DCOS_DOMAIN, ?DCOS_DIRECTORY("dcos")).
 -define(MESOS_DOMAIN, ?DCOS_DIRECTORY("mesos")).
+-define(DCOS_DNS_TTL, 5).
 
 %% 30 seconds
 -define(DEFAULT_TIMEOUT, 30000).

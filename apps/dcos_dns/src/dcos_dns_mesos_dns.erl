@@ -9,7 +9,6 @@
 -endif.
 
 -define(MESOS_DNS_URI, "http://127.0.0.1:8123/v1/axfr").
--define(DCOS_DNS_TTL, 5).
 
 %% API
 -export([

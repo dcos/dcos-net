@@ -18,8 +18,6 @@
 -type task() :: dcos_net_mesos_listener:task().
 -type task_id() :: dcos_net_mesos_listener:task_id().
 
--define(DCOS_DNS_TTL, 5).
-
 -record(state, {
     ref :: reference(),
     tasks :: #{ task_id() => [dns:dns_rr()] },
