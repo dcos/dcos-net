@@ -87,7 +87,7 @@ jobs:
           command: ./rebar3 as test cover
       - run:
           name: Generating cover report
-          command: ./rebar3 covertool generate
+          command: ./rebar3 as test covertool generate
       - run:
           name: Installing codecov
           command: pip install codecov

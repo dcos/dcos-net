@@ -87,7 +87,7 @@ maybe_kill(Pid, MFA) ->
 
 -spec(kill(pid(), mfa()) -> true).
 kill(Pid, MFA) ->
-    lager:warning("~p is stuck: ~p", [MFA]),
+    lager:warning("~p is stuck: ~p", [Pid, MFA]),
     case application:get_env(dcos_net, enable_killer, true) of
         true -> exit(Pid, kill);
         false -> true
