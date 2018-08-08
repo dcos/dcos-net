@@ -10,6 +10,7 @@
 
 -define(RECORDS_FIELD, {records, riak_dt_orswot}).
 -define(POSTFIX, <<"thisdcos.directory">>).
+-define(DCOS_DNS_TTL, 5).
 
 %% 30 seconds
 -define(DEFAULT_TIMEOUT, 30000).
