@@ -294,8 +294,14 @@ handle_task(TaskObj, #state{tasks=T}=State) ->
     task(), state()) -> state()).
 handle_task(TaskId, TaskObj, Task,
             State=#state{agents=A, frameworks=F}) ->
-    Task0 = task(TaskObj, Task, A, F),
-    add_task(TaskId, Task, Task0, State).
+    try
+        Task0 = task(TaskObj, Task, A, F),
+        add_task(TaskId, Task, Task0, State)
+    catch Class:Error ->
+        lager:error("Unexpected error with ~s [~p]: ~p",
+                    [TaskId, Class, Error]),
+        State
+    end.
 
 -spec(task(TaskObj, task(), Agent, Framework) -> task()
     when TaskObj :: jiffy:object(),
@@ -318,8 +324,13 @@ task(TaskObj, Task, Agents, Frameworks) ->
     Task1 = mput(agent_ip, Agent, Task0),
     Task2 = mput(framework, Framework, Task1),
     lists:foldl(fun ({Key, Fun}, Acc) ->
-        Value = Fun(TaskObj, Acc),
-        mput(Key, Value, Acc)
+        try Fun(TaskObj, Acc) of Value ->
+            mput(Key, Value, Acc)
+        catch Class:Error ->
+            lager:error("Unexpected error with ~p [~p]: ~p",
+                        [Key, Class, Error]),
+            Acc
+        end
     end, Task2, Fields).
 
 -spec(add_task(task_id(), task(), task(), state()) -> state()).
@@ -697,18 +708,28 @@ from_state_imp(Data) ->
 
     TaskObjs = mget([<<"get_tasks">>, <<"launched_tasks">>], State, []),
     TaskObjs0 = mget([<<"get_tasks">>, <<"tasks">>], State, TaskObjs),
-    Tasks =
-        lists:foldl(fun (TaskObj, Acc) ->
-            Id = mget([<<"task_id">>, <<"value">>], TaskObj),
-            Task = task(TaskObj, #{}, Agents, Frameworks),
-            mput(Id, Task, Acc)
-        end, #{}, TaskObjs0),
+    from_state_imp(TaskObjs0, Agents, Frameworks).
 
-    maps:filter(
-        fun (_TaskId, #{agent_ip := {id, _}}) -> false;
-            (_TaskId, #{framework := {id, _}}) -> false;
-            (_TaskId, _Task) -> true
-        end, Tasks).
+-spec(from_state_imp([TaskObj], Agents, Frameworks) -> #{task_id() => task()}
+    when TaskObj :: jiffy:object(),
+         Agents :: #{binary() => inet:ip4_address()},
+         Frameworks :: #{binary() => binary()}).
+from_state_imp(TaskObjs, Agents, Frameworks) ->
+    lists:foldl(fun (TaskObj, Acc) ->
+        Id = mget([<<"task_id">>, <<"value">>], TaskObj),
+        try task(TaskObj, #{}, Agents, Frameworks) of
+            #{agent_ip := {id, _}} ->
+                Acc;
+            #{framework := {id, _}} ->
+                Acc;
+            Task ->
+                mput(Id, Task, Acc)
+        catch Class:Error ->
+            lager:error("Unexpected error with ~s [~p]: ~p",
+                        [Id, Class, Error]),
+            Acc
+        end
+    end, #{}, TaskObjs).
 
 %%%===================================================================
 %%% Subscribe Functions

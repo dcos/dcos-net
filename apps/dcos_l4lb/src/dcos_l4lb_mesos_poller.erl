@@ -135,14 +135,25 @@ collect_vips(Tasks) ->
 
 -spec(collect_vips(task_id(), task(), VIPs) -> VIPs
     when VIPs :: #{key() => [backend()]}).
-collect_vips(_TaskId, Task, VIPs) ->
+collect_vips(TaskId, Task, VIPs) ->
     lists:foldl(fun (Port, Acc) ->
         lists:foldl(fun (VIPLabel, Bcc) ->
-            Key = key(Task, Port, VIPLabel),
-            Value = backends(Task, Port),
-            mappend(Key, Value, Bcc)
+            collect_vips(TaskId, Task, Port, VIPLabel, Bcc)
         end, Acc, maps:get(vip, Port, []))
     end, VIPs, maps:get(ports, Task, [])).
+
+-spec(collect_vips(task_id(), task(), task_port(), VIPLabel, VIPs) -> VIPs
+    when VIPs :: #{key() => [backend()]}, VIPLabel :: binary()).
+collect_vips(TaskId, Task, Port, VIPLabel, VIPs) ->
+    try
+        Key = key(Task, Port, VIPLabel),
+        Value = backends(Task, Port),
+        mappend(Key, Value, VIPs)
+    catch Class:Error ->
+        lager:error("Unexpected error with ~s [~p]: ~p",
+                    [TaskId, Class, Error]),
+        VIPs
+    end.
 
 -spec(key(task(), task_port(), VIPLabel :: binary()) -> key()).
 key(Task, PortObj, VIPLabel) ->
