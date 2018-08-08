@@ -70,6 +70,7 @@ lookup_failure3(Config) ->
 
 lookup_vip(_Config) ->
   {ok, _} = update_de8b9dc86_marathon(),
+  timer:sleep(100),
   [] = dcos_l4lb_lashup_vip_listener:lookup_vips([]),
   [{ip, IP}] = dcos_l4lb_lashup_vip_listener:lookup_vips([{name, <<"de8b9dc86.marathon">>}]),
   [{name, <<"de8b9dc86.marathon">>}] = dcos_l4lb_lashup_vip_listener:lookup_vips([{ip, IP}]),
