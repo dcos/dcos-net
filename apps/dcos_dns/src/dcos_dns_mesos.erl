@@ -160,7 +160,10 @@ task_autoip(#{name := Name, framework := Fwrk,
             true -> [AgentIP];
             false -> TaskIPs
         end
-    ).
+    );
+task_autoip(#{name := Name, framework := Fwrk, agent_ip := AgentIP}) ->
+    DName = format_name([Name, Fwrk, <<"autoip">>], ?DCOS_DOMAIN),
+    dns_records(DName, [AgentIP]).
 
 -spec(is_running(dcos_net_mesos_listener:task_state()) -> boolean()).
 is_running({running, _Healthy}) ->
