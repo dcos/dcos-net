@@ -458,19 +458,25 @@ handle_task_port_mappings(<<"DOCKER">>, TaskObj) ->
 
 -spec(handle_port_mappings(jiffy:object()) -> [task_port()]).
 handle_port_mappings(PortMappings) when is_list(PortMappings) ->
-    lists:map(fun handle_port_mappings/1, PortMappings);
+    lists:flatmap(fun handle_port_mappings/1, PortMappings);
 handle_port_mappings(PortMapping) ->
-    Protocol = handle_protocol(PortMapping),
     Port = mget(<<"container_port">>, PortMapping),
     HostPort = mget(<<"host_port">>, PortMapping),
-    #{protocol => Protocol, port => Port, host_port => HostPort}.
+    try handle_protocol(PortMapping) of Protocol ->
+        [#{protocol => Protocol, port => Port, host_port => HostPort}]
+    catch throw:unexpected_protocol ->
+        []
+    end.
 
 -spec(handle_protocol(jiffy:object()) -> tcp | udp).
 handle_protocol(Obj) ->
     Protocol = mget(<<"protocol">>, Obj),
     case cowboy_bstr:to_lower(Protocol) of
         <<"tcp">> -> tcp;
-        <<"udp">> -> udp
+        <<"udp">> -> udp;
+        _Protocol ->
+            lager:warning("Unexpected protocol type: ~p", [Obj]),
+            throw(unexpected_protocol)
     end.
 
 -spec(handle_task_port_resources(jiffy:object()) -> [task_port()]).
@@ -536,26 +542,30 @@ handle_task_vip_label(_Idx, _Label) ->
 handle_task_discovery_ports(TaskObj, Task) ->
     try mget([<<"discovery">>, <<"ports">>, <<"ports">>], TaskObj) of
         Ports ->
-            DPorts = lists:map(fun handle_task_discovery_port/1, Ports),
+            DPorts = lists:flatmap(fun handle_task_discovery_port/1, Ports),
             lists:filter(fun is_discovery_port/1, DPorts)
     catch error:{badkey, _} ->
         maps:get(ports, Task, [])
     end.
 
--spec(handle_task_discovery_port(jiffy:object()) -> task_port()).
+-spec(handle_task_discovery_port(jiffy:object()) -> [task_port()]).
 handle_task_discovery_port(PortObj) ->
     Name = mget(<<"name">>, PortObj, <<"default">>),
-    Protocol = handle_protocol(PortObj),
     Port = mget(<<"number">>, PortObj),
     Labels = mget([<<"labels">>, <<"labels">>], PortObj, []),
     VIPLabels = handle_vip_labels(Labels),
 
-    Result = #{protocol => Protocol},
-    Result0 = mput(name, Name, Result),
-    Result1 = mput(vip, VIPLabels, Result0),
+    Result = mput(name, Name, #{}),
+    Result0 = mput(vip, VIPLabels, Result),
 
     PortField = handle_port_scope(Labels),
-    mput(PortField, Port, Result1).
+    Result1 = mput(PortField, Port, Result0),
+
+    try handle_protocol(PortObj) of Protocol ->
+        [mput(protocol, Protocol, Result1)]
+    catch throw:unexpected_protocol ->
+        []
+    end.
 
 -spec(is_discovery_port(task_port()) -> boolean()).
 is_discovery_port(#{port := 0}) ->
@@ -597,30 +607,31 @@ merge_task_ports(PortMappings, PortResources, DiscoveryPorts) ->
 merge_task_ports([], DiscoveryPorts) ->
     DiscoveryPorts;
 merge_task_ports(PortMappings, DiscoveryPorts) ->
-    Ports =
-        maps:from_list([ begin
-            A = maps:get(protocol, TaskPort),
-            B = maps:get(port, TaskPort, undefined),
-            C = maps:get(host_port, TaskPort, undefined),
-            {{A, B, C}, TaskPort}
-        end || TaskPort <- DiscoveryPorts ]),
-    Ports0 =
-        lists:foldl(fun (TaskPort, Acc) ->
-            A = maps:get(protocol, TaskPort),
-            B = maps:get(port, TaskPort, undefined),
-            C = maps:get(host_port, TaskPort, undefined),
-            KeyA = {A, B, undefined},
-            KeyB = {A, undefined, C},
-            KeyC = {A, B, C},
-            case mfind([KeyA, KeyB, KeyC], Acc) of
-                {ok, Key, TP} ->
-                    TP0 = merge_ports(TP, TaskPort),
-                    maps:put(Key, TP0, Acc);
-                error ->
-                    maps:put(KeyC, TaskPort, Acc)
-            end
-        end, Ports, PortMappings),
-    maps:values(Ports0).
+    lists:foldl(fun (Port, Acc) ->
+        merge_task_port(Port, Acc, [])
+    end, DiscoveryPorts, PortMappings).
+
+-spec(merge_task_port(P, [P], [P]) -> [P] when P :: task_port()).
+merge_task_port(Port, [], Acc) ->
+    [Port|Acc];
+merge_task_port(PortA, [PortB|Ports], Acc) ->
+    case match_task_port(PortA, PortB) of
+        true ->
+            PortC = merge_ports(PortB, PortA),
+            merge_task_port(PortC, [], Acc ++ Ports);
+        false ->
+            merge_task_port(PortA, Ports, [PortB|Acc])
+    end.
+
+-spec(match_task_port(task_port(), task_port()) -> boolean()).
+match_task_port(#{protocol := P, port := Key},
+                #{protocol := P, port := Key}) ->
+    true;
+match_task_port(#{protocol := P, host_port := Key},
+                #{protocol := P, host_port := Key}) ->
+    true;
+match_task_port(_PortA, _PortB) ->
+    false.
 
 -spec(merge_ports(task_port(), task_port()) -> task_port()).
 merge_ports(#{vip := VIPA} = PortA, #{vip := VIPB} = PortB) ->
@@ -843,15 +854,6 @@ mdiff(A, B) ->
             _ -> Acc
         end
     end, B, A).
-
--spec(mfind([Key], #{Key => Value}) -> {ok, Key, Value} | error
-    when Key :: term(), Value :: term()).
-mfind(Keys, Map) ->
-    MapW = maps:with(Keys, Map),
-    case maps:to_list(MapW) of
-        [{Key, Value}] -> {ok, Key, Value};
-        [] -> error
-    end.
 
 %%%===================================================================
 %%% Mesos Operator API Client
