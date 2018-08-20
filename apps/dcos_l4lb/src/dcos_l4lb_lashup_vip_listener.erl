@@ -135,9 +135,7 @@ handle_value(VIPs0, State0) ->
 process_vips(VIPs0, State) ->
     VIPs1 = lists:map(fun rewrite_keys/1, VIPs0),
     CategorizedVIPs = categories_vips(VIPs1),
-    RebindVIPs = [rebind_names(Family, VIPs, State)
-                     || {Family, VIPs} <- CategorizedVIPs],
-    lists:flatten(RebindVIPs).
+    rebind_names(CategorizedVIPs, State).
 
 rewrite_keys({{RealKey, riak_dt_orswot}, Value}) ->
     {RealKey, Value}.
@@ -160,15 +158,15 @@ categories_BE({{_Protocol, _Name, _PortNumber}, BEs}) ->
     lists:usort(Families).
 
 %% @doc Extracts name based vips. Binds names
--spec(rebind_names(family(), [vip2()], state()) -> [key()]).
-rebind_names(_Family, [], _State) ->
-    [];
-rebind_names(Family, VIPs, State) ->
-    Names0 = [Name || {{_Protocol, {name, Name}, _Portnumber}, _Backends} <- VIPs],
-    Names1 = lists:map(fun({Name, FWName}) -> binary_to_name([Name, FWName]) end, Names0),
-    Names2 = lists:usort(Names1),
-    update_name_mapping(Family, Names2, State),
-    lists:map(fun(VIP) -> rewrite_name(Family, VIP) end, VIPs).
+-spec(rebind_names([{family(), [vip2()]}], state()) -> [key()]).
+rebind_names(CategorizedVIPs, State) ->
+    lists:flatmap(fun ({Family, VIPs}) ->
+        Names0 = [Name || {{_Protocol, {name, Name}, _Portnumber}, _Backends} <- VIPs],
+        Names1 = lists:map(fun({Name, FWName}) -> binary_to_name([Name, FWName]) end, Names0),
+        Names2 = lists:usort(Names1),
+        update_name_mapping(Family, Names2, State),
+        lists:map(fun(VIP) -> rewrite_name(Family, VIP) end, VIPs)
+    end, CategorizedVIPs).
 
 -spec(rewrite_name(family(), vip2()) -> key()).
 rewrite_name(Family, {{Protocol, {name, {Name, FWName}}, PortNum}, BEs}) ->
