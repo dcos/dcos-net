@@ -59,7 +59,7 @@ lookup_vips(_Config) ->
     timer:sleep(100),
     {11, 0, 0, 37} = name2ip(<<"foo.bar">>),
     {11, 0, 0, 39} = IP4 = name2ip(<<"baz.qux">>),
-    {16#fd01, 0, 0, 0, 0, 0, 0, 1} = IP6 =
+    {16#fd01, 16#c, 0, 0, 16#6d6d, 16#9c64, 16#fd19, 16#f251} = IP6 =
         name2ip(?DNS_TYPE_AAAA, <<"qux.ipv6">>),
 
     lashup_kv:request_op(?VIPS_KEY2, {update, [

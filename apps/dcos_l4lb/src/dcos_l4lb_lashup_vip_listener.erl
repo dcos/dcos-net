@@ -212,17 +212,19 @@ next_ip6({Num0, Num1, Num2, Num3, Num4, Num5, Num6, Num7}, _, _) ->
 
 -spec(init_ip(family(), binary(), {inet:ip_address(), inet:ip_address()}) ->
     {Qtty :: pos_integer(), inet:ip_address()}).
-init_ip(inet, Name, {MinIP, MaxIP}) ->
-    MinIPn = ip2int(inet, MinIP),
-    MaxIPn = ip2int(inet, MaxIP),
+init_ip(Family, Name, {MinIP, MaxIP}) ->
+    MinIPn = ip2int(Family, MinIP),
+    MaxIPn = ip2int(Family, MaxIP),
     Qtty = MaxIPn - MinIPn,
-    InitIPn = MinIPn + erlang:phash2(Name, Qtty),
-    {Qtty, int2ip(inet, InitIPn)};
-init_ip(inet6, _Name, {MinIP, MaxIP}) ->
-    MinIPn = ip2int(inet6, MinIP),
-    MaxIPn = ip2int(inet6, MaxIP),
-    Qtty = MaxIPn - MinIPn,
-    {Qtty, MinIPn}.
+    InitIPn = MinIPn + hash(Family, Name, Qtty),
+    {Qtty, int2ip(Family, InitIPn)}.
+
+-spec(hash(family(), binary(), Qtty :: pos_integer()) -> non_neg_integer()).
+hash(inet, Name, Qtty) ->
+    erlang:phash2(Name, Qtty);
+hash(inet6, Name, Qtty) ->
+    <<Hash:160>> = crypto:hash(sha, Name),
+    Hash rem Qtty.
 
 -spec(ip2int(family(), inet:ip_address()) -> non_neg_integer()).
 ip2int(inet, {A, B, C, D}) ->
