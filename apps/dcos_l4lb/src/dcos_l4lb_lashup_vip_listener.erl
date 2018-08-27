@@ -254,9 +254,16 @@ int2ip(inet6, IntIP) ->
 
 -spec(push_dns_records() -> ok).
 push_dns_records() ->
+    Zones = erldns_zone_cache:zone_names_and_versions(),
     lists:foreach(fun (ZoneComponents) ->
-        Zone = zone(ZoneComponents),
-        ok = erldns_zone_cache:put_zone(Zone)
+        Zone = {ZoneName, Sha, Records} = zone(ZoneComponents),
+        case lists:keyfind(ZoneName, 1, Zones) of
+            {ZoneName, Sha} -> ok;
+            _Other ->
+                ok = erldns_zone_cache:put_zone(Zone),
+                lager:notice("DNS Zone ~s was updated (~p records, sha: ~s)",
+                             [ZoneName, length(Records), bin_to_hex(Sha)])
+        end
     end, ?ZONE_NAMES).
 
 -spec(zone([binary()]) -> {Name :: binary(), Sha :: binary(), [dns:rr()]}).

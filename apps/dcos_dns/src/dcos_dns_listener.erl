@@ -98,7 +98,7 @@ handle_event(#{key := ?LASHUP_KEY(ZoneName), value := Value}, State) ->
 push_zone(Zone = {ZoneName, Sha, Records}) ->
     Size = length(Records),
     ok = erldns_zone_cache:put_zone(Zone),
-    lager:notice("~s was updated (~p records, sha: ~s)",
+    lager:notice("DNS Zone ~s was updated (~p records, sha: ~s)",
                  [ZoneName, Size, bin_to_hex(Sha)]),
     case sign_zone(Zone) of
         {no_key, _Zone} -> ok;
