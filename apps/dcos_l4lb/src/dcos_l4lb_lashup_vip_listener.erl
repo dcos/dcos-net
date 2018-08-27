@@ -118,8 +118,12 @@ categorize_backends(BEs) ->
 -spec(maybe_add_mapping(family(), binary(), binary()) -> inet:ip_address()).
 maybe_add_mapping(Family, FwName, Label) ->
     case ets:lookup(?NAME2IP, {Family, FwName, Label}) of
-        [] -> add_mapping(Family, FwName, Label);
-        [{_Key, IP}] -> IP
+        [{_Key, IP}] -> IP;
+        [] ->
+            IP = add_mapping(Family, FwName, Label),
+            lager:notice("VIP mapping was added: ~p -> ~p",
+                         [{Label, FwName}, IP]),
+            IP
     end.
 
 -spec(add_mapping(family(), binary(), binary()) -> inet:ip_address()).
@@ -151,8 +155,10 @@ cleanup_mappings(VIPs) ->
     NewIPs = maps:from_list([{IP, true} || {{_, IP, _}, _} <- VIPs]),
     OldIPs = [IP || IP <- AllIPs, not maps:is_key(IP, NewIPs)],
     lists:foreach(fun (IP) ->
-        [{IP, Key}] = ets:take(?IP2NAME, IP),
-        ets:delete(?NAME2IP, Key)
+        [{IP, {_Family, FwName, Label}=Key}] = ets:take(?IP2NAME, IP),
+        ets:delete(?NAME2IP, Key),
+        lager:notice("VIP mapping was removed: ~p -> ~p",
+                    [{Label, FwName}, IP])
     end, OldIPs).
 
 %%%===================================================================
