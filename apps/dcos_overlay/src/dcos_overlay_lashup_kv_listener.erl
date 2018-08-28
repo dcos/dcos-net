@@ -18,11 +18,18 @@
 -export([init/1, callback_mode/0, terminate/3, code_change/4]).
 
 %% state API
--export([init/3, unconfigured/3, configuring/3, batching/3, reapplying/3]).
+-export([init/3,
+         wait/3,
+         subscribe/3,
+         unconfigured/3,
+         configuring/3,
+         batching/3,
+         reapplying/3]).
 
 -define(SERVER, ?MODULE).
 -define(HEAPSIZE, 100). %% In MB
 -define(KILL_TIMER, 300000). %% 5 min
+-define(WAIT_TIMEOUT, 5000). %% 5 secs
 -define(BATCH_TIMEOUT, 5000). %% 5 secs
 -define(REAPPLY_TIMEOUT, 300000). %% 5 min
 
@@ -31,7 +38,7 @@
 -type config() :: orddict:orddict(term(), term()).
 
 -record(data, {
-    ref :: reference(),
+    ref :: undefined | reference(),
     pid :: undefined | pid(),
     config = orddict:new() :: config(),
     num_req = 0 :: non_neg_integer(),
@@ -88,6 +95,15 @@ init(timeout, init, []) ->
     MaxHeapSizeInWords = (?HEAPSIZE bsl 20) div erlang:system_info(wordsize), %%100 MB
     process_flag(message_queue_data, on_heap),
     process_flag(max_heap_size, MaxHeapSizeInWords),
+    {next_state, wait, #data{}, {timeout, 0, []}}.
+
+wait(timeout, [], _StateData) ->
+    Overlays = dcos_overlay_poller:overlays(),
+    {keep_state_and_data, {timeout, ?WAIT_TIMEOUT, Overlays}};
+wait(timeout, _Overlays, StateData) ->
+    {next_state, subscribe, StateData, {next_event, internal, []}}.
+
+subscribe(internal, _, _) ->
     MatchSpec = mk_key_matchspec(),
     {ok, Ref} = lashup_kv_events_helper:start_link(MatchSpec),
     {next_state, unconfigured, #data{ref = Ref}}.
