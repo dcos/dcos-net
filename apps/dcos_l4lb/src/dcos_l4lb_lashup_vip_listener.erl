@@ -64,7 +64,8 @@ handle_info(init, []) ->
     {noreply, #state{ref = Ref}};
 handle_info({lashup_kv_events, #{ref := Ref} = Event},
             #state{ref=Ref}=State) ->
-    ok = handle_event(Event),
+    Event0 = skip_kv_event(Event, Ref),
+    ok = handle_event(Event0),
     {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -78,6 +79,17 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+-spec(skip_kv_event(Event, reference()) -> Event when Event :: map()).
+skip_kv_event(Event, Ref) ->
+    % Skip current lashup kv event if there is yet another event in
+    % the message queue. It should improve the convergence.
+    receive
+        {lashup_kv_events, #{ref := Ref} = Event0} ->
+            skip_kv_event(Event0, Ref)
+    after 0 ->
+        Event
+    end.
 
 -spec(handle_event(Event :: map()) -> ok).
 handle_event(#{value := RawVIPs}) ->
