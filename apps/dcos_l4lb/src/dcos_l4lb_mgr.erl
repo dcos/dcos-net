@@ -45,6 +45,10 @@
 -type backend() :: dcos_l4lb_mesos_poller:backend().
 -type ipport() :: {inet:ip_address(), inet:port_number()}.
 
+-define(GM_EVENTS(R, T), {lashup_gm_route_events, #{ref := R, tree := T}}).
+-define(KV_EVENTS(R, V), {lashup_kv_events, #{ref := R, value := V}}).
+
+
 -spec(push_vips(VIPs :: [{Key, [Backend]}]) -> ok
     when Key :: dcos_l4lb_mesos_poller:key(),
          Backend :: dcos_l4lb_mesos_poller:backend()).
@@ -82,9 +86,9 @@ handle_cast(_Request, State) ->
 
 handle_info(init, []) ->
     {noreply, handle_init()};
-handle_info({lashup_gm_route_events, Event}, State) ->
+handle_info(?GM_EVENTS(_R, _T)=Event, State) ->
     {noreply, handle_gm_event(Event, State)};
-handle_info({lashup_kv_events, Event}, State) ->
+handle_info(?KV_EVENTS(_R, _T)=Event, State) ->
     {noreply, handle_kv_event(Event, State)};
 handle_info({timeout, _Ref, reconcile}, State) ->
     {noreply, handle_reconcile(State)};
@@ -101,6 +105,17 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Events functions
 %%%===================================================================
 
+-define(SKIP(Pattern, Value, Init), (fun Skip(X) ->
+    % Skip message if there is yet another such message in
+    % the message queue. It should improve the convergence.
+    receive
+        Pattern ->
+            Skip(Value)
+    after 0 ->
+        X
+    end
+end)(Init)).
+
 -spec(handle_init() -> state()).
 handle_init() ->
     {ok, IPVSMgr} = dcos_l4lb_ipvs_mgr:start_link(),
@@ -115,17 +130,19 @@ handle_init() ->
     #state{ipvs_mgr=IPVSMgr, route_mgr=RouteMgr, netns_mgr=NetNSMgr,
            route_ref=RouteRef, nodes_ref=NodesRef, recon_ref=ReconRef}.
 
--spec(handle_gm_event(Event :: map(), state()) -> state()).
-handle_gm_event(#{ref := Ref, tree := Tree},
-                #state{route_ref=Ref}=State) ->
-    State#state{tree=Tree};
+-spec(handle_gm_event(?GM_EVENTS(Ref, Tree), state()) -> state()
+    when Ref :: reference(), Tree :: lashup_gm_route:tree()).
+handle_gm_event(?GM_EVENTS(Ref, Tree), #state{route_ref=Ref}=State) ->
+    Tree0 = ?SKIP(?GM_EVENTS(Ref, T), T, Tree),
+    State#state{tree=Tree0};
 handle_gm_event(_Event, State) ->
     State.
 
--spec(handle_kv_event(Event :: map(), state()) -> state()).
-handle_kv_event(#{ref := Ref, value := Value},
-                #state{nodes_ref=Ref}=State) ->
-    Nodes = [{IP, Node} || {?LWW_REG(IP), Node} <- Value],
+-spec(handle_kv_event(?KV_EVENTS(Ref, Value), state()) -> state()
+    when Ref :: reference(), Value :: [tuple()]).
+handle_kv_event(?KV_EVENTS(Ref, Value), #state{nodes_ref=Ref}=State) ->
+    Value0 = ?SKIP(?KV_EVENTS(Ref, V), V, Value),
+    Nodes = [{IP, Node} || {?LWW_REG(IP), Node} <- Value0],
     State#state{nodes=maps:from_list(Nodes)};
 handle_kv_event(_Event, State) ->
     State.
@@ -144,7 +161,8 @@ handle_netns_event(_Event, State) ->
 
 -spec(handle_vips([{key(), [backend()]}], state()) -> state()).
 handle_vips(VIPs, State) ->
-    handle_vips_imp(VIPs, State).
+    VIPs0 = ?SKIP({'$gen_cast', {vips, V}}, V, VIPs),
+    handle_vips_imp(VIPs0, State).
 
 -spec(handle_reconcile(state()) -> state()).
 handle_reconcile(#state{vips=VIPs, recon_ref=Ref}=State) ->
