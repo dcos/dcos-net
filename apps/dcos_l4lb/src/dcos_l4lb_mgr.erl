@@ -189,13 +189,18 @@ handle_reconcile(VIPs, #state{route_mgr=RouteMgr, ipvs_mgr=IPVSMgr,
     VIPsP = prepare_vips(VIPs1),
     Routes = get_vip_routes(VIPs1),
     lists:foreach(fun (NetNs) ->
+        NetNsBin = netns2bin(NetNs),
+        LogPrefix = <<"netns: ", NetNsBin/binary, "; ">>,
+
         PrevRoutes = get_routes(RouteMgr, NetNs),
         DiffRoutes = dcos_net_utils:complement(Routes, PrevRoutes),
         ok = apply_routes_diff(RouteMgr, NetNs, DiffRoutes),
+        ok = log_routes_diff(LogPrefix, DiffRoutes),
 
         PrevVIPsP = get_vips(IPVSMgr, NetNs),
         DiffVIPs = diff(PrevVIPsP, VIPsP),
-        ok = apply_vips_diff(IPVSMgr, NetNs, DiffVIPs)
+        ok = apply_vips_diff(IPVSMgr, NetNs, DiffVIPs),
+        ok = log_vips_diff(LogPrefix, DiffVIPs)
     end, Namespaces),
     State#state{prev_ipvs=VIPs1, prev_routes=Routes}.
 
@@ -214,6 +219,8 @@ handle_vips_imp(VIPs, #state{route_mgr=RouteMgr, ipvs_mgr=IPVSMgr,
         ok = apply_routes_diff(RouteMgr, NetNs, DiffRoutes),
         ok = apply_vips_diff(IPVSMgr, NetNs, DiffVIPs)
     end, Namespaces),
+    ok = log_vips_diff(DiffVIPs),
+    ok = log_routes_diff(DiffRoutes),
     State#state{vips=VIPs, prev_ipvs=VIPs1, prev_routes=Routes}.
 
 %%%===================================================================
@@ -375,6 +382,11 @@ agents(VIPs, Nodes, Tree) ->
         end, VIPs),
     AgentIPs0 = lists:usort(AgentIPs),
     Result = [{IP, is_reachable(IP, Nodes, Tree)} || IP <- AgentIPs0],
+    Unreachable = [IP || {IP, false} <- Result],
+    [ lager:warning(
+        "L4LB unreachable agent nodes, size: ~p, ~p",
+        [length(Unreachable), Unreachable])
+    || Unreachable =/= [] ],
     maps:from_list(Result).
 
 -spec(healthy_backends([backend()], Agents) -> [backend()]
@@ -398,6 +410,64 @@ is_reachable(AgentIP, Nodes, Tree) ->
     end.
 
 %%%===================================================================
+%%% Logging functions
+%%%===================================================================
+
+-spec(netns2bin(host | netns()) -> binary()).
+netns2bin(host) ->
+    <<"host">>;
+netns2bin(#netns{ns=Ns}) when is_binary(Ns) ->
+    Ns;
+netns2bin(_NetNs) ->
+    <<"undef">>.
+
+-spec(log_vips_diff(diff_vips()) -> ok).
+log_vips_diff(Diff) ->
+    log_vips_diff(<<>>, Diff).
+
+-spec(log_vips_diff(binary(), diff_vips()) -> ok).
+log_vips_diff(Prefix, {ToAdd, ToDel, ToMod}) ->
+    lists:foreach(fun ({{Proto, VIP, Port}, Backends}) ->
+        lager:notice(
+            "~sVIP service was added: ~p://~s:~p, Backends: ~p",
+            [Prefix, Proto, inet:ntoa(VIP), Port, Backends])
+    end, ToAdd),
+    lists:foreach(fun ({{Proto, VIP, Port}, _BEs}) ->
+        lager:notice(
+            "~sVIP service was deleted: ~p://~s:~p",
+            [Prefix, Proto, inet:ntoa(VIP), Port])
+    end, ToDel),
+    lists:foreach(fun ({{Proto, VIP, Port}, Added, Removed}) ->
+        lager:notice(
+            "~sVIP service was modified: ~p://~s:~p, Backends: +~p -~p",
+            [Prefix, Proto, inet:ntoa(VIP), Port, Added, Removed])
+    end, ToMod).
+
+-spec(log_routes_diff(diff_routes()) -> ok).
+log_routes_diff(Diff) ->
+    log_routes_diff(<<>>, Diff).
+
+-spec(log_routes_diff(binary(), diff_routes()) -> ok).
+log_routes_diff(Prefix, {ToAdd, ToDel}) ->
+    [ lager:notice(
+        "~sVIP routes were added, routes: ~p, IPs: ~p",
+        [Prefix, length(ToAdd), ToAdd]) || ToAdd =/= [] ],
+    [ lager:notice(
+        "~sVIP routes were removed, routes: ~p, IPs: ~p",
+        [Prefix, length(ToDel), ToDel]) || ToDel =/= [] ],
+    ok.
+
+-spec(log_netns_diff([NetNs], [NetNs]) -> ok
+    when NetNs :: host | netns()).
+log_netns_diff(Namespaces, Namespaces) ->
+    ok;
+log_netns_diff(Namespaces, _PrevNamespaces) ->
+    <<", ", Str/binary>> =
+        << <<", ", (netns2bin(NetNs))/binary>>
+        || NetNs <- Namespaces>>,
+    lager:notice("L4LB network namespaces: ~s", [Str]).
+
+%%%===================================================================
 %%% Network Namespace functions
 %%%===================================================================
 
@@ -408,12 +478,14 @@ handle_netns_event(remove_netns, ToDel,
     Namespaces = dcos_l4lb_route_mgr:remove_netns(RouteMgr, ToDel),
     Namespaces = dcos_l4lb_route_mgr:remove_netns(IPVSMgr, ToDel),
     Result = ordsets:subtract(Prev, ordsets:from_list(Namespaces)),
+    log_netns_diff(Result, Prev),
     State#state{netns=Result};
 handle_netns_event(add_netns, ToAdd,
         #state{ipvs_mgr=IPVSMgr, route_mgr=RouteMgr, netns=Prev}=State) ->
     Namespaces = dcos_l4lb_route_mgr:add_netns(RouteMgr, ToAdd),
     Namespaces = dcos_l4lb_ipvs_mgr:add_netns(IPVSMgr, ToAdd),
     Result = ordsets:union(ordsets:from_list(Namespaces), Prev),
+    log_netns_diff(Result, Prev),
     State#state{netns=Result};
 handle_netns_event(reconcile_netns, Namespaces, State) ->
     handle_netns_event(add_netns, Namespaces, State).
