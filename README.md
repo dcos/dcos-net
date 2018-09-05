@@ -48,7 +48,7 @@ $ make dcos-docker-destroy
 
 ### Dependencies
 
-* Erlang/OTP 20.x
+* Erlang/OTP 21.x
 
 * C compiler
 
@@ -70,7 +70,7 @@ following list of additional dependencies:
 [coverage badge]: https://img.shields.io/codecov/c/github/dcos/dcos-net/master.svg?style=flat-square
 [jira badge]: https://img.shields.io/badge/issues-jira-yellow.svg?style=flat-square
 [license badge]: https://img.shields.io/github/license/dcos/dcos-net.svg?style=flat-square
-[erlang version badge]: https://img.shields.io/badge/erlang-20.x-blue.svg?style=flat-square
+[erlang version badge]: https://img.shields.io/badge/erlang-21.x-blue.svg?style=flat-square
 
 <!-- Links -->
 [circleci]: https://circleci.com/gh/dcos/dcos-net

@@ -4,10 +4,6 @@
 ## Cookie for distributed erlang
 -setcookie minuteman
 
-## Enable kernel poll and a few async threads
-+K true
-+A 10
-
 ## Increase number of concurrent ports/sockets
 -env ERL_MAX_PORTS 16384
 
@@ -31,6 +27,6 @@
 -stbt nnts
 
 ## Dirty I/O schedulers
-+SDio 0
++SDio 4
 
 # This file MUST have extra new lines at the end

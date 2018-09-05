@@ -95,7 +95,7 @@ maybe_load_masters() ->
             error
     end.
 
--spec(get_masters() -> {error, Reason :: term()} | [upstream()]).
+-spec(get_masters() -> {error, Reason :: term()} | {ok, [upstream()]}).
 get_masters() ->
     case os:getenv("MASTER_SOURCE") of
         "exhibitor_uri" ->

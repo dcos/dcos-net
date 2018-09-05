@@ -4,12 +4,11 @@ jobs:
     machine: true
     working_directory: '~/dcos-net'
     environment:
-      - OTP_VERSION: "20.3.2"
-      - OTP_DOWNLOAD_SHA256: "9809be52baa23d6fd18ee70b9a9b7c548e44f586db2f46ff5bfe66719cfab10a"
+      - OTP_VERSION: "21.0.7"
     steps:
       - checkout
       - restore_cache:
-          key: otp-build-20.3.2
+          key: otp-build-21.0.7
       - run:
           name: Building OTP
           command: |
@@ -18,20 +17,21 @@ jobs:
                   exit 0
               fi
 
-              OTP_DOWNLOAD_URL="https://github.com/erlang/otp/archive/OTP-${OTP_VERSION}.tar.gz"
-
               set -xe
-              curl -fSL -o otp-src.tar.gz "$OTP_DOWNLOAD_URL"
-              echo "$OTP_DOWNLOAD_SHA256  otp-src.tar.gz" | sha256sum -c -
-              mkdir -vp ~/src/otp
-              tar -xzf otp-src.tar.gz -C ~/src/otp --strip-components=1
-              rm otp-src.tar.gz
+              ( mkdir -p ~/src && cd ~/src \
+                && git clone --branch maint-21 https://github.com/erlang/otp.git )
               ( cd ~/src/otp \
+                && git checkout f7012b7a731924193cf05fc77b103e89bd0fcbfb \
+                && git cherry-pick --no-commit 1d1f29eb614ce75012f9136d185f4dbcccc8650b \
+                && git cherry-pick --no-commit a06549fbe59333347232c56093791c0075fcd150 \
+                && git cherry-pick --no-commit d87ac1c55188f5ba5cdf72384125d94d42118c18 \
+                && git cherry-pick --no-commit 0078ebf6c5311edc1a07be71fb7a127a175a60fa \
+                && git cherry-pick --no-commit a508428df8af14437f1a4766ec68294d1d736915 \
                 && ./otp_build autoconf \
                 && ./configure \
                 && make -j$(getconf _NPROCESSORS_ONLN) )
       - save_cache:
-          key: otp-build-20.3.2
+          key: otp-build-21.0.7
           paths:
             - ~/src/otp
       - run:
