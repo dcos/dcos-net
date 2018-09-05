@@ -3,6 +3,7 @@
 % EPMD Module
 -export([
     register_node/3,
+    address_please/3,
     port_please/2,
     names/1
 ]).
@@ -26,6 +27,12 @@ names(_Hostname) ->
          Creation :: 1 .. 3, Reason :: address | file:posix()).
 register_node(_Name, _Port, _Driver) ->
     {ok, 1}.
+
+-spec(address_please(Name, Address, Family) -> {ok, IP} | term()
+    when Name :: string(), Address :: string(), Family :: atom(),
+         IP :: inet:ip_address()).
+address_please(_Name, Address, _Family) ->
+    inet:parse_ipv4_address(Address).
 
 -spec(port_please(Name, Ip) -> {port, TcpPort, Version} | term()
     when Name :: string(), Ip :: inet:ip_address(),
