@@ -14,7 +14,8 @@
     accept_connection/5,
     setup/5,
     close/1,
-    childspecs/0
+    childspecs/0,
+    is_node_name/1
 ]).
 
 -spec(hostname() -> binary()).
@@ -78,6 +79,10 @@ close(Listen) ->
 childspecs() ->
     M = dist_module(),
     M:childspecs().
+
+is_node_name(Node) ->
+    M = dist_module(),
+    M:is_node_name(Node).
 
 %%====================================================================
 %% Internal functions
