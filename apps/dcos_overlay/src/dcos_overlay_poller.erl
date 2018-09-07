@@ -127,13 +127,15 @@ process_ip(IPBin0) ->
     {ok, IP} = inet:parse_ipv4_address(IPStr),
     IP.
 
-add_overlay(Overlay=#{<<"state">> := #{<<"status">> := <<"STATUS_OK">>}},
+add_overlay(Overlay=#{<<"backend">> := #{<<"vxlan">> := VxLan},
+                      <<"state">> := #{<<"status">> := <<"STATUS_OK">>}},
             State=#state{known_overlays=KnownOverlays}) ->
+    lager:notice("Configuring new overlay network, ~p", [VxLan]),
     config_overlay(Overlay, State),
     maybe_add_overlay_to_lashup(Overlay, State),
     State#state{known_overlays=[Overlay | KnownOverlays]};
 add_overlay(Overlay, State) ->
-    lager:warning("Overlay not okay: ~p", [Overlay]),
+    lager:warning("Bad overlay network was skipped, ~p", [Overlay]),
     State.
 
 config_overlay(Overlay, State) ->
@@ -159,15 +161,18 @@ maybe_create_vtep(#{<<"backend">> := Backend}, #state{netlink = Pid}) ->
     dcos_overlay_netlink:iplink_add(Pid, VTEPNameStr, "vxlan", VNI, 64000, VTEPAttr),
     {ok, _} = dcos_overlay_netlink:iplink_set(Pid, ParsedVTEPMAC, VTEPNameStr),
     {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, inet, ParsedVTEPIP, PrefixLen, VTEPNameStr),
+    Info = #{vni => VNI, mac => VTEPMAC, attr => VTEPAttr},
+    lager:notice("Overlay VTEP was configured, ~s => ~p", [VTEPName, Info#{ip => VTEPIP}]),
     case {application:get_env(dcos_overlay, enable_ipv6, true), VTEPIP6} of
-      {false, _} ->
-          ok;
       {_, undefined} ->
           ok;
+      {false, _} ->
+          lager:notice("Overlay network is disabled [ipv6], ~s => ~p", [VTEPName, Info#{ip => VTEPIP6}]);
       _ ->
           ok = try_enable_ipv6(VTEPNameStr),
           {ParsedVTEPIP6, PrefixLen6} = parse_subnet(VTEPIP6),
-          {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, inet6, ParsedVTEPIP6, PrefixLen6, VTEPNameStr)
+          {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, inet6, ParsedVTEPIP6, PrefixLen6, VTEPNameStr),
+          lager:notice("Overlay VTEP was configured, ~s => ~p", [VTEPName, Info#{ip => VTEPIP6}])
     end.
 
 try_enable_ipv6(IfName) ->
@@ -182,13 +187,18 @@ try_enable_ipv6(IfName) ->
             ExitCode
     end.
 
-maybe_add_ip_rule(#{<<"info">> := #{<<"subnet">> := Subnet}}, #state{netlink = Pid}) ->
+maybe_add_ip_rule(#{<<"info">> := #{<<"subnet">> := Subnet},
+                    <<"backend">> := #{<<"vxlan">> := #{<<"vtep_name">> := VTEPName}}},
+                  #state{netlink = Pid}) ->
     {ParsedSubnetIP, PrefixLen} = parse_subnet(Subnet),
     {ok, Rules} = dcos_overlay_netlink:iprule_show(Pid, inet),
     Rule = dcos_overlay_netlink:make_iprule(inet, ParsedSubnetIP, PrefixLen, ?TABLE),
     case dcos_overlay_netlink:is_iprule_present(Rules, Rule) of
         false ->
-            {ok, _} = dcos_overlay_netlink:iprule_add(Pid, inet, ParsedSubnetIP, PrefixLen, ?TABLE);
+            {ok, _} = dcos_overlay_netlink:iprule_add(Pid, inet, ParsedSubnetIP, PrefixLen, ?TABLE),
+            lager:notice(
+                "Overlay routing policy was added, ~s => ~p",
+                [VTEPName, #{overlaySubnet => Subnet}]);
         _ ->
             ok
     end;
@@ -205,23 +215,25 @@ maybe_add_overlay_to_lashup(Overlay, State) ->
     VTEPIPStr = mget(<<"vtep_ip">>, VXLan),
     VTEPIP6Str = mget(<<"vtep_ip6">>, VXLan),
     VTEPMac = mget(<<"vtep_mac">>, VXLan),
-    maybe_add_overlay_to_lashup(VTEPIPStr, VTEPMac, AgentSubnet, OverlaySubnet, State),
-    maybe_add_overlay_to_lashup(VTEPIP6Str, VTEPMac, AgentSubnet6, OverlaySubnet6, State).
+    VTEPName = mget(<<"vtep_name">>, VXLan),
+    maybe_add_overlay_to_lashup(VTEPName, VTEPIPStr, VTEPMac, AgentSubnet, OverlaySubnet, State),
+    maybe_add_overlay_to_lashup(VTEPName, VTEPIP6Str, VTEPMac, AgentSubnet6, OverlaySubnet6, State).
 
-maybe_add_overlay_to_lashup(_VTEPIPStr, _VTEPMac, _AgentSubnet, undefined, _State) ->
+maybe_add_overlay_to_lashup(_VTEPName, _VTEPIPStr, _VTEPMac, _AgentSubnet, undefined, _State) ->
     ok;
-maybe_add_overlay_to_lashup(undefined, _VTEPMac, _AgentSubnet, _OverlaySubnet, _State) ->
+maybe_add_overlay_to_lashup(_VTEPName, undefined, _VTEPMac, _AgentSubnet, _OverlaySubnet, _State) ->
     ok;
-maybe_add_overlay_to_lashup(VTEPIPStr, VTEPMac, AgentSubnet, OverlaySubnet, State) ->
+maybe_add_overlay_to_lashup(VTEPName, VTEPIPStr, VTEPMac, AgentSubnet, OverlaySubnet, State) ->
     ParsedSubnet = parse_subnet(OverlaySubnet),
     Key = [navstar, overlay, ParsedSubnet],
     LashupValue = lashup_kv:value(Key),
     case check_subnet(VTEPIPStr, VTEPMac, AgentSubnet, LashupValue, State) of
-        ok ->
-            ok;
+        ok -> ok;
         Updates ->
-            lager:info("Overlay poller updating lashup"),
-            {ok, _} = lashup_kv:request_op(Key, {update, [Updates]})
+            {ok, _} = lashup_kv:request_op(Key, {update, [Updates]}),
+            Info = #{ip => VTEPIPStr, mac => VTEPMac,
+                     agentSubnet => AgentSubnet, overlaySubnet => OverlaySubnet},
+            lager:notice("Overlay network was added, ~s => ~p", [VTEPName, Info])
     end.
 
 -type prefix_len() :: 0..32 | 0..128.
