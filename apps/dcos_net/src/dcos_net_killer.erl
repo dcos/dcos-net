@@ -70,7 +70,7 @@ reductions() ->
         end
     end, #{}, erlang:processes()).
 
--spec(maybe_kill(pid()) -> true).
+-spec(maybe_kill(pid()) -> true | no_return()).
 maybe_kill(Pid) ->
     case erlang:process_info(Pid, current_function) of
         {current_function, MFA} ->
@@ -78,19 +78,20 @@ maybe_kill(Pid) ->
         undefined -> true
     end.
 
--spec(maybe_kill(pid(), mfa()) -> true).
+-spec(maybe_kill(pid(), mfa()) -> true | no_return()).
 maybe_kill(Pid, MFA) ->
     case stuck_fun(MFA) of
         true -> kill(Pid, MFA);
         false -> true
     end.
 
--spec(kill(pid(), mfa()) -> true).
+-spec(kill(pid(), mfa()) -> true | no_return()).
 kill(Pid, MFA) ->
-    lager:warning("~p is stuck: ~p", [Pid, MFA]),
-    case application:get_env(dcos_net, enable_killer, true) of
-        true -> exit(Pid, kill);
-        false -> true
+    lager:alert("~p got stuck: ~p", [Pid, MFA]),
+    case application:get_env(dcos_net, killer, disabled) of
+        disabled -> true;
+        enabled -> exit(Pid, kill);
+        {enabled, abort} -> erlang:halt(abort)
     end.
 
 -spec(stuck_fun(mfa()) -> boolean()).
