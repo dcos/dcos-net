@@ -32,7 +32,7 @@ maybe_configure(Config, MyPid) ->
     lager:debug("Started applying config ~p~n", [Config]),
     KnownOverlays = dcos_overlay_poller:overlays(),
     {ok, Netlink} = dcos_overlay_netlink:start_link(),
-    lists:map(
+    lists:foreach(
         fun(Overlay) -> try_configure_overlay(Netlink, Config, Overlay) end,
         KnownOverlays
     ),
@@ -71,7 +71,7 @@ parse_subnet(Subnet) ->
 try_configure_overlay2(Pid,
   _Config = #{key := [navstar, overlay, Subnet], value := LashupValue},
   Overlay, ParsedSubnet) when Subnet == ParsedSubnet ->
-    lists:map(
+    lists:foreach(
         fun(Value) -> maybe_configure_overlay_entry(Pid, Overlay, Value) end,
         LashupValue
     );
