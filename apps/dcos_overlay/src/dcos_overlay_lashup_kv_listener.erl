@@ -158,6 +158,11 @@ handle_lashup_event2(OverlayKey = [navstar, overlay, Subnet], NewOverlayConfig, 
              StateData = #data{config = OldConfig}) when is_tuple(Subnet), tuple_size(Subnet) == 2 ->
     DeltaOverlayConfig = determine_delta_config(NewOverlayConfig, OldOverlayConfig),
     NewConfig = orddict:append_list(OverlayKey, DeltaOverlayConfig, OldConfig),
+    DeltaInfo =
+        maps:from_list(
+            [ {to_str(IP), maps:from_list([{K, to_str(V)} || {{K, riak_dt_lwwreg}, V} <- Value])}
+            || {{IP, riak_dt_map}, Value} <- DeltaOverlayConfig ]),
+    lager:notice("Overlay configuration was gossiped, ~s => ~p", [to_str(Subnet), DeltaInfo]),
     StateData#data{config = NewConfig}.
 
 determine_delta_config(NewOverlayConfig, OldOverlayConfig) ->
@@ -207,3 +212,13 @@ create_actions([Config|Configs], Acc) ->
 create_action({OverlayKey, KeyValue}) ->
     EventContent = #{key => OverlayKey, value => KeyValue},
     {next_event, internal, EventContent}.
+
+to_str({IP, Prefix}) ->
+    lists:concat([inet:ntoa(IP), "/", Prefix]);
+to_str(Mac) when length(Mac) =:= 6 ->
+    List = [[integer_to_list(A div 16, 16),
+             integer_to_list(A rem 16, 16)]
+           || A <- Mac],
+    lists:flatten(string:join(List, ":"));
+to_str(IP) ->
+    inet:ntoa(IP).
