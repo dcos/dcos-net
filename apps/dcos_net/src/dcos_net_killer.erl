@@ -98,7 +98,7 @@ kill(Pid, MFA) ->
 stuck_fun({erlang, hibernate, 3}) -> false;
 stuck_fun({erts_code_purger, wait_for_request, 0}) -> false;
 stuck_fun({gen_event, fetch_msg, 6}) -> false;
-stuck_fun({prim_inet, accept0, 2}) -> false;
+stuck_fun({prim_inet, accept0, _}) -> false;
 stuck_fun({prim_inet, recv0, 2}) -> false;
 stuck_fun({timer, sleep, 1}) -> false;
 stuck_fun({group, _F, _A}) -> false;
