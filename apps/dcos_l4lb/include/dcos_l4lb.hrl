@@ -2,6 +2,7 @@
 
 -record(netns, {id :: undefined | term(),
                 ns :: undefined | binary()}).
+-type netns() :: #netns{}.
 
 -define(ZONE_NAMES, [
     [<<"l4lb">>, <<"thisdcos">>, <<"directory">>],

@@ -192,12 +192,16 @@ apply_p99(C = #ip_vs_conn{dst_ip = IP, dst_port = Port,
 named_tags(IIP, Port, IVIP, VIPPort) ->
     IP = int_to_ip(IIP),
     VIP = int_to_ip(IVIP),
-    case dcos_l4lb_lashup_vip_listener:lookup_vips([{ip, VIP}]) of
-        [{name, VIPName}] -> #{vip => fmt_ip_port(VIP, VIPPort), backend => fmt_ip_port(IP, Port), name => VIPName};
-        _ -> #{vip => fmt_ip_port(VIP, VIPPort), backend => fmt_ip_port(IP, Port)}
+    Result = #{vip => fmt_ip_port(VIP, VIPPort), backend => fmt_ip_port(IP, Port)},
+    case dcos_l4lb_lashup_vip_listener:ip2name(VIP) of
+        false -> Result;
+        VIPName ->
+            Result#{name => VIPName}
     end.
 
-int_to_ip(Int) -> dcos_l4lb_lashup_vip_listener:integer_to_ip(Int).
+int_to_ip(IntIP) ->
+    <<A, B, C, D>> = <<IntIP:32/integer>>,
+    {A, B, C, D}.
 
 -spec(fmt_ip_port(IP :: inet:ip4_address(), Port :: inet:port_number()) -> binary()).
 fmt_ip_port(IP, Port) ->

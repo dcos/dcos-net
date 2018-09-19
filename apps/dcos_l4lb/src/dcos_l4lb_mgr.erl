@@ -1,74 +1,537 @@
-%%%-------------------------------------------------------------------
-%%% @author sdhillon
-%%% @copyright (C) 2016, <COMPANY>
-%%% @doc
-%%%
-%%% @end
-%%% Created : 18. Oct 2016 12:48 AM
-%%%-------------------------------------------------------------------
 -module(dcos_l4lb_mgr).
--author("sdhillon").
+-behaviour(gen_server).
 
--behaviour(gen_statem).
+-include_lib("stdlib/include/ms_transform.hrl").
+-include("dcos_l4lb_lashup.hrl").
+-include("dcos_l4lb.hrl").
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 -endif.
--include_lib("stdlib/include/ms_transform.hrl").
--include_lib("gen_netlink/include/netlink.hrl").
--include("dcos_l4lb_lashup.hrl").
--include("dcos_l4lb.hrl").
-
--define(NOW, 0).
--define(RECONCILE_TIMEOUT, 30000).
--define(SERVER, ?MODULE).
-
--record(state, {
-    last_configured_vips = [],
-    last_received_vips = [],
-    route_mgr,
-    ipvs_mgr,
-    route_events_ref,
-    kv_ref,
-    netns_event_ref,
-    ns = [host],
-    routes :: ordsets:ordset() | undefined,
-    ip_mapping = #{}:: map(),
-    tree            :: lashup_gm_route:tree() | undefined
-}).
 
 %% API
 -export([
-    start_link/0,
     push_vips/1,
     push_netns/2,
     local_port_mappings/1
 ]).
 
-%% gen_statem behaviour
--export([init/1, terminate/3, code_change/4, callback_mode/0]).
+-export([start_link/0]).
 
-%% State callbacks
--export([init/3, notree/3, reconcile/3, maintain/3]).
+%% gen_server callbacks
+-export([init/1, handle_call/3, handle_cast/2,
+    handle_info/2, terminate/2, code_change/3]).
 
--ifdef(TEST).
--export([normalize_services_and_dests/1]).
--endif.
+-record(state, {
+    % pids and refs
+    ipvs_mgr :: pid(),
+    route_mgr :: pid(),
+    netns_mgr :: pid(),
+    route_ref :: reference(),
+    nodes_ref :: reference(),
+    recon_ref :: reference(),
+    % data
+    tree = #{} :: lashup_gm_route:tree(),
+    nodes = #{} :: #{inet:ip4_address() => node()},
+    netns = [host] :: [host | netns()],
+    % vips
+    vips = [] :: [{key(), [backend()]}],
+    prev_ipvs = [] :: [{key(), [ipport()]}],
+    prev_routes = [] :: [inet:ip_address()]
+}).
+-type state() :: #state{}.
 
-push_vips(VIPs0) ->
-    VIPs1 = ordsets:from_list(VIPs0),
-    gen_statem:cast(?SERVER, {vips, VIPs1}).
+-type key() :: dcos_l4lb_mesos_poller:key().
+-type backend() :: dcos_l4lb_mesos_poller:backend().
+-type ipport() :: {inet:ip_address(), inet:port_number()}.
 
+-define(GM_EVENTS(R, T), {lashup_gm_route_events, #{ref := R, tree := T}}).
+-define(KV_EVENTS(R, V), {lashup_kv_events, #{ref := R, value := V}}).
+
+
+-spec(push_vips(VIPs :: [{Key, [Backend]}]) -> ok
+    when Key :: dcos_l4lb_mesos_poller:key(),
+         Backend :: dcos_l4lb_mesos_poller:backend()).
+push_vips(VIPs) ->
+    gen_server:cast(?MODULE, {vips, VIPs}).
+
+-spec(push_netns(EventType, [netns()]) -> ok
+    when EventType :: add_netns | remove_netns | reconcile_netns).
 push_netns(EventType, EventContent) ->
-    gen_statem:cast(?SERVER, {netns_event, self(), EventType, EventContent}).
+    gen_server:cast(?MODULE, {netns, {self(), EventType, EventContent}}).
 
+-spec(start_link() ->
+    {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link() ->
+    init_local_port_mappings(),
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+
+%%%===================================================================
+%%% gen_server callbacks
+%%%===================================================================
+
+init([]) ->
+    self() ! init,
+    {ok, []}.
+
+handle_call(_Request, _From, State) ->
+    {noreply, State}.
+
+handle_cast({vips, VIPs}, State) ->
+    {noreply, handle_vips(VIPs, State)};
+handle_cast({netns, Event}, State) ->
+    {noreply, handle_netns_event(Event, State)};
+handle_cast(_Request, State) ->
+    {noreply, State}.
+
+handle_info(init, []) ->
+    {noreply, handle_init()};
+handle_info(?GM_EVENTS(_R, _T)=Event, State) ->
+    {noreply, handle_gm_event(Event, State)};
+handle_info(?KV_EVENTS(_R, _T)=Event, State) ->
+    {noreply, handle_kv_event(Event, State)};
+handle_info({timeout, _Ref, reconcile}, State) ->
+    {noreply, handle_reconcile(State)};
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+%%%===================================================================
+%%% Events functions
+%%%===================================================================
+
+-define(SKIP(Pattern, Value, Init), (fun Skip(X) ->
+    % Skip message if there is yet another such message in
+    % the message queue. It should improve the convergence.
+    receive
+        Pattern ->
+            Skip(Value)
+    after 0 ->
+        X
+    end
+end)(Init)).
+
+-spec(handle_init() -> state()).
+handle_init() ->
+    {ok, IPVSMgr} = dcos_l4lb_ipvs_mgr:start_link(),
+    {ok, RouteMgr} = dcos_l4lb_route_mgr:start_link(),
+    {ok, NetNSMgr} = dcos_l4lb_netns_watcher:start_link(),
+
+    MatchSpec = ets:fun2ms(fun ({?NODEMETADATA_KEY}) -> true end),
+    {ok, NodesRef} = lashup_kv_events_helper:start_link(MatchSpec),
+    {ok, RouteRef} = lashup_gm_route_events:subscribe(),
+    ReconRef = start_reconcile_timer(),
+
+    #state{ipvs_mgr=IPVSMgr, route_mgr=RouteMgr, netns_mgr=NetNSMgr,
+           route_ref=RouteRef, nodes_ref=NodesRef, recon_ref=ReconRef}.
+
+-spec(handle_gm_event(?GM_EVENTS(Ref, Tree), state()) -> state()
+    when Ref :: reference(), Tree :: lashup_gm_route:tree()).
+handle_gm_event(?GM_EVENTS(Ref, Tree), #state{route_ref=Ref}=State) ->
+    Tree0 = ?SKIP(?GM_EVENTS(Ref, T), T, Tree),
+    State#state{tree=Tree0};
+handle_gm_event(_Event, State) ->
+    State.
+
+-spec(handle_kv_event(?KV_EVENTS(Ref, Value), state()) -> state()
+    when Ref :: reference(), Value :: [tuple()]).
+handle_kv_event(?KV_EVENTS(Ref, Value), #state{nodes_ref=Ref}=State) ->
+    Value0 = ?SKIP(?KV_EVENTS(Ref, V), V, Value),
+    Nodes = [{IP, Node} || {?LWW_REG(IP), Node} <- Value0],
+    State#state{nodes=maps:from_list(Nodes)};
+handle_kv_event(_Event, State) ->
+    State.
+
+-spec(handle_netns_event({pid(), EventType, [netns()]}, state()) -> state()
+    when EventType :: add_netns | remove_netns | reconcile_netns).
+handle_netns_event({Pid, remove_netns, EventContent},
+                #state{netns_mgr=Pid}=State) ->
+    handle_netns_event(remove_netns, EventContent, State);
+handle_netns_event({Pid, EventType, EventContent},
+                #state{netns_mgr=Pid}=State) ->
+    State0 = handle_netns_event(EventType, EventContent, State),
+    handle_reconcile(State0);
+handle_netns_event(_Event, State) ->
+    State.
+
+-spec(handle_vips([{key(), [backend()]}], state()) -> state()).
+handle_vips(VIPs, State) ->
+    VIPs0 = ?SKIP({'$gen_cast', {vips, V}}, V, VIPs),
+    handle_vips_imp(VIPs0, State).
+
+-spec(handle_reconcile(state()) -> state()).
+handle_reconcile(#state{vips=VIPs, recon_ref=Ref}=State) ->
+    erlang:cancel_timer(Ref),
+    State0 = handle_reconcile(VIPs, State),
+    Ref0 = start_reconcile_timer(),
+    State0#state{recon_ref=Ref0}.
+
+-spec(start_reconcile_timer() -> reference()).
+start_reconcile_timer() ->
+    Timeout = application:get_env(dcos_l4lb, reconcile_timeout, 30000),
+    erlang:start_timer(Timeout, self(), reconcile).
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+-spec(handle_reconcile([{key(), [backend()]}], state()) -> state()).
+handle_reconcile(VIPs, #state{route_mgr=RouteMgr, ipvs_mgr=IPVSMgr,
+        tree=Tree, nodes=Nodes, netns=Namespaces}=State) ->
+    % If everything is ok this function is silent and changes nothing.
+    VIPs0 = vips_port_mappings(VIPs),
+    VIPs1 = healthy_vips(VIPs0, Nodes, Tree),
+    VIPsP = prepare_vips(VIPs1),
+    Routes = get_vip_routes(VIPs1),
+    lists:foreach(fun (NetNs) ->
+        NetNsBin = netns2bin(NetNs),
+        LogPrefix = <<"netns: ", NetNsBin/binary, "; ">>,
+
+        PrevRoutes = get_routes(RouteMgr, NetNs),
+        DiffRoutes = dcos_net_utils:complement(Routes, PrevRoutes),
+        ok = apply_routes_diff(RouteMgr, NetNs, DiffRoutes),
+        ok = log_routes_diff(LogPrefix, DiffRoutes),
+
+        PrevVIPsP = get_vips(IPVSMgr, NetNs),
+        DiffVIPs = diff(PrevVIPsP, VIPsP),
+        ok = apply_vips_diff(IPVSMgr, NetNs, DiffVIPs),
+        ok = log_vips_diff(LogPrefix, DiffVIPs)
+    end, Namespaces),
+    State#state{prev_ipvs=VIPs1, prev_routes=Routes}.
+
+-spec(handle_vips_imp([{key(), [backend()]}], state()) -> state()).
+handle_vips_imp(VIPs, #state{route_mgr=RouteMgr, ipvs_mgr=IPVSMgr,
+        tree=Tree, nodes=Nodes, netns=Namespaces,
+        prev_ipvs=PrevVIPs, prev_routes=PrevRoutes}=State) ->
+    VIPs0 = vips_port_mappings(VIPs),
+    VIPs1 = healthy_vips(VIPs0, Nodes, Tree),
+    DiffVIPs = diff(prepare_vips(PrevVIPs), prepare_vips(VIPs1)),
+
+    Routes = get_vip_routes(VIPs1),
+    DiffRoutes = dcos_net_utils:complement(Routes, PrevRoutes),
+
+    lists:foreach(fun (NetNs) ->
+        ok = apply_routes_diff(RouteMgr, NetNs, DiffRoutes),
+        ok = apply_vips_diff(IPVSMgr, NetNs, DiffVIPs)
+    end, Namespaces),
+    ok = log_vips_diff(DiffVIPs),
+    ok = log_routes_diff(DiffRoutes),
+    State#state{vips=VIPs, prev_ipvs=VIPs1, prev_routes=Routes}.
+
+%%%===================================================================
+%%% Routes functions
+%%%===================================================================
+
+-type diff_routes() :: {[inet:ip_address()], [inet:ip_address()]}.
+
+-spec(apply_routes_diff(pid(), NetNs, diff_routes()) -> ok
+    when NetNs :: netns() | host).
+apply_routes_diff(RouteMgr, NetNs, {ToAdd, ToDel}) ->
+    dcos_l4lb_route_mgr:add_routes(RouteMgr, ToAdd, NetNs),
+    dcos_l4lb_route_mgr:remove_routes(RouteMgr, ToDel, NetNs).
+
+-spec(get_routes(pid(), netns() | host) -> [inet:ip_address()]).
+get_routes(RouteMgr, NetNs) ->
+    dcos_l4lb_route_mgr:get_routes(RouteMgr, NetNs).
+
+-spec(get_vip_routes(VIPs :: [{key(), [backend()]}]) -> [inet:ip_address()]).
+get_vip_routes(VIPs) ->
+    lists:usort([IP || {{_Proto, IP, _Port}, _Backends} <- VIPs]).
+
+%%%===================================================================
+%%% IPVS functions
+%%%===================================================================
+
+-spec(prepare_vips([{key(), [backend()]}]) -> [{key(), [ipport()]}]).
+prepare_vips(VIPs) ->
+    lists:map(fun ({VIP, BEs}) ->
+        {VIP, [BE || {_AgentIP, BE} <- BEs]}
+    end, VIPs).
+
+-spec(get_vips(pid(), netns() | host) -> [{key(), [ipport()]}]).
+get_vips(IPVSMgr, NetNs) ->
+    Services = get_vip_services(IPVSMgr, NetNs),
+    lists:map(fun (S) -> get_vip(IPVSMgr, NetNs, S) end, Services).
+
+-spec(get_vip_services(pid(), netns() | host) -> [Service]
+    when Service :: dcos_l4lb_ipvs_mgr:service()).
+get_vip_services(IPVSMgr, NetNs) ->
+    Services = dcos_l4lb_ipvs_mgr:get_services(IPVSMgr, NetNs),
+    FVIPs = lists:map(fun dcos_l4lb_ipvs_mgr:service_address/1, Services),
+    maps:values(maps:from_list(lists:zip(FVIPs, Services))).
+
+-spec(get_vip(pid(), netns() | host, Service) -> {key(), [ipport()]}
+    when Service :: dcos_l4lb_ipvs_mgr:service()).
+get_vip(IPVSMgr, NetNs, Service) ->
+    {Family, VIP} = dcos_l4lb_ipvs_mgr:service_address(Service),
+    Dests = dcos_l4lb_ipvs_mgr:get_dests(IPVSMgr, Service, NetNs),
+    Backends =
+        lists:map(fun (Dest) ->
+            dcos_l4lb_ipvs_mgr:destination_address(Family, Dest)
+        end, Dests),
+    {VIP, lists:usort(Backends)}.
+
+%%%===================================================================
+%%% IPVS Apply functions
+%%%===================================================================
+
+-type diff_vips() :: {ToAdd :: [{key(), [ipport()]}],
+                      ToDel :: [{key(), [ipport()]}],
+                      ToMod :: [{key(), [ipport()], [ipport()]}]}.
+
+-spec(apply_vips_diff(pid(), netns() | host, diff_vips()) -> ok).
+apply_vips_diff(IPVSMgr, NetNs, {ToAdd, ToDel, ToMod}) ->
+    lists:foreach(fun (VIP) ->
+        vip_del(IPVSMgr, NetNs, VIP)
+    end, ToDel),
+    lists:foreach(fun (VIP) ->
+        vip_add(IPVSMgr, NetNs, VIP)
+    end, ToAdd),
+    lists:foreach(fun (VIP) ->
+        vip_mod(IPVSMgr, NetNs, VIP)
+    end, ToMod).
+
+-spec(vip_add(pid(), netns() | host, {key(), [ipport()]}) -> ok).
+vip_add(IPVSMgr, NetNs, {{Protocol, IP, Port}, BEs}) ->
+    dcos_l4lb_ipvs_mgr:add_service(IPVSMgr, IP, Port, Protocol, NetNs),
+    lists:foreach(fun ({BEIP, BEPort}) ->
+        dcos_l4lb_ipvs_mgr:add_dest(
+            IPVSMgr, IP, Port,
+            BEIP, BEPort,
+            Protocol, NetNs)
+    end, BEs).
+
+-spec(vip_del(pid(), netns() | host, {key(), [ipport()]}) -> ok).
+vip_del(IPVSMgr, NetNs, {{Protocol, IP, Port}, _BEs}) ->
+    dcos_l4lb_ipvs_mgr:remove_service(IPVSMgr, IP, Port, Protocol, NetNs).
+
+-spec(vip_mod(pid(), netns() | host, {key(), [ipport()], [ipport()]}) -> ok).
+vip_mod(IPVSMgr, NetNs, {{Protocol, IP, Port}, ToAdd, ToDel}) ->
+    lists:foreach(fun ({BEIP, BEPort}) ->
+        dcos_l4lb_ipvs_mgr:add_dest(
+            IPVSMgr, IP, Port,
+            BEIP, BEPort,
+            Protocol, NetNs)
+    end, ToAdd),
+    lists:foreach(fun ({BEIP, BEPort}) ->
+        dcos_l4lb_ipvs_mgr:remove_dest(
+            IPVSMgr, IP, Port,
+            BEIP, BEPort,
+            Protocol, NetNs)
+    end, ToDel).
+
+%%%===================================================================
+%%% Diff functions
+%%%===================================================================
+
+%% @doc Return {A\B, B\A, [{Key, Va\Vb, Vb\Va}]}
+-spec(diff([{A, B}], [{A, B}]) -> {[{A, B}], [{A, B}], [{A, B, B}]}
+    when A :: term(), B :: term()).
+diff(ListA, ListB) ->
+    diff(lists:sort(ListA),
+         lists:sort(ListB),
+         [], [], []).
+
+-spec(diff([{A, B}], [{A, B}], [{A, B}], [{A, B}], [{A, B, B}]) ->
+    {[{A, B}], [{A, B}], [{A, B, B}]} when A :: term(), B :: term()).
+diff([A|ListA], [A|ListB], Acc, Bcc, Mcc) ->
+    diff(ListA, ListB, Acc, Bcc, Mcc);
+diff([{Key, Va}|ListA], [{Key, Vb}|ListB], Acc, Bcc, Mcc) ->
+    {Ma, Mb} = dcos_net_utils:complement(Vb, Va),
+    diff(ListA, ListB, Acc, Bcc, [{Key, Ma, Mb}|Mcc]);
+diff([A|_]=ListA, [B|ListB], Acc, Bcc, Mcc) when A > B ->
+    diff(ListA, ListB, [B|Acc], Bcc, Mcc);
+diff([A|ListA], [B|_]=ListB, Acc, Bcc, Mcc) when A < B ->
+    diff(ListA, ListB, Acc, [A|Bcc], Mcc);
+diff([], ListB, Acc, Bcc, Mcc) ->
+    {ListB ++ Acc, Bcc, Mcc};
+diff(ListA, [], Acc, Bcc, Mcc) ->
+    {Acc, ListA ++ Bcc, Mcc}.
+
+%%%===================================================================
+%%% Reachability functions
+%%%===================================================================
+
+-spec(healthy_vips(VIPs, Nodes, Tree) -> VIPs
+    when VIPs :: [{key(), [backend()]}],
+         Nodes :: #{inet:ip4_address() => node()},
+         Tree :: lashup_gm_route:tree()).
+healthy_vips(VIPs, Nodes, Tree)
+        when map_size(Tree) =:= 0;
+             map_size(Nodes) =:= 0 ->
+    VIPs;
+healthy_vips(VIPs, Nodes, Tree) ->
+    Agents = agents(VIPs, Nodes, Tree),
+    lists:map(fun ({VIP, BEs}) ->
+        {VIP, healthy_backends(BEs, Agents)}
+    end, VIPs).
+
+-spec(agents(VIPs, Nodes, Tree) -> #{inet:ip4_address() => boolean()}
+    when VIPs :: [{key(), [backend()]}],
+         Nodes :: #{inet:ip4_address() => node()},
+         Tree :: lashup_gm_route:tree()).
+agents(VIPs, Nodes, Tree) ->
+    AgentIPs =
+        lists:flatmap(fun ({_VIP, BEs}) ->
+            [AgentIP || {AgentIP, _BE} <- BEs]
+        end, VIPs),
+    AgentIPs0 = lists:usort(AgentIPs),
+    Result = [{IP, is_reachable(IP, Nodes, Tree)} || IP <- AgentIPs0],
+    Unreachable = [IP || {IP, false} <- Result],
+    [ lager:warning(
+        "L4LB unreachable agent nodes, size: ~p, ~p",
+        [length(Unreachable), Unreachable])
+    || Unreachable =/= [] ],
+    maps:from_list(Result).
+
+-spec(healthy_backends([backend()], Agents) -> [backend()]
+    when Agents :: #{inet:ip4_address() => boolean()}).
+healthy_backends(BEs, Agents) ->
+    case [BE || BE={IP, _BE} <- BEs, maps:get(IP, Agents)] of
+        [] -> BEs;
+        BEs0 -> BEs0
+    end.
+
+-spec(is_reachable(inet:ip4_address(), Nodes, Tree) -> boolean()
+    when Nodes :: #{inet:ip4_address() => node()},
+         Tree :: lashup_gm_route:tree()).
+is_reachable(AgentIP, Nodes, Tree) ->
+    case maps:find(AgentIP, Nodes) of
+        {ok, Node} ->
+            Distance = lashup_gm_route:distance(Node, Tree),
+            Distance =/= infinity;
+        error ->
+            false
+    end.
+
+%%%===================================================================
+%%% Logging functions
+%%%===================================================================
+
+-spec(netns2bin(host | netns()) -> binary()).
+netns2bin(host) ->
+    <<"host">>;
+netns2bin(#netns{ns=Ns}) when is_binary(Ns) ->
+    Ns;
+netns2bin(_NetNs) ->
+    <<"undef">>.
+
+-spec(log_vips_diff(diff_vips()) -> ok).
+log_vips_diff(Diff) ->
+    log_vips_diff(<<>>, Diff).
+
+-spec(log_vips_diff(binary(), diff_vips()) -> ok).
+log_vips_diff(Prefix, {ToAdd, ToDel, ToMod}) ->
+    lists:foreach(fun ({{Proto, VIP, Port}, Backends}) ->
+        lager:notice(
+            "~sVIP service was added: ~p://~s:~p, Backends: ~p",
+            [Prefix, Proto, inet:ntoa(VIP), Port, Backends])
+    end, ToAdd),
+    lists:foreach(fun ({{Proto, VIP, Port}, _BEs}) ->
+        lager:notice(
+            "~sVIP service was deleted: ~p://~s:~p",
+            [Prefix, Proto, inet:ntoa(VIP), Port])
+    end, ToDel),
+    lists:foreach(fun ({{Proto, VIP, Port}, Added, Removed}) ->
+        lager:notice(
+            "~sVIP service was modified: ~p://~s:~p, Backends: +~p -~p",
+            [Prefix, Proto, inet:ntoa(VIP), Port, Added, Removed])
+    end, ToMod).
+
+-spec(log_routes_diff(diff_routes()) -> ok).
+log_routes_diff(Diff) ->
+    log_routes_diff(<<>>, Diff).
+
+-spec(log_routes_diff(binary(), diff_routes()) -> ok).
+log_routes_diff(Prefix, {ToAdd, ToDel}) ->
+    [ lager:notice(
+        "~sVIP routes were added, routes: ~p, IPs: ~p",
+        [Prefix, length(ToAdd), ToAdd]) || ToAdd =/= [] ],
+    [ lager:notice(
+        "~sVIP routes were removed, routes: ~p, IPs: ~p",
+        [Prefix, length(ToDel), ToDel]) || ToDel =/= [] ],
+    ok.
+
+-spec(log_netns_diff([NetNs], [NetNs]) -> ok
+    when NetNs :: host | netns()).
+log_netns_diff(Namespaces, Namespaces) ->
+    ok;
+log_netns_diff(Namespaces, _PrevNamespaces) ->
+    <<", ", Str/binary>> =
+        << <<", ", (netns2bin(NetNs))/binary>>
+        || NetNs <- Namespaces>>,
+    lager:notice("L4LB network namespaces: ~s", [Str]).
+
+%%%===================================================================
+%%% Network Namespace functions
+%%%===================================================================
+
+-spec(handle_netns_event(EventType, [netns()], state()) -> state()
+    when EventType :: add_netns | remove_netns | reconcile_netns).
+handle_netns_event(remove_netns, ToDel,
+        #state{ipvs_mgr=IPVSMgr, route_mgr=RouteMgr, netns=Prev}=State) ->
+    Namespaces = dcos_l4lb_route_mgr:remove_netns(RouteMgr, ToDel),
+    Namespaces = dcos_l4lb_route_mgr:remove_netns(IPVSMgr, ToDel),
+    Result = ordsets:subtract(Prev, ordsets:from_list(Namespaces)),
+    log_netns_diff(Result, Prev),
+    State#state{netns=Result};
+handle_netns_event(add_netns, ToAdd,
+        #state{ipvs_mgr=IPVSMgr, route_mgr=RouteMgr, netns=Prev}=State) ->
+    Namespaces = dcos_l4lb_route_mgr:add_netns(RouteMgr, ToAdd),
+    Namespaces = dcos_l4lb_ipvs_mgr:add_netns(IPVSMgr, ToAdd),
+    Result = ordsets:union(ordsets:from_list(Namespaces), Prev),
+    log_netns_diff(Result, Prev),
+    State#state{netns=Result};
+handle_netns_event(reconcile_netns, Namespaces, State) ->
+    handle_netns_event(add_netns, Namespaces, State).
+
+%%%===================================================================
+%%% Local Port Mappings functions
+%%%===================================================================
+
+-spec(vips_port_mappings(VIPs) -> VIPs
+    when VIPs :: [{key(), [backend()]}]).
+vips_port_mappings(VIPs) ->
+    PMs = local_port_mappings(),
+    AgentIP = dcos_net_dist:nodeip(),
+    % Remove port mappings for local backends.
+    lists:map(fun ({{Protocol, VIP, VIPPort}, BEs}) ->
+        BEs0 = bes_port_mappings(PMs, Protocol, AgentIP, BEs),
+        {{Protocol, VIP, VIPPort}, BEs0}
+    end, VIPs).
+
+-spec(bes_port_mappings(PMs, tcp | udp, AgentIP, [backend()]) -> [backend()]
+    when PMs :: #{Host => Container},
+         AgentIP :: inet:ip4_address(),
+         Host :: {tcp | udp, inet:port_number()},
+         Container :: {inet:ip_address(), inet:port_number()}).
+bes_port_mappings(PMs, Protocol, AgentIP, BEs) ->
+    lists:map(
+        fun ({BEAgentIP, {BEIP, BEPort}}) when BEIP =:= AgentIP ->
+                case maps:find({Protocol, BEPort}, PMs) of
+                    {ok, {IP, Port}} -> {BEAgentIP, {IP, Port}};
+                    error -> {BEAgentIP, {BEIP, BEPort}}
+                end;
+            ({BEAgentIP, {BEIP, BEPort}}) ->
+                {BEAgentIP, {BEIP, BEPort}}
+        end, BEs).
+
+%%%===================================================================
+%%% Local Port Mappings API functions
+%%%===================================================================
+
+-spec(init_local_port_mappings() -> local_port_mappings).
+init_local_port_mappings() ->
     try
         ets:new(local_port_mappings, [public, named_table])
     catch error:badarg ->
-        ok
-    end,
-    gen_statem:start_link({local, ?SERVER}, ?MODULE, [], []).
+        local_port_mappings
+    end.
 
 -spec(local_port_mappings([{Host, Container}] | #{Host => Container}) -> true
     when Host :: {tcp | udp, inet:port_number()},
@@ -83,292 +546,9 @@ local_port_mappings(PortMappings) ->
         true
     end.
 
-%%%===================================================================
-%%% gen_statem callbacks
-%%%===================================================================
-
-init([]) ->
-    {ok, init, [], {timeout, 0, init}}.
-
-terminate(Reason, State, Data) ->
-    lager:warning("Terminating, due to: ~p, in state: ~p, with state data: ~p", [Reason, State, Data]).
-
-code_change(_OldVsn, OldState, OldData, _Extra) ->
-    {ok, OldState, OldData}.
-
-callback_mode() ->
-    state_functions.
-
-%% TODO: We need to do lashup integration and make it so there are availability checks
-
-
-%handle_event(EventType, EventContent, StateName, #state{}) ->
-%% In the uninitialized state, we want to enumerate the VIPs that exist,
-%% and we want to delete the VIPs that aren't in the list
-%% Then we we redeliver the event for further processing
-%% VIPs are in the structure [{{protocol(), inet:ip_address(), port_num}, [{inet:ip_address(), port_num}]}]
-%% [{{tcp,{1,2,3,4},80},[{{33,33,33,2},20320}]}]
-
-init(timeout, init, []) ->
-    {ok, KVRef} = lashup_kv_events_helper:start_link(ets:fun2ms(fun({?NODEMETADATA_KEY}) -> true end)),
-    {ok, Ref} = lashup_gm_route_events:subscribe(),
-    {ok, IPVSMgr} = dcos_l4lb_ipvs_mgr:start_link(),
-    {ok, RouteMgr} = dcos_l4lb_route_mgr:start_link(),
-    {ok, NetnsRef} = dcos_l4lb_netns_watcher:start_link(),
-    State = #state{route_mgr = RouteMgr, ipvs_mgr = IPVSMgr, route_events_ref = Ref,
-                   kv_ref = KVRef, netns_event_ref = NetnsRef},
-    {next_state, notree, State}.
-
-%% States go notree -> reconcile -> maintain
-notree(info, {lashup_gm_route_events, #{ref := Ref, tree := Tree}}, State0 = #state{route_events_ref = Ref}) ->
-    State1 = State0#state{tree = Tree},
-    {next_state, reconcile, State1};
-notree(cast, {netns_event, Ref, EventType, EventContent}, State0 = #state{netns_event_ref = Ref}) ->
-    State1 = update_netns(EventType, EventContent, State0),
-    {keep_state, State1};
-notree(_, _, _) ->
-    {keep_state_and_data, postpone}.
-
-reconcile(cast, {vips, VIPs}, State0) ->
-    State1 = do_reconcile(VIPs, State0),
-    {next_state, maintain, State1};
-reconcile(info, {lashup_gm_route_events, #{ref := Ref, tree := Tree}}, State0 = #state{route_events_ref = Ref}) ->
-    State1 = State0#state{tree = Tree},
-    {keep_state, State1};
-reconcile(info, {lashup_kv_events, Event = #{ref := Ref}}, State0 = #state{kv_ref = Ref}) ->
-    State1 = handle_ip_event(Event, State0),
-    {keep_state, State1};
-reconcile(cast, {netns_event, Ref, EventType, EventContent}, State0 = #state{netns_event_ref = Ref}) ->
-    State1 = update_netns(EventType, EventContent, State0),
-    {keep_state, State1}.
-
-maintain(cast, {vips, VIPs}, State0) ->
-    State1 = maintain(VIPs, State0),
-    {keep_state, State1, {timeout, ?RECONCILE_TIMEOUT, do_reconcile}};
-maintain(internal, maintain, State0 = #state{last_received_vips = VIPs}) ->
-    State1 = maintain(VIPs, State0),
-    {keep_state, State1, {timeout, ?RECONCILE_TIMEOUT, do_reconcile}};
-maintain(info, {lashup_gm_route_events, #{ref := Ref, tree := Tree}}, State0 = #state{route_events_ref = Ref}) ->
-    State1 = State0#state{tree = Tree},
-    {keep_state, State1, {next_event, internal, maintain}};
-maintain(info, {lashup_kv_events, Event = #{ref := Ref}}, State0 = #state{kv_ref = Ref}) ->
-    State1 = handle_ip_event(Event, State0),
-    {keep_state, State1, {timeout, ?RECONCILE_TIMEOUT, do_reconcile}};
-maintain(cast, {netns_event, Ref, reconcile_netns, EventContent},
-         State0 = #state{netns_event_ref = Ref}) ->
-    State1 = update_netns(reconcile_netns, EventContent, State0),
-    {keep_state, State1, {timeout, ?NOW, do_reconcile}};
-maintain(cast, {netns_event, Ref, EventType, EventContent}, State0 = #state{netns_event_ref = Ref}) ->
-    State1 = update_netns(EventType, EventContent, State0),
-    {keep_state, State1, {timeout, ?RECONCILE_TIMEOUT, do_reconcile}};
- maintain(timeout, do_reconcile, State0 = #state{last_received_vips = VIPs}) ->
-    State1 = do_reconcile(VIPs, State0),
-    {keep_state, State1, {timeout, ?RECONCILE_TIMEOUT, do_reconcile}}.
-
-handle_ip_event(_Event = #{value := Value}, State0) ->
-    IPToNodeName = [{IP, NodeName} || {?LWW_REG(IP), NodeName} <- Value],
-    IPMapping = maps:from_list(IPToNodeName),
-    State0#state{ip_mapping = IPMapping}.
-
-update_netns(add_netns, UpdateValue, State = #state{
-        ns = Namespaces0, ipvs_mgr = IPVSMgr, route_mgr = RouteMgr}) ->
-    Namespaces1 = dcos_l4lb_route_mgr:add_netns(RouteMgr, UpdateValue),
-    Namespaces1 = dcos_l4lb_ipvs_mgr:add_netns(IPVSMgr, UpdateValue),
-    lists:foreach(fun(Ns) -> push_config(Ns, State) end, Namespaces1),
-    Namespaces2 = ordsets:union(ordsets:from_list(Namespaces1), Namespaces0),
-    State#state{ns = Namespaces2};
-update_netns(remove_netns, UpdateValue, State = #state{
-        ns = Namespaces0, ipvs_mgr = IPVSMgr, route_mgr = RouteMgr}) ->
-    Namespaces1 = dcos_l4lb_route_mgr:remove_netns(RouteMgr, UpdateValue),
-    Namespaces1 = dcos_l4lb_route_mgr:remove_netns(IPVSMgr, UpdateValue),
-    Namespaces2 = ordsets:subtract(Namespaces0, ordsets:from_list(Namespaces1)),
-    State#state{ns = Namespaces2};
-update_netns(reconcile_netns, UpdateValue, State = #state{
-        ns = Namespaces0, ipvs_mgr = IPVSMgr, route_mgr = RouteMgr}) ->
-    Namespaces1 = dcos_l4lb_route_mgr:add_netns(RouteMgr, UpdateValue),
-    Namespaces1 = dcos_l4lb_ipvs_mgr:add_netns(IPVSMgr, UpdateValue),
-    Namespaces2 = ordsets:union(ordsets:from_list(Namespaces1), Namespaces0),
-    State#state{ns = Namespaces2}.
-
-push_config(Namespace, State) ->
-    push_routes(Namespace, State),
-    push_services(Namespace, State).
-
-push_routes(Namespace, #state{routes = Routes, route_mgr = RouteMgr}) ->
-    dcos_l4lb_route_mgr:add_routes(RouteMgr, Routes, Namespace).
-
-push_services(Namespace, State = #state{last_configured_vips = VIPs}) ->
-    lists:foreach(fun({VIP, BEs}) -> add_service(VIP, BEs, Namespace, State) end, VIPs).
-
-do_reconcile(VIPs, State0 = #state{ns = Namespaces}) ->
-    VIPs0 = vips_port_mappings(VIPs),
-    VIPs1 = process_reachability(VIPs0, State0),
-    Routes = ordsets:from_list([VIP || {{_Proto, VIP, _Port}, _Backends} <- VIPs1]),
-    State1 = State0#state{last_received_vips = VIPs0, last_configured_vips = VIPs1, routes = Routes},
-    lists:foreach(fun(Ns) ->
-                     do_reconcile_routes(Ns, State1),
-                     do_reconcile_services(Ns, State1)
-                  end, Namespaces),
-    State1.
-
-do_reconcile_routes(Namespace, State = #state{routes = Routes}) ->
-    InstalledRoutes = installed_routes(Namespace, State),
-    do_update_routes(Routes, InstalledRoutes, Namespace, State).
-
-installed_routes(Namespace, #state{route_mgr = RouteMgr}) ->
-    dcos_l4lb_route_mgr:get_routes(RouteMgr, Namespace).
-
-do_update_routes(NewRoutes, OldRoutes, Namespace, #state{route_mgr = RouteMgr}) ->
-    RoutesToAdd = ordsets:subtract(NewRoutes, OldRoutes),
-    RoutesToDel = ordsets:subtract(OldRoutes, NewRoutes),
-    dcos_l4lb_route_mgr:add_routes(RouteMgr, RoutesToAdd, Namespace),
-    dcos_l4lb_route_mgr:remove_routes(RouteMgr, RoutesToDel, Namespace).
-
-do_reconcile_services(Namespace, State = #state{last_configured_vips = VIPs1}) ->
-    InstalledState = installed_state(Namespace, State),
-    VIPs2 = lists:map(fun do_transform/1, VIPs1),
-    Diff = generate_diff(InstalledState, VIPs2),
-    apply_diff(Diff, Namespace, State).
-
-do_transform({VIP, BEs}) ->
-    {VIP, [BE || {_AgentIP, BE} <- BEs]}.
-
-installed_state(Namespace, #state{ipvs_mgr = IPVSMgr}) ->
-    Services = dcos_l4lb_ipvs_mgr:get_services(IPVSMgr, Namespace),
-    ServicesAndDests0 = [{Service, dcos_l4lb_ipvs_mgr:get_dests(IPVSMgr, Service, Namespace)} || Service <- Services],
-    ServicesAndDests1 = lists:map(fun normalize_services_and_dests/1, ServicesAndDests0),
-    lists:usort(ServicesAndDests1).
-
-%% Converts IPVS service / dests into our normal dcos_l4lb ones
-normalize_services_and_dests({Service0, Destinations0}) ->
-    {AddressFamily, Service1} = dcos_l4lb_ipvs_mgr:service_address(Service0),
-    Destinations1 = lists:map(
-                      fun(Dest) ->
-                          dcos_l4lb_ipvs_mgr:destination_address(AddressFamily, Dest)
-                      end, Destinations0),
-    Destinations2 = lists:usort(Destinations1),
-    {Service1, Destinations2}.
-
-apply_diff({ServicesToAdd, ServicesToRemove, ServicesToModify}, Namespace, State) ->
-    lists:foreach(fun({VIP, _BEs}) -> remove_service(VIP, Namespace, State) end, ServicesToRemove),
-    lists:foreach(fun({VIP, BEs}) -> add_service(VIP, BEs, Namespace, State) end, ServicesToAdd),
-    lists:foreach(fun({VIP, BEAdd, BERemove}) ->
-        modify_service(VIP, BEAdd, BERemove, Namespace, State)
-    end, ServicesToModify).
-
-modify_service({Protocol, IP, Port}, BEAdd, BERemove, Namespace, #state{ipvs_mgr = IPVSMgr}) ->
-    lists:foreach(fun
-        ({_AgentIP, {BEIP, BEPort}}) ->
-            dcos_l4lb_ipvs_mgr:add_dest(IPVSMgr, IP, Port, BEIP, BEPort, Protocol, Namespace);
-        ({BEIP, BEPort}) ->
-            dcos_l4lb_ipvs_mgr:add_dest(IPVSMgr, IP, Port, BEIP, BEPort, Protocol, Namespace)
-        end,
-        BEAdd),
-    lists:foreach(fun
-        ({_AgentIP, {BEIP, BEPort}}) ->
-            dcos_l4lb_ipvs_mgr:remove_dest(IPVSMgr, IP, Port, BEIP, BEPort, Protocol, Namespace);
-        ({BEIP, BEPort}) ->
-            dcos_l4lb_ipvs_mgr:remove_dest(IPVSMgr, IP, Port, BEIP, BEPort, Protocol, Namespace)
-        end,
-        BERemove).
-
-remove_service({Protocol, IP, Port}, Namespace, #state{ipvs_mgr = IPVSMgr}) ->
-    dcos_l4lb_ipvs_mgr:remove_service(IPVSMgr, IP, Port, Protocol, Namespace).
-
-add_service({Protocol, IP, Port}, BEs, Namespace, #state{ipvs_mgr = IPVSMgr}) ->
-    dcos_l4lb_ipvs_mgr:add_service(IPVSMgr, IP, Port, Protocol, Namespace),
-    lists:foreach(fun
-      ({_AgentIP, {BEIP, BEPort}}) ->
-          dcos_l4lb_ipvs_mgr:add_dest(IPVSMgr, IP, Port, BEIP, BEPort, Protocol, Namespace);
-      ({BEIP, BEPort}) ->
-          dcos_l4lb_ipvs_mgr:add_dest(IPVSMgr, IP, Port, BEIP, BEPort, Protocol, Namespace)
-      end,
-      BEs).
-
-process_reachability(VIPs0, State) ->
-    lists:map(fun({VIP, BEs0}) -> {VIP, reachable_backends(BEs0, State)} end, VIPs0).
-
-maintain(VIPs, State = #state{ns = Namespaces, routes = Routes, last_configured_vips = LastConfigured}) ->
-    VIPs0 = vips_port_mappings(VIPs),
-    VIPs1 = process_reachability(VIPs0, State),
-    Diff = generate_diff(LastConfigured, VIPs1),
-    NewRoutes = ordsets:from_list([VIP || {{_Proto, VIP, _Port}, _Backends} <- VIPs1]),
-    lager:debug("Last Configured: ~p, VIPs: ~p, NewRoutes ~p, Diff ~p", [LastConfigured, VIPs1, NewRoutes, Diff]),
-    lists:foreach(fun(Namespace) ->
-                    do_update_routes(NewRoutes, Routes, Namespace, State),
-                    apply_diff(Diff, Namespace, State)
-                  end, Namespaces),
-    State#state{last_configured_vips = VIPs1, last_received_vips = VIPs0, routes = NewRoutes}.
-
-%% Returns {VIPsToRemove, VIPsToAdd, [VIP, BackendsToRemove, BackendsToAdd]}
-generate_diff(Lhs, Rhs) ->
-    generate_diff(Lhs, Rhs, [], [], []).
-
-%% The VIPs are equal AND the backends are equal. Ignore it.
-generate_diff([{VIP, BE}|RestLhs], [{VIP, BE}|RestRhs], VIPsToAdd, VIPsToRemove, Mutations) ->
-    generate_diff(RestLhs, RestRhs, VIPsToAdd, VIPsToRemove, Mutations);
-%% VIPs are equal, but the backends are different, prepare a mutation entry
-generate_diff([{VIP, BELhs}|RestLhs], [{VIP, BERhs}|RestRhs], VIPsToAdd, VIPsToRemove, Mutations0) ->
-    BERhs1 = ordsets:from_list(BERhs),
-    BELhs1 = ordsets:from_list(BELhs),
-    BEToAdd = ordsets:subtract(BERhs1, BELhs1),
-    BEToRemove = ordsets:subtract(BELhs1, BERhs1),
-    Mutation = {VIP, BEToAdd, BEToRemove},
-    generate_diff(RestLhs, RestRhs, VIPsToAdd, VIPsToRemove, [Mutation|Mutations0]);
-%% New VIP
-generate_diff(Lhs = [VIPLhs|_RestLhs], [VIPRhs|RestRhs], VIPsToAdd0, VIPsToRemove, Mutations) when VIPLhs > VIPRhs ->
-    generate_diff(Lhs, RestRhs, [VIPRhs|VIPsToAdd0], VIPsToRemove, Mutations);
-%% To delete VIP
-generate_diff([VIPLhs|RestLhs], Rhs = [VIPRhs|_RestRhs], VIPsToAdd, VIPsToRemove0, Mutations) when VIPLhs < VIPRhs ->
-    generate_diff(RestLhs, Rhs, VIPsToAdd, [VIPLhs|VIPsToRemove0], Mutations);
-generate_diff([], [], VIPsToAdd, VIPsToRemove, Mutations) ->
-    {VIPsToAdd, VIPsToRemove, Mutations};
-generate_diff([], Rhs, VIPsToAdd0, VIPsToRemove, Mutations) ->
-    {VIPsToAdd0 ++ Rhs, VIPsToRemove, Mutations};
-generate_diff(Lhs, [], VIPsToAdd, VIPsToRemove0, Mutations) ->
-    {VIPsToAdd, VIPsToRemove0 ++ Lhs, Mutations}.
-
-reachable_backends(Backends, State) ->
-    reachable_backends(Backends, [], [], State).
-
-reachable_backends([], _OpenBackends = [], ClosedBackends, _State) ->
-    ClosedBackends;
-reachable_backends([], OpenBackends, _ClosedBackends, _State) ->
-    OpenBackends;
-reachable_backends([BE = {IP, {_BEIP, _BEPort}}|Rest], OB, CB, State = #state{ip_mapping = IPMapping, tree = Tree}) ->
-    case IPMapping of
-        #{IP := NodeName} ->
-            case lashup_gm_route:distance(NodeName, Tree) of
-                infinity ->
-                    reachable_backends(Rest, OB, [BE|CB], State);
-                _ ->
-                    reachable_backends(Rest, [BE|OB], CB, State)
-            end;
-        _ ->
-            reachable_backends(Rest, OB, [BE|CB], State)
-    end.
-
-
-vips_port_mappings(VIPs) ->
-    PMs = local_port_mappings(),
-    AgentIP = dcos_net_dist:nodeip(),
-    % remove port mappings for local backends
-    lists:map(fun ({{Protocol, VIP, VIPPort}, BEs}) ->
-        BEs0 = bes_port_mappings(PMs, Protocol, AgentIP, BEs),
-        {{Protocol, VIP, VIPPort}, BEs0}
-    end, VIPs).
-
-bes_port_mappings(PMs, Protocol, AgentIP, BEs) ->
-    lists:map(
-        fun ({BEAgentIP, {BEIP, BEPort}}) when BEIP =:= AgentIP ->
-                case maps:find({Protocol, BEPort}, PMs) of
-                    {ok, {IP, Port}} -> {BEAgentIP, {IP, Port}};
-                    error -> {BEAgentIP, {BEIP, BEPort}}
-                end;
-            ({BEAgentIP, {BEIP, BEPort}}) ->
-                {BEAgentIP, {BEIP, BEPort}}
-        end, BEs).
-
+-spec(local_port_mappings() -> #{Host => Container}
+    when Host :: {tcp | udp, inet:port_number()},
+         Container :: {inet:ip_address(), inet:port_number()}).
 local_port_mappings() ->
     try ets:lookup(local_port_mappings, pm) of
         [{pm, PortMappings}] ->
@@ -381,75 +561,53 @@ local_port_mappings() ->
 
 -ifdef(TEST).
 
-generate_diffs_test() ->
-    ?assertEqual({[], [], []}, generate_diff([], [])),
-    ?assertEqual({[], [], [{a, [4], [1]}]}, generate_diff([{a, [1, 2, 3]}], [{a, [2, 3, 4]}])),
-    ?assertEqual({[], [{b, [1, 2, 3]}], []}, generate_diff([{b, [1, 2, 3]}], [])),
-    ?assertEqual({[{b, [1, 2, 3]}], [], []}, generate_diff([], [{b, [1, 2, 3]}])),
-    ?assertEqual({[], [], []}, generate_diff([{a, [1, 2, 3]}], [{a, [1, 2, 3]}])),
-    ?assertEqual({[{b, []}], [{a, []}, {c, []}], []}, generate_diff([{a, []}, {c, []}], [{b, []}])),
-    Diff1 =
-        generate_diff(
-            [
-                {
-                    {tcp, {11, 136, 231, 163}, 80},
-                    [
-                        {{10, 0, 3, 98}, {{10, 0, 3, 98}, 8895}},
-                        {{10, 0, 1, 107}, {{10, 0, 1, 107}, 16319}},
-                        {{10, 0, 1, 107}, {{10, 0, 1, 107}, 3892}}
-                    ]
-                }
-            ],
-            [
-                {{tcp, {11, 136, 231, 163}, 80},
-                    [
-                        {{10, 0, 3, 98}, {{10, 0, 3, 98}, 8895}},
-                        {{10, 0, 1, 107}, {{10, 0, 1, 107}, 16319}},
-                        {{10, 0, 1, 107}, {{10, 0, 1, 107}, 15671}},
-                        {{10, 0, 1, 107}, {{10, 0, 1, 107}, 3892}}
-                    ]
-                }
-            ]),
+diff_simple_test() ->
     ?assertEqual(
-        {[], [], [{{tcp, {11, 136, 231, 163}, 80}, [{{10, 0, 1, 107}, {{10, 0, 1, 107}, 15671}}], []}]}, Diff1),
-    Diff2 =
-        generate_diff(
-            [
-                {
-                    {tcp, {11, 136, 231, 163}, 80},
-                    [
-                        {{10, 0, 3, 98}, {{10, 0, 3, 98}, 23520}},
-                        {{10, 0, 3, 98}, {{10, 0, 3, 98}, 1132}}
-                    ]
-                }
-            ],
-            [
-                {
-                    {tcp, {11, 136, 231, 163}, 80},
-                    [
-                        {{10, 0, 3, 98}, {{10, 0, 3, 98}, 23520}},
-                        {{10, 0, 3, 98}, {{10, 0, 3, 98}, 12930}},
-                        {{10, 0, 3, 98}, {{10, 0, 3, 98}, 1132}},
-                        {{10, 0, 1, 107}, {{10, 0, 1, 107}, 18818}}
-                    ]
-                }
-            ]),
+        {[], [], []},
+        diff([], [])),
     ?assertEqual(
-        {[], [], [{{tcp, {11, 136, 231, 163}, 80},
-                     [{{10, 0, 1, 107}, {{10, 0, 1, 107}, 18818}},
-                      {{10, 0, 3, 98}, {{10, 0, 3, 98}, 12930}}],
-         []}]}, Diff2),
+        {[], [], [{a, [4], [1]}]},
+        diff([{a, [1, 2, 3]}], [{a, [2, 3, 4]}])),
     ?assertEqual(
-        {[{{tcp, {1, 1, 1, 3}, 80}, [{{10, 0, 0, 3}, {{10, 0, 0, 3}, 1000}}]}], [], []},
-        generate_diff(
-            [ {{tcp, {1, 1, 1, 1}, 80}, [{{10, 0, 0, 1}, {{10, 0, 0, 1}, 1000}}]},
-              {{tcp, {1, 1, 1, 2}, 80}, [{{10, 0, 0, 2}, {{10, 0, 0, 2}, 1000}}]},
-              {{tcp, {1, 1, 1, 4}, 80}, [{{10, 0, 0, 4}, {{10, 0, 0, 4}, 1000}}]},
-              {{tcp, {1, 1, 1, 5}, 80}, [{{10, 0, 0, 5}, {{10, 0, 0, 5}, 1000}}]} ],
-            [ {{tcp, {1, 1, 1, 1}, 80}, [{{10, 0, 0, 1}, {{10, 0, 0, 1}, 1000}}]},
-              {{tcp, {1, 1, 1, 2}, 80}, [{{10, 0, 0, 2}, {{10, 0, 0, 2}, 1000}}]},
-              {{tcp, {1, 1, 1, 3}, 80}, [{{10, 0, 0, 3}, {{10, 0, 0, 3}, 1000}}]},
-              {{tcp, {1, 1, 1, 4}, 80}, [{{10, 0, 0, 4}, {{10, 0, 0, 4}, 1000}}]},
-              {{tcp, {1, 1, 1, 5}, 80}, [{{10, 0, 0, 5}, {{10, 0, 0, 5}, 1000}}]} ])).
+        {[], [{b, [1, 2, 3]}], []},
+        diff([{b, [1, 2, 3]}], [])),
+    ?assertEqual(
+        {[{b, [1, 2, 3]}], [], []},
+        diff([], [{b, [1, 2, 3]}])),
+    ?assertEqual(
+        {[], [], []},
+        diff([{a, [1, 2, 3]}], [{a, [1, 2, 3]}])),
+    ?assertEqual(
+        {[{b, []}], [{c, []}, {a, []}], []},
+        diff([{a, []}, {c, []}], [{b, []}])).
+
+diff_backends_test() ->
+    Key = {tcp, {11, 136, 231, 163}, 80},
+    ?assertEqual(
+        {[], [], [{Key, [ {{10, 0, 1, 107}, 15671}], []} ]},
+        diff([{Key, [ {{10, 0, 3, 98}, 8895}, {{10, 0, 1, 107}, 16319},
+                      {{10, 0, 1, 107}, 3892} ]
+             }],
+             [{Key, [ {{10, 0, 3, 98}, 8895}, {{10, 0, 1, 107}, 16319},
+                      {{10, 0, 1, 107}, 15671}, {{10, 0, 1, 107}, 3892} ]}]) ),
+    ?assertEqual(
+        {[], [], [{Key, [ {{10, 0, 3, 98}, 12930},
+                          {{10, 0, 1, 107}, 18818} ], []}]},
+        diff([{Key, [ {{10, 0, 3, 98}, 23520}, {{10, 0, 3, 98}, 1132} ]}],
+             [{Key, [ {{10, 0, 3, 98}, 23520}, {{10, 0, 3, 98}, 12930},
+                      {{10, 0, 3, 98}, 1132}, {{10, 0, 1, 107}, 18818} ]}]) ).
+
+diff_services_test() ->
+    ?assertEqual(
+        {[{{tcp, {1, 1, 1, 3}, 80}, [{{10, 0, 0, 3}, 1000}]}], [], []},
+        diff([ {{tcp, {1, 1, 1, 1}, 80}, [{{10, 0, 0, 1}, 1000}]},
+               {{tcp, {1, 1, 1, 2}, 80}, [{{10, 0, 0, 2}, 1000}]},
+               {{tcp, {1, 1, 1, 4}, 80}, [{{10, 0, 0, 4}, 1000}]},
+               {{tcp, {1, 1, 1, 5}, 80}, [{{10, 0, 0, 5}, 1000}]} ],
+             [ {{tcp, {1, 1, 1, 1}, 80}, [{{10, 0, 0, 1}, 1000}]},
+               {{tcp, {1, 1, 1, 2}, 80}, [{{10, 0, 0, 2}, 1000}]},
+               {{tcp, {1, 1, 1, 3}, 80}, [{{10, 0, 0, 3}, 1000}]},
+               {{tcp, {1, 1, 1, 4}, 80}, [{{10, 0, 0, 4}, 1000}]},
+               {{tcp, {1, 1, 1, 5}, 80}, [{{10, 0, 0, 5}, 1000}]} ]) ).
 
 -endif.
