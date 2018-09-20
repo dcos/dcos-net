@@ -113,6 +113,8 @@ process_vip({Protocol, {name, {Label, FwName}}, Port}, AllBEs) ->
         IP = maybe_add_mapping(Family, FwName, Label),
         {{Protocol, IP, Port}, BEs}
     end, CategorizedBEs);
+process_vip(_Key, []) ->
+    [];
 process_vip(Key, BEs) ->
     [{Key, BEs}].
 
