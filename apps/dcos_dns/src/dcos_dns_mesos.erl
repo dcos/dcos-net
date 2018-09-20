@@ -79,7 +79,7 @@ handle_init(State) ->
             Tasks = task_records(MTasks),
             {ok, NewRRs, OldRRs} = push_tasks(Tasks),
             lager:notice(
-                "~p records were added, ~p records were removed",
+                "DC/OS DNS Sync: ~p records were added, ~p records were removed",
                 [length(NewRRs), length(OldRRs)]),
             #state{ref=Ref, tasks=Tasks, masters_ref=MRef};
         {error, timeout} ->
@@ -190,10 +190,10 @@ handle_masters(#state{masters=MRRs}=State) ->
 
     {NewRRs, OldRRs} = dcos_net_utils:complement(MRRs0, MRRs),
     lists:foreach(fun (#dns_rr{data=#dns_rrdata_a{ip = IP}}) ->
-        lager:notice("master ~p was added", [IP])
+        lager:notice("DNS records: master ~p was added", [IP])
     end, NewRRs),
     lists:foreach(fun (#dns_rr{data=#dns_rrdata_a{ip = IP}}) ->
-        lager:notice("master ~p was removed", [IP])
+        lager:notice("DNS records: master ~p was removed", [IP])
     end, OldRRs),
 
     Ref = start_masters_timer(),
