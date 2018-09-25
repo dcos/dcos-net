@@ -135,8 +135,8 @@ handle_data(Data, State) ->
         {ok, [], []} -> State;
         {ok, NewRRs, OldRRs} ->
             lager:notice(
-                "Update ~s: ~p reconds were added, ~p reconds were removed",
-                [?MESOS_DOMAIN, length(NewRRs), length(OldRRs)]),
+                "Mesos DNS Sync: ~p reconds were added, ~p reconds were removed",
+                [length(NewRRs), length(OldRRs)]),
             State
     end.
 

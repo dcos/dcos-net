@@ -270,7 +270,12 @@ handle_agent_removed(Obj, #state{agents=A}=State) ->
     #{id => binary(), ip => inet:ip4_address() | undefined}).
 handle_agent(Obj) ->
     Info = mget(<<"agent_info">>, Obj),
-    Id = mget([<<"id">>, <<"value">>], Info),
+    Id =
+        try
+            mget([<<"id">>, <<"value">>], Info)
+        catch error:{badkey, <<"id">>} ->
+            error(bad_agent_id)
+        end,
     try mget(<<"hostname">>, Info) of Hostname ->
         IPStr = binary_to_list(Hostname),
         {ok, IP} = inet:parse_ipv4strict_address(IPStr),

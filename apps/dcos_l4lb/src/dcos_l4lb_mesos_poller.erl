@@ -84,11 +84,13 @@ handle_poll() ->
 handle_poll(false) ->
     ok;
 handle_poll(true) ->
-    case dcos_net_mesos_listener:poll() of
+    try dcos_net_mesos_listener:poll() of
         {error, Error} ->
-            lager:warning("Unable to poll agent: ~p", [Error]);
+            lager:warning("Unable to poll mesos agent: ~p", [Error]);
         {ok, Tasks} ->
             handle_poll_state(Tasks)
+    catch error:bad_agent_id ->
+        lager:warning("Mesos agent is not ready")
     end.
 
 -spec(handle_poll_state(#{task_id() => task()}) -> ok).
