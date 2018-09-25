@@ -106,7 +106,7 @@ dev-stop:
 	  ) > /etc/resolv.conf
 
 dev-start:
-	@ systemctl stop dcos-net.service
+	@ systemctl start dcos-net.service
 
 dev-shell:
 	@ CFLAGS="-I/opt/mesosphere/include -I/opt/mesosphere/active/libsodium/include" \
@@ -129,7 +129,7 @@ dev: dev-install dev-stop
 ##
 
 DCOS_DOCKER_TRANSPORT ?= docker-exec
-DCOS_DOCKER_CLUSTOM_VOLUME ?= "$(BASE_DIR):$(BASE_DIR):rw"
+DCOS_DOCKER_CUSTOM_VOLUME ?= "$(BASE_DIR):$(BASE_DIR):rw"
 DCOS_DOCKER_CLUSTER_ID ?= default
 DCOS_DOCKER_MASTERS ?= 1
 DCOS_DOCKER_AGENTS ?= 1
@@ -147,7 +147,7 @@ dcos-docker-create:
 	      --agents $(DCOS_DOCKER_AGENTS) \
 	      --public-agents $(DCOS_DOCKER_PUBLIC_AGENTS) \
 	      --cluster-id $(DCOS_DOCKER_CLUSTER_ID) \
-	      --custom-volume $(DCOS_DOCKER_CLUSTOM_VOLUME) \
+	      --custom-volume $(DCOS_DOCKER_CUSTOM_VOLUME) \
 	      $(DCOS_DOCKER_OPTS) && \
 	  dcos-docker wait \
 	      --transport $(DCOS_DOCKER_TRANSPORT) \
