@@ -95,6 +95,7 @@ handle_poll(Prev, true) ->
             Prev;
         {ok, Tasks} ->
             ok = handle_poll_state(Tasks),
+            ok = push_tasks(Tasks),
             Tasks
     catch error:bad_agent_id ->
         lager:warning("Mesos agent is not ready"),
@@ -256,6 +257,14 @@ push_ops(_Key, []) ->
     ok;
 push_ops(Key, Ops) ->
     {ok, _} = lashup_kv:request_op(Key, {update, Ops}),
+    ok.
+
+-spec(push_tasks(#{task_id() => task()}) -> ok).
+push_tasks(Tasks) ->
+    Ts = erlang:system_time(millisecond),
+    LKey = {dcos_net_dist:nodeip(), riak_dt_lwwreg},
+    Ops = [{update, LKey, {assign, Tasks, Ts}}],
+    {ok, _} = lashup_kv:request_op([tasks], {update, Ops}),
     ok.
 
 -spec(log_ops([riak_dt_map:map_field_update()]) -> ok).
