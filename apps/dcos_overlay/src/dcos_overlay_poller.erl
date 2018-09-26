@@ -30,6 +30,8 @@
 -define(SERVER, ?MODULE).
 -define(MIN_POLL_PERIOD, 30000). %% 30 secs
 -define(MAX_POLL_PERIOD, 120000). %% 120 secs
+-define(VXLAN_UDP_PORT, 64000).
+-define(LINK_INFO(LinkInfo), [{rtnetlink, newlink, [], _, _, {unspec,arphrd_ether, _, _, _, LinkInfo}}]).
 
 -include_lib("stdlib/include/ms_transform.hrl").
 -include_lib("mesos_state/include/mesos_state_overlay_pb.hrl").
@@ -173,17 +175,16 @@ maybe_create_vtep(_Overlay = #mesos_state_agentoverlayinfo{backend = Backend},
     {ParsedVTEPIP, PrefixLen} = parse_subnet(VTEPIP),
     case vtep_present(Pid, VXLan) of
         false ->
+            lager:debug("~p will be created.", [VTEPNameStr]),
             dcos_overlay_netlink:iplink_add(Pid, VTEPNameStr, "vxlan", VNI, 64000),
             {ok, _} = dcos_overlay_netlink:iplink_set(Pid, ParsedVTEPMAC, VTEPNameStr);
-        {true, []} ->
+        {true, match} ->
             lager:debug("Attributes of ~p is up-to-date.", [VTEPNameStr]);
-        {true, [address]} ->
-            lager:debug("Mac address of ~p will be updated.", [VTEPNameStr]),
-            {ok, _} = dcos_overlay_netlink:iplink_set(Pid, ParsedVTEPMAC, VTEPNameStr);
-        {true, _} ->
-            lager:error("Attributes of ~p do not match ~p , please take a check and process will exit", [VTEPNameStr, VXLan]),
-            ExitReason = "Failed to establish vtep for overlay network",
-            exit(ExitReason)
+        {true, notmatch} ->
+            lager:info("Attributes of ~p are not update-to-date, and vtep will be recreated.", [VTEPNameStr]),
+            dcos_overlay_netlink:iplink_delete(Pid, VTEPNameStr),
+            dcos_overlay_netlink:iplink_add(Pid, VTEPNameStr, "vxlan", VNI, 64000),
+            {ok, _} = dcos_overlay_netlink:iplink_set(Pid, ParsedVTEPMAC, VTEPNameStr)
     end,
 
     config_l3(VTEPNameStr, ParsedVTEPIP, PrefixLen, VTEPIP6, State).
@@ -205,47 +206,40 @@ vtep_present(Pid, VXLan) ->
     #mesos_state_vxlaninfo{vtep_name = VTEPName} = VXLan,
     VTEPNameStr = binary_to_list(VTEPName),
     case dcos_overlay_netlink:iplink_show(Pid, VTEPNameStr) of
-        {ok, [RtLinkInfo]} ->
-            {rtnetlink, newlink, [], _, _, {unspec,arphrd_ether, _, _, _, LinkInfo}} = RtLinkInfo,
-            UnMatched = unmatched_vtep_attributes(LinkInfo, VXLan),
-            {true, UnMatched};
+        {ok, ?LINK_INFO(LinkInfo)} ->
+            Match = vxlan_attributes_match(LinkInfo, VXLan),
+            {true, Match};
         {error, ErrorCode, ResponseMsg} ->
             lager:error("Failed to find ~p for error_code: ~p, msg: ~p", [VTEPNameStr, ErrorCode, ResponseMsg]),
             false
     end.
-
-unmatched_vtep_attributes(DeviceLinkInfo, VXLan) ->
-    unmatched_vtep_attributes(DeviceLinkInfo, VXLan, []).
-
-unmatched_vtep_attributes([{address, Address} |Right], VXLan, NotMatched) ->
+vxlan_attributes_match([{address, Address} |Right], VXLan) ->
     #mesos_state_vxlaninfo{vtep_mac = VTEPMAC} = VXLan,
     ParsedVTEPMAC = binary:list_to_bin(parse_vtep_mac(VTEPMAC)),
     case ParsedVTEPMAC of
-        Address -> unmatched_vtep_attributes(Right, VXLan);
-        _ -> NotMatched ++ [address]
+        Address -> vxlan_attributes_match(Right, VXLan);
+        _ -> notmatch
     end;
 
-unmatched_vtep_attributes([{linkinfo, [{kind, LinkKind}, {data, LinkData}]} |Right], VXLan, NotMatched) ->
+vxlan_attributes_match([{linkinfo, [{kind, LinkKind}, {data, LinkData}]} |Right], VXLan) ->
     #mesos_state_vxlaninfo{vni = VNI} = VXLan,
     case LinkKind of
         "vxlan" ->
         MapLinkData = maps:from_list(LinkData),
-        #{id := ID, port := Port} = MapLinkData,
-        case {ID, Port} of
-            {VNI, 64000} -> NotMatched2 = NotMatched; 
-            {VNI, _} -> NotMatched2 = NotMatched ++ [port];
-            {_, 64000} -> NotMatched2 = NotMatched ++ [id];
-            _ -> NotMatched2 = NotMatched ++ [id, port]
-        end,
-        unmatched_vtep_attributes(Right, VXLan, NotMatched2); 
-    _ -> NotMatched ++ [kind]
-    end;
+            #{id := ID, port := Port} = MapLinkData,
+            if
+                VNI == ID, 64000 == Port -> vxlan_attributes_match(Right, VXLan); 
+                true -> notmatch
+            end;
+        _ ->
+            notmatch
+  end;
 
-unmatched_vtep_attributes([_Left| Right], VXLan, NotMatched) ->
-    unmatched_vtep_attributes(Right, VXLan, NotMatched);
+vxlan_attributes_match([_Left| Right], VXLan) ->
+    vxlan_attributes_match(Right, VXLan);
 
-unmatched_vtep_attributes([], _VXLan, NotMatched) ->
-    NotMatched.
+vxlan_attributes_match([], _VXLan) ->
+    match.
 
 try_enable_ipv6(IfName) ->
     Var = lists:flatten(io_lib:format("net.ipv6.conf.~s.disable_ipv6=0", [IfName])),
