@@ -222,10 +222,7 @@ vtep_present(Pid, VXLan) ->
             {true, Match};
         {error, ErrorCode, ResponseMsg} ->
             lager:info("Failed to find ~p for error_code: ~p, msg: ~p", [VTEPNameStr, ErrorCode, ResponseMsg]),
-            false;
-        {ok, []} ->
-            %% this occurs when we use non-root user to run dcos-net
-            {true, true}
+            false
     end.
 
 vxlan_match(VXLan, Link) ->
