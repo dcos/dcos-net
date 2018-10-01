@@ -30,6 +30,8 @@
 -define(SERVER, ?MODULE).
 -define(MIN_POLL_PERIOD, 30000). %% 30 secs
 -define(MAX_POLL_PERIOD, 120000). %% 120 secs
+-define(VXLAN_UDP_PORT, 64000).
+-define(LINK_NOT_FOUND, 3992977407).
 
 -include_lib("stdlib/include/ms_transform.hrl").
 -include_lib("gen_netlink/include/netlink.hrl").
@@ -147,33 +149,95 @@ mget(Key, Map) ->
 
 maybe_create_vtep(#{<<"backend">> := Backend}, #state{netlink = Pid}) ->
     #{<<"vxlan">> := VXLan} = Backend,
+    maybe_create_vtep_link(Pid, VXLan),
+    create_vtep_addr(Pid, VXLan).
+
+maybe_create_vtep_link(Pid, VXLan) ->
+    #{<<"vtep_name">> := VTEPName} = VXLan,
+    VTEPNameStr = binary_to_list(VTEPName),
+    case check_vtep_link(Pid, VXLan) of
+        false ->
+            lager:info("Overlay VTEP link will be created, ~s", [VTEPName]),
+            create_vtep_link(Pid, VXLan);
+        {true, true} ->
+            lager:info("Overlay VTEP link is up-to-date, ~s", [VTEPName]);
+        {true, false} ->
+            lager:info("Overlay VTEP link is not up-to-date, and will be recreated, ~s", [VTEPName]),
+            dcos_overlay_netlink:iplink_delete(Pid, VTEPNameStr),
+            lager:notice("Overlay VTEP link was removed, ~s", [VTEPName]),
+            create_vtep_link(Pid, VXLan)
+    end.
+
+check_vtep_link(Pid, VXLan) ->
+    #{<<"vtep_name">> := VTEPName} = VXLan,
+    VTEPNameStr = binary_to_list(VTEPName),
+    case dcos_overlay_netlink:iplink_show(Pid, VTEPNameStr) of
+        {ok, [#rtnetlink{type=newlink, msg=Msg}]} ->
+            {unspec, arphrd_ether, _, _, _, LinkInfo} = Msg,
+            Match = match_vtep_link(VXLan, LinkInfo),
+            {true, Match};
+        {error, ?LINK_NOT_FOUND, _} ->
+            lager:info("Overlay VTEP link does not exist, ~s", [VTEPName]),
+            false
+    end.
+
+match_vtep_link(VXLan, Link) ->
     #{ <<"vni">> := VNI,
-       <<"vtep_ip">> := VTEPIP,
+       <<"vtep_mac">> := VTEPMAC
+    } = VXLan,
+    Expected =
+        [{address, binary:list_to_bin(parse_vtep_mac(VTEPMAC))},
+         {linkinfo, [{kind, "vxlan"}, {data, [{id, VNI}, {port, ?VXLAN_UDP_PORT}]}]}],
+    VTEPMTU = mget(<<"vtep_mtu">>, VXLan),
+    Expected2 = Expected ++ [{mtu, VTEPMTU} || is_integer(VTEPMTU)],
+    match(Expected2, Link).
+
+match(Expected, List) when is_list(Expected) ->
+    lists:all(fun (KV) -> match(KV, List) end, Expected);
+match({K, V}, List) ->
+    case lists:keyfind(K, 1, List) of
+        false -> false;
+        {K, V} -> true;
+        {K, V0} -> match(V, V0)
+    end;
+match(_Attr, _List) ->
+    false.
+
+create_vtep_link(Pid, VXLan) ->
+    #{ <<"vni">> := VNI,
        <<"vtep_mac">> := VTEPMAC,
        <<"vtep_name">> := VTEPName
     } = VXLan,
-    VTEPIP6 = mget(<<"vtep_ip6">>, VXLan),
     VTEPMTU = mget(<<"vtep_mtu">>, VXLan),
     VTEPNameStr = binary_to_list(VTEPName),
     ParsedVTEPMAC = list_to_tuple(parse_vtep_mac(VTEPMAC)),
-    {ParsedVTEPIP, PrefixLen} = parse_subnet(VTEPIP),
     VTEPAttr = [{mtu, VTEPMTU} || is_integer(VTEPMTU)],
-    dcos_overlay_netlink:iplink_add(Pid, VTEPNameStr, "vxlan", VNI, 64000, VTEPAttr),
+    dcos_overlay_netlink:iplink_add(Pid, VTEPNameStr, "vxlan", VNI, ?VXLAN_UDP_PORT, VTEPAttr),
     {ok, _} = dcos_overlay_netlink:iplink_set(Pid, ParsedVTEPMAC, VTEPNameStr),
-    {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, inet, ParsedVTEPIP, PrefixLen, VTEPNameStr),
     Info = #{vni => VNI, mac => VTEPMAC, attr => VTEPAttr},
-    lager:notice("Overlay VTEP was configured, ~s => ~p", [VTEPName, Info#{ip => VTEPIP}]),
+    lager:notice("Overlay VTEP link was configured, ~s => ~p", [VTEPName, Info]).
+
+create_vtep_addr(Pid, VXLan) ->
+    #{ <<"vtep_ip">> := VTEPIP,
+       <<"vtep_name">> := VTEPName
+    } = VXLan,
+    VTEPIP6 = mget(<<"vtep_ip6">>, VXLan),
+    VTEPNameStr = binary_to_list(VTEPName),
+    {ParsedVTEPIP, PrefixLen} = parse_subnet(VTEPIP),
+    {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, inet, ParsedVTEPIP, PrefixLen, VTEPNameStr),
+    lager:notice("Overlay VTEP address was configured, ~s => ~p", [VTEPName, VTEPIP]),
     case {application:get_env(dcos_overlay, enable_ipv6, true), VTEPIP6} of
       {_, undefined} ->
           ok;
       {false, _} ->
-          lager:notice("Overlay network is disabled [ipv6], ~s => ~p", [VTEPName, Info#{ip => VTEPIP6}]);
+          lager:notice("Overlay network is disabled [ipv6], ~s => ~p", [VTEPName, VTEPIP6]);
       _ ->
           ok = try_enable_ipv6(VTEPNameStr),
           {ParsedVTEPIP6, PrefixLen6} = parse_subnet(VTEPIP6),
           {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, inet6, ParsedVTEPIP6, PrefixLen6, VTEPNameStr),
-          lager:notice("Overlay VTEP was configured, ~s => ~p", [VTEPName, Info#{ip => VTEPIP6}])
+          lager:notice("Overlay VTEP address was configured [ipv6], ~s => ~p", [VTEPName, VTEPIP6])
     end.
+
 
 try_enable_ipv6(IfName) ->
     Var = lists:flatten(io_lib:format("net.ipv6.conf.~s.disable_ipv6=0", [IfName])),
@@ -276,3 +340,27 @@ parse_vtep_mac(MAC) ->
             binary_to_integer(Component, 16)
         end,
         MACComponents).
+
+-ifdef(TEST).
+
+match_vtep_link_test() ->
+    VNI = 1024,
+    VTEPIP = <<"44.128.0.1/20">>,
+    VTEPMAC = <<"70:b3:d5:80:00:01">>,
+    VTEPMAC2 = <<"70:b3:d5:80:00:02">>,
+    VTEPNAME = <<"vtep1024">>,
+    {ok, [RtnetLinkInfo]} = file:consult("apps/dcos_overlay/testdata/vtep_link.data"),
+    [#rtnetlink{type=newlink, msg=Msg}] = RtnetLinkInfo,
+    {unspec, arphrd_ether, _, _, _, LinkInfo} = Msg,
+    VXLan = #{
+        <<"vni">> => VNI,
+        <<"vtep_ip">> => VTEPIP,
+        <<"vtep_mac">> => VTEPMAC,
+        <<"vtep_name">> => VTEPNAME
+    },
+    ?assertEqual(true, match_vtep_link(VXLan, LinkInfo)),
+
+    VXLan2 = VXLan#{<<"vtep_mac">> := VTEPMAC2},
+    ?assertEqual(false, match_vtep_link(VXLan2, LinkInfo)).
+
+-endif.
