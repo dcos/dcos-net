@@ -30,6 +30,7 @@
 -define(SERVER, ?MODULE).
 -define(MIN_POLL_PERIOD, 30000). %% 30 secs
 -define(MAX_POLL_PERIOD, 120000). %% 120 secs
+-define(VXLAN_UDP_PORT, 64000).
 
 -include_lib("stdlib/include/ms_transform.hrl").
 -include_lib("mesos_state/include/mesos_state_overlay_pb.hrl").
@@ -158,21 +159,49 @@ config_overlay(Overlay, State) ->
     maybe_create_vtep(Overlay, State),
     maybe_add_ip_rule(Overlay, State).
 
-maybe_create_vtep(_Overlay = #mesos_state_agentoverlayinfo{backend = Backend},
-  #state{netlink = Pid}) ->
-    #mesos_state_backendinfo{vxlan = VXLan} = Backend,
+create_vtep_link(VXLan, #state{netlink = Pid}) ->
     #mesos_state_vxlaninfo{
         vni = VNI,
-        vtep_ip = VTEPIP,
-        vtep_ip6 = VTEPIP6,
         vtep_mac = VTEPMAC,
         vtep_name = VTEPName
     } = VXLan,
     VTEPNameStr = binary_to_list(VTEPName),
     ParsedVTEPMAC = list_to_tuple(parse_vtep_mac(VTEPMAC)),
+    dcos_overlay_netlink:iplink_add(Pid, VTEPNameStr, "vxlan", VNI, ?VXLAN_UDP_PORT),
+    {ok, _} = dcos_overlay_netlink:iplink_set(Pid, ParsedVTEPMAC, VTEPNameStr).
+
+maybe_create_vtep_link(VXLan, State=#state{netlink = Pid}) ->
+    #mesos_state_vxlaninfo{
+        vtep_name = VTEPName
+    } = VXLan,
+    VTEPNameStr = binary_to_list(VTEPName),
+    case check_vtep_link(Pid, VXLan) of
+        false ->
+            lager:debug("~p will be created.", [VTEPNameStr]),
+            create_vtep_link(VXLan, State);
+        {true, true} ->
+            lager:debug("Attributes of ~p are up-to-date.", [VTEPNameStr]);
+        {true, false} ->
+            lager:debug("Attributes of ~p are not update-to-date, and vtep will be recreated.", [VTEPNameStr]),
+            dcos_overlay_netlink:iplink_delete(Pid, VTEPNameStr),
+            create_vtep_link(VXLan, State)
+    end,
+
+    create_vtep_addr(VXLan, State).
+
+maybe_create_vtep(_Overlay = #mesos_state_agentoverlayinfo{backend = Backend}, State) ->
+    #mesos_state_backendinfo{vxlan = VXLan} = Backend,
+    maybe_create_vtep_link(VXLan, State).
+
+create_vtep_addr(VXLan, #state{netlink = Pid}) ->
+    #mesos_state_vxlaninfo{
+        vtep_ip = VTEPIP,
+        vtep_ip6 = VTEPIP6,
+        vtep_name = VTEPName
+    } = VXLan,
+    VTEPNameStr = binary_to_list(VTEPName),
     {ParsedVTEPIP, PrefixLen} = parse_subnet(VTEPIP),
-    dcos_overlay_netlink:iplink_add(Pid, VTEPNameStr, "vxlan", VNI, 64000),
-    {ok, _} = dcos_overlay_netlink:iplink_set(Pid, ParsedVTEPMAC, VTEPNameStr),
+
     {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, inet, ParsedVTEPIP, PrefixLen, VTEPNameStr),
     case {application:get_env(dcos_overlay, enable_ipv6, true), VTEPIP6} of
       {false, _} ->
@@ -184,6 +213,37 @@ maybe_create_vtep(_Overlay = #mesos_state_agentoverlayinfo{backend = Backend},
           {ParsedVTEPIP6, PrefixLen6} = parse_subnet(VTEPIP6),
           {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, inet6, ParsedVTEPIP6, PrefixLen6, VTEPNameStr)
     end.
+
+check_vtep_link(Pid, VXLan) ->
+    #mesos_state_vxlaninfo{vtep_name = VTEPName} = VXLan,
+    VTEPNameStr = binary_to_list(VTEPName),
+    case dcos_overlay_netlink:iplink_show(Pid, VTEPNameStr) of
+        {ok, [#rtnetlink{type=newlink, msg=Msg}]} ->
+            {unspec, arphrd_ether, _, _, _, LinkInfo} = Msg,
+            Match = match_vtep_link(VXLan, LinkInfo),
+            {true, Match};
+        {error, ErrorCode, ResponseMsg} ->
+            lager:info("Failed to find ~p for error_code: ~p, msg: ~p", [VTEPNameStr, ErrorCode, ResponseMsg]),
+            false
+    end.
+
+match_vtep_link(VXLan, Link) ->
+    #mesos_state_vxlaninfo{vtep_mac = VTEPMAC, vni = VNI} = VXLan,
+    Expected =
+        [{address, binary:list_to_bin(parse_vtep_mac(VTEPMAC))},
+         {linkinfo, [{kind, "vxlan"}, {data, [{id, VNI}, {port, ?VXLAN_UDP_PORT}]}]}],
+    match(Expected, Link).
+
+match(Expected, List) when is_list(Expected) ->
+    lists:all(fun (KV) -> match(KV, List) end, Expected);
+match({K, V}, List) ->
+    case lists:keyfind(K, 1, List) of
+        false -> false;
+        {K, V} -> true;
+        {K, V0} -> match(V, V0)
+    end;
+match(_Attr, _List) ->
+    false.
 
 try_enable_ipv6(IfName) ->
     Var = lists:flatten(io_lib:format("net.ipv6.conf.~s.disable_ipv6=0", [IfName])),
@@ -301,5 +361,25 @@ deserialize_overlay_test() ->
     {ok, OverlayData} = file:read_file(OverlayFilename),
     Msg = mesos_state_overlay_pb:decode_msg(OverlayData, mesos_state_agentinfo),
     ?assertEqual(<<"10.0.0.160:5051">>, Msg#mesos_state_agentinfo.ip).
+
+match_vtep_link_test() ->
+    VNI = 1024,
+    VTEPIP = <<"44.128.0.1/20">>,
+    VTEPMAC = <<"70:b3:d5:80:00:01">>,
+    VTEPMAC2 = <<"70:b3:d5:80:00:02">>,
+    VTEPNAME = <<"vtep1024">>,
+    {ok, [RtnetLinkInfo]} = file:consult("apps/dcos_overlay/testdata/vtep_link.data"),
+    [#rtnetlink{type=newlink, msg=Msg}] = RtnetLinkInfo,
+    {unspec, arphrd_ether, _, _, _, LinkInfo} = Msg,
+    VXLan = #mesos_state_vxlaninfo{
+        vni = VNI,
+        vtep_ip = VTEPIP,
+        vtep_mac = VTEPMAC,
+        vtep_name = VTEPNAME
+    },
+    ?assertEqual(true, match_vtep_link(VXLan, LinkInfo)),
+
+    VXLan2 = VXLan#mesos_state_vxlaninfo{vtep_mac=VTEPMAC2},
+    ?assertEqual(false, match_vtep_link(VXLan2, LinkInfo)).
 
 -endif.
