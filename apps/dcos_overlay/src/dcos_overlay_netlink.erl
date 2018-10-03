@@ -7,7 +7,7 @@
 %% Application callbacks
 -export([start_link/0, stop/1, ipneigh_replace/5, iproute_replace/6, bridge_fdb_replace/4,
         iplink_show/2, iplink_add/6, iplink_set/3, iprule_show/2,
-        iprule_add/5, make_iprule/4, match_iprules/2, is_iprule_present/2,
+        iprule_add/5, make_iprule/4, match_iprules/2, is_iprule_present/2, iplink_delete/2,
         ipaddr_replace/5, if_nametoindex/1]).
 
 -include_lib("gen_netlink/include/netlink.hrl").
@@ -79,6 +79,14 @@ iplink_show(Pid, Ifname) ->
   Attr = [{ifname, Ifname}, {ext_mask, 1}],
   Link = {packet, arphrd_netrom, 0, [], [], Attr},
   netlink_request(Pid, getlink, [], Link).
+
+%% eg. iplink_delete(Pid, "vtep1024") ->
+%%         {ok,[]}
+iplink_delete(Pid, Ifname) ->
+  Attr = [{ifname, Ifname}, {ext_mask, 1}],
+  Link = {packet, arphrd_netrom, 0, [], [], Attr},
+  netlink_request(Pid, dellink, [], Link).
+
 
 %% iplink_add(Pid, "vtep1024", "vxlan", 1024, 64000)
 iplink_add(Pid, Ifname, Kind, Id, DstPort, Attr) ->

@@ -33,6 +33,10 @@
 -define(MNESIADIR(BaseDir), filename:join([BaseDir, "mnesia"])).
 
 init_per_suite(Config) ->
+  Uid = list_to_integer(string:strip(os:cmd("id -u"), right, $\n)),
+  init_per_suite(Uid, Config).
+
+init_per_suite(0, Config) ->
   %% this might help, might not...
   os:cmd(os:find_executable("epmd") ++ " -daemon"),
   {ok, Hostname} = inet:gethostname(),
@@ -40,7 +44,9 @@ init_per_suite(Config) ->
     {ok, _} -> ok;
     {error, {already_started, _}} -> ok
   end,
-  Config.
+  Config;
+init_per_suite(_, _) ->
+  {skip, "Not running as root"}.
 
 end_per_suite(Config) ->
   net_kernel:stop(),
