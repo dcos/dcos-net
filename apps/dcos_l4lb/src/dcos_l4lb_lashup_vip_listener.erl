@@ -3,7 +3,8 @@
 
 -export([
     start_link/0,
-    ip2name/1
+    ip2name/1,
+    to_name/1
 ]).
 
 %% gen_server callbacks

@@ -42,7 +42,7 @@ vip({{Protocol, VIP, Port}, riak_dt_orswot}) ->
     vip({Protocol, VIP, Port});
 vip({Protocol, {name, {Id, Framework}}, Port}) ->
     [ZoneName|_ZoneNames] = ?ZONE_NAMES,
-    FullName = mesos_state:domain_frag([Id, Framework | ZoneName]),
+    FullName = dcos_l4lb_lashup_vip_listener:to_name([Id, Framework | ZoneName]),
     vip(Protocol, FullName, Port);
 vip({Protocol, IP, Port}) ->
     vip(Protocol, ip(IP), Port).
