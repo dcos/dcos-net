@@ -17,7 +17,8 @@
     key/0, lkey/0, backend/0]).
 
 -record(state, {
-    timer_ref :: reference()
+    timer_ref :: reference(),
+    prev = #{} :: #{task_id() => task()}
 }).
 
 -type task() :: dcos_net_mesos_listener:task().
@@ -53,10 +54,10 @@ handle_call(_Request, _From, State) ->
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-handle_info({timeout, TRef, poll}, #state{timer_ref=TRef}=State) ->
+handle_info({timeout, TRef, poll}, #state{timer_ref=TRef, prev=Prev}=State) ->
     TRef0 = start_poll_timer(),
-    ok = handle_poll(),
-    {noreply, State#state{timer_ref=TRef0}};
+    Tasks = handle_poll(Prev),
+    {noreply, State#state{timer_ref=TRef0, prev=Tasks}};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -75,22 +76,30 @@ start_poll_timer() ->
     Timeout = dcos_l4lb_config:agent_poll_interval(),
     erlang:start_timer(Timeout, self(), poll).
 
--spec(handle_poll() -> ok).
-handle_poll() ->
+-spec(handle_poll(Tasks) -> Tasks
+    when Tasks :: #{task_id() => task()}).
+handle_poll(Prev) ->
     IsEnabled = dcos_l4lb_config:agent_polling_enabled(),
-    handle_poll(IsEnabled).
+    handle_poll(Prev, IsEnabled).
 
--spec(handle_poll(boolean()) -> ok).
-handle_poll(false) ->
-    ok;
-handle_poll(true) ->
+-spec(handle_poll(Tasks, boolean()) -> Tasks
+    when Tasks :: #{task_id() => task()}).
+handle_poll(Prev, false) ->
+    Prev;
+handle_poll(Prev, true) ->
     try dcos_net_mesos_listener:poll() of
         {error, Error} ->
-            lager:warning("Unable to poll mesos agent: ~p", [Error]);
+            lager:warning("Unable to poll mesos agent: ~p", [Error]),
+            Prev;
+        {ok, Tasks} when Prev =:= Tasks ->
+            Prev;
         {ok, Tasks} ->
-            handle_poll_state(Tasks)
+            ok = handle_poll_state(Tasks),
+            ok = push_tasks(Tasks),
+            Tasks
     catch error:bad_agent_id ->
-        lager:warning("Mesos agent is not ready")
+        lager:warning("Mesos agent is not ready"),
+        Prev
     end.
 
 -spec(handle_poll_state(#{task_id() => task()}) -> ok).
@@ -248,6 +257,14 @@ push_ops(_Key, []) ->
     ok;
 push_ops(Key, Ops) ->
     {ok, _} = lashup_kv:request_op(Key, {update, Ops}),
+    ok.
+
+-spec(push_tasks(#{task_id() => task()}) -> ok).
+push_tasks(Tasks) ->
+    Ts = erlang:system_time(millisecond),
+    LKey = {dcos_net_dist:nodeip(), riak_dt_lwwreg},
+    Ops = [{update, LKey, {assign, Tasks, Ts}}],
+    {ok, _} = lashup_kv:request_op([tasks], {update, Ops}),
     ok.
 
 -spec(log_ops([riak_dt_map:map_field_update()]) -> ok).
