@@ -339,11 +339,13 @@ diff(ListA, ListB) ->
 
 -spec(diff([{A, B}], [{A, B}], [{A, B}], [{A, B}], [{A, B, B}]) ->
     {[{A, B}], [{A, B}], [{A, B, B}]} when A :: term(), B :: term()).
-diff([A|ListA], [A|ListB], Acc, Bcc, Mcc) ->
-    diff(ListA, ListB, Acc, Bcc, Mcc);
 diff([{Key, Va}|ListA], [{Key, Vb}|ListB], Acc, Bcc, Mcc) ->
-    {Ma, Mb} = dcos_net_utils:complement(Vb, Va),
-    diff(ListA, ListB, Acc, Bcc, [{Key, Ma, Mb}|Mcc]);
+    case dcos_net_utils:complement(Vb, Va) of
+        {[], []} ->
+            diff(ListA, ListB, Acc, Bcc, Mcc);
+        {Ma, Mb} ->
+            diff(ListA, ListB, Acc, Bcc, [{Key, Ma, Mb}|Mcc])
+    end;
 diff([A|_]=ListA, [B|ListB], Acc, Bcc, Mcc) when A > B ->
     diff(ListA, ListB, [B|Acc], Bcc, Mcc);
 diff([A|ListA], [B|_]=ListB, Acc, Bcc, Mcc) when A < B ->
@@ -579,7 +581,10 @@ diff_simple_test() ->
         diff([{a, [1, 2, 3]}], [{a, [1, 2, 3]}])),
     ?assertEqual(
         {[{b, []}], [{c, []}, {a, []}], []},
-        diff([{a, []}, {c, []}], [{b, []}])).
+        diff([{a, []}, {c, []}], [{b, []}])),
+    ?assertEqual(
+        {[], [], []},
+        diff([{key, [x, y]}], [{key, [y, x]}])).
 
 diff_backends_test() ->
     Key = {tcp, {11, 136, 231, 163}, 80},

@@ -27,6 +27,8 @@ complement([], ListB, Acc, Bcc) ->
     {Acc, ListB ++ Bcc};
 complement(ListA, [], Acc, Bcc) ->
     {ListA ++ Acc, Bcc};
+complement(List, List, Acc, Bcc) ->
+    {Acc, Bcc};
 complement([A|ListA], [A|ListB], Acc, Bcc) ->
     complement(ListA, ListB, Acc, Bcc);
 complement([A|_]=ListA, [B|ListB], Acc, Bcc) when A > B ->
