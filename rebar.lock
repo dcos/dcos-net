@@ -20,7 +20,7 @@
  {<<"folsom">>,{pkg,<<"folsom">>,<<"0.8.7">>},0},
  {<<"gen_netlink">>,
   {git,"https://github.com/mesosphere/gen_netlink.git",
-       {ref,"3b7fd372a5446b5463a44531f8fa8911c64ac540"}},
+       {ref,"66dd707ae7996cf2b107e75b02d30ef8798afddd"}},
   0},
  {<<"goldrush">>,{pkg,<<"goldrush">>,<<"0.1.9">>},1},
  {<<"hut">>,{pkg,<<"hut">>,<<"1.2.0">>},0},
