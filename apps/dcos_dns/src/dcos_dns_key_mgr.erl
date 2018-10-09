@@ -200,8 +200,9 @@ push_data_to_lashup(#{public := Pk, secret := Sk}) ->
 
 get_zookeepers() ->
     lists:map(fun ({Host, Port}) ->
-        case dcos_dns:resolve_mesos(Host) of
-            {ok, IPAddr} ->
+        HostBin = list_to_binary(Host),
+        case dcos_dns:resolve(HostBin) of
+            {ok, [IPAddr|_IPAddrs]} ->
                 {inet:ntoa(IPAddr), Port};
             {error, _} ->
                 {Host, Port}

@@ -34,7 +34,7 @@ start(Protocol, Request, Fun) ->
     end.
 
 -spec(resolve(protocol(), binary(), timeout()) ->
-    {ok, pid()} | {error, atom()}).
+    {ok, binary()} | {error, atom()}).
 resolve(Protocol, Request, Timeout) ->
     Ref = make_ref(),
     Fun = {fun resolve_reply_fun/3, [self(), Ref]},
