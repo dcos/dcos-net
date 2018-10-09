@@ -278,10 +278,13 @@ handle_agent(Obj) ->
         end,
     try mget(<<"hostname">>, Info) of Hostname ->
         IPStr = binary_to_list(Hostname),
-        {ok, IP} = inet:parse_ipv4strict_address(IPStr),
+        %% The hostname can be a DNS hostname, so we need to try and resolve it
+        %% but we handle an nxdomain or malformed hostname below
+        {ok, IP} = inet:getaddr(IPStr, inet),
         #{id => Id, ip => IP}
-    catch error:{badkey, _} ->
-        #{id => Id, ip => undefined}
+    catch error:{badkey, _} -> #{id => Id, ip => undefined};
+          error:{nxdomain, _} -> #{id => Id, ip => undefined};
+          error:{einval, _} -> #{id => Id, ip => undefined}
     end.
 
 %%%===================================================================
