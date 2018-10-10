@@ -139,6 +139,7 @@ test_ip_cmds_5(Config) ->
     IPStr = inet:ntoa(IP),
     DstIP = {192, 168, 65, 91},
     Family = inet,
+    {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, Family, IP, 32, ?IFNAME),
     {ok, _} = dcos_overlay_netlink:iproute_replace(Pid, Family, DstIP, 32, IP, 42),
     Entry5 = lists:flatten(io_lib:format("~s via ~s", [inet:ntoa(DstIP), IPStr])),
     Result5 = os:cmd("ip route show table 42"),
