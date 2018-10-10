@@ -15,7 +15,11 @@
 
 -define(DEFAULT_CONFIG_DIR, "/opt/mesosphere/etc/dcos-net.config.d").
 
-init_per_testcase(_TestCase, Config) ->
+init_per_testcase(TestCase, Config) ->
+    Uid = list_to_integer(string:strip(os:cmd("id -u"), right, $\n)),
+    init_per_testcase(Uid, TestCase, Config).
+
+init_per_testcase(0, _TestCase, Config) ->
     meck:new(file, [unstick, passthrough]),
     meck:expect(file, list_dir,
         fun (?DEFAULT_CONFIG_DIR) ->
@@ -31,7 +35,9 @@ init_per_testcase(_TestCase, Config) ->
         end),
     meck:new(dcos_overlay_sup, [passthrough]),
     meck:expect(dcos_overlay_sup, init, fun (_) -> {ok, {#{}, []}} end),
-    Config.
+    Config;
+init_per_testcase(_, _, _) ->
+    {skip, "Not running as root"}.
 
 end_per_testcase(_TestCase, _Config) ->
     ok = meck:unload(dcos_overlay_sup),

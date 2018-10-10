@@ -31,7 +31,6 @@
 -define(MIN_POLL_PERIOD, 30000). %% 30 secs
 -define(MAX_POLL_PERIOD, 120000). %% 120 secs
 -define(VXLAN_UDP_PORT, 64000).
--define(LINK_NOT_FOUND, 3992977407).
 
 -include_lib("stdlib/include/ms_transform.hrl").
 -include_lib("gen_netlink/include/netlink.hrl").
@@ -176,7 +175,7 @@ check_vtep_link(Pid, VXLan) ->
             {unspec, arphrd_ether, _, _, _, LinkInfo} = Msg,
             Match = match_vtep_link(VXLan, LinkInfo),
             {true, Match};
-        {error, ?LINK_NOT_FOUND, _} ->
+        {error, enodev, _ErrorMsg} ->
             lager:info("Overlay VTEP link does not exist, ~s", [VTEPName]),
             false
     end.

@@ -12,15 +12,6 @@
 
 -include_lib("gen_netlink/include/netlink.hrl").
 
--ifdef(TEST).
--include_lib("eunit/include/eunit.hrl").
--define(TEST_OR_DEV, true).
--endif.
-
--ifdef(DEV).
--define(TEST_OR_DEV, true).
--endif.
-
 start_link() ->
    gen_netlink_client:start_link(?NETLINK_ROUTE).
 
@@ -176,34 +167,9 @@ ipaddr_replace(Pid, Family, IP, PrefixLen, Ifname) ->
    Attr},
  netlink_request(Pid, newaddr, [create, replace], Msg).
 
-
-real_if_nametoindex(IfName) ->
-  {ok, Idx} = gen_netlink_client:if_nametoindex(IfName),
-  Idx.
-
--ifdef(TEST_OR_DEV).
-netlink_request(Pid, Type, Flags, Msg) ->
-  Uid = list_to_integer(string:strip(os:cmd("id -u"), right, $\n)),
-  case Uid of
-    0 -> %% root
-      gen_netlink_client:rtnl_request(Pid, Type, Flags, Msg);
-    _ ->
-      io:format("Would run fun ~p with flags ~p and argument ~p~n", [Type, Flags, Msg]),
-      {ok, []}
-  end.
-
-if_nametoindex(Ifname) ->
-  Uid = list_to_integer(string:strip(os:cmd("id -u"), right, $\n)),
-  case Uid of
-     0 -> real_if_nametoindex(Ifname);
-     Uid -> Uid
-  end.
-
--else.
-
 netlink_request(Pid, Type, Flags, Msg) ->
   gen_netlink_client:rtnl_request(Pid, Type, Flags, Msg).
 
 if_nametoindex(Ifname) ->
-  real_if_nametoindex(Ifname).
--endif.
+  {ok, Idx} = gen_netlink_client:if_nametoindex(Ifname),
+  Idx.
