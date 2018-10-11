@@ -54,7 +54,7 @@ resolve(DNSName, Family, Timeout) ->
     end.
 
 -spec(imp_resolve(binary(), inet | inet6, timeout()) ->
-    {ok, inet:ip_address()} | {error, term()}).
+    {ok, [inet:ip_address()]} | {error, term()}).
 imp_resolve(<<"localhost">>, inet, _Timeout) ->
     {ok, [{127, 0, 0, 1}]};
 imp_resolve(DNSName, Family, Timeout) ->
