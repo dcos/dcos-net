@@ -67,6 +67,19 @@ vip_labels_test() ->
         }
     }, dcos_net_mesos_listener:from_state(Data)).
 
+dns_hostname_test() ->
+    [RawData] = read_lines("dns-hostname.json"),
+    Data = jiffy:decode(RawData, [return_maps]),
+    ?assertEqual(#{
+        <<"test.f12cc459-cb38-11e8-a264-2e431fa5cff2">> => #{
+            name => <<"test">>,
+            framework => <<"marathon">>,
+            agent_ip => {127, 0, 0, 1},
+            task_ip => [{127, 0, 0, 1}],
+            state => running
+        }
+    }, dcos_net_mesos_listener:from_state(Data)).
+
 %%%===================================================================
 %%% Basic Tests
 %%%===================================================================

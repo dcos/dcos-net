@@ -276,12 +276,27 @@ handle_agent(Obj) ->
         catch error:{badkey, <<"id">>} ->
             error(bad_agent_id)
         end,
-    try mget(<<"hostname">>, Info) of Hostname ->
-        IPStr = binary_to_list(Hostname),
-        {ok, IP} = inet:parse_ipv4strict_address(IPStr),
-        #{id => Id, ip => IP}
-    catch error:{badkey, _} ->
-        #{id => Id, ip => undefined}
+    Hostname = mget(<<"hostname">>, Info, undefined),
+    AgentIP = handle_agent_hostname(Hostname),
+    #{id => Id, ip => AgentIP}.
+
+-spec(handle_agent_hostname(binary() | undefined) ->
+    inet:ip4_address() | undefined).
+handle_agent_hostname(Hostname) ->
+    % `Hostname` is an IP address or a DNS name.
+    case dcos_dns:resolve(Hostname) of
+        {ok, [IP]} ->
+            IP;
+        {ok, [IP|IPs]} ->
+            lager:warning(
+                "Unexpected agent ips were ignored, ~s -> ~p: ~p",
+                [Hostname, IP, IPs]),
+            IP;
+        {error, Error} ->
+            lager:error(
+                "Couldn't resolve agent hostname, ~s: ~p",
+                [Hostname, Error]),
+            undefined
     end.
 
 %%%===================================================================
