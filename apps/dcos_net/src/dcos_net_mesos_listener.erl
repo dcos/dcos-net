@@ -335,14 +335,13 @@ task(TaskObj, Task, Agents, Frameworks) ->
     Framework = mget(FrameworkId, Frameworks, {id, FrameworkId}),
 
     Fields = [
+        {name, fun handle_task_name/2},
         {task_ip, fun handle_task_ip/2},
         {state, fun handle_task_state/2},
         {ports, fun handle_task_ports/2}
     ],
-    Name = mget(<<"name">>, TaskObj, undefined),
-    Task0 = mput(name, Name, Task),
-    Task1 = mput(agent_ip, Agent, Task0),
-    Task2 = mput(framework, Framework, Task1),
+    Task0 = mput(agent_ip, Agent, Task),
+    Task1 = mput(framework, Framework, Task0),
     lists:foldl(fun ({Key, Fun}, Acc) ->
         try Fun(TaskObj, Acc) of Value ->
             mput(Key, Value, Acc)
@@ -351,7 +350,7 @@ task(TaskObj, Task, Agents, Frameworks) ->
                         [Key, Class, Error]),
             Acc
         end
-    end, Task2, Fields).
+    end, Task1, Fields).
 
 -spec(add_task(task_id(), task(), task(), state()) -> state()).
 add_task(TaskId, TaskPrev, TaskNew, State) ->
@@ -434,6 +433,11 @@ handle_task_state(TaskObj, _Task) ->
         _TaskState ->
             true
     end.
+
+-spec(handle_task_name(jiffy:object(), task()) -> binary() | undefined).
+handle_task_name(TaskObj, _Task) ->
+    Name = mget(<<"name">>, TaskObj, undefined),
+    mget([<<"discovery">>, <<"name">>], TaskObj, Name).
 
 -spec(handle_task_ip(jiffy:object(), task()) -> [inet:ip_address()]).
 handle_task_ip(TaskObj, _Task) ->
