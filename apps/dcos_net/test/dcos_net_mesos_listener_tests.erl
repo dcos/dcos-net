@@ -198,7 +198,7 @@ docker_on_ipv6(Tasks) ->
     }, maps:get(TaskId, Tasks)).
 
 pod_on_host(Tasks) ->
-    TaskId = <<"pod-on-host.instance-ea1231bf-2930-11e8-96bf-70b3d5800001.pod-on-host">>,
+    TaskId = <<"pod-on-host.instance-ea1231bf-2930-11e8-96bf-70b3d5800001.app">>,
     ?assertEqual(#{
         name => <<"pod-on-host">>,
         framework => <<"marathon">>,
@@ -212,7 +212,7 @@ pod_on_host(Tasks) ->
     }, maps:get(TaskId, Tasks)).
 
 pod_on_bridge(Tasks) ->
-    TaskId = <<"pod-on-bridge.instance-e9d06dcd-2930-11e8-96bf-70b3d5800001.pod-on-bridge">>,
+    TaskId = <<"pod-on-bridge.instance-e9d06dcd-2930-11e8-96bf-70b3d5800001.app">>,
     ?assertEqual(#{
         name => <<"pod-on-bridge">>,
         framework => <<"marathon">>,
@@ -226,7 +226,7 @@ pod_on_bridge(Tasks) ->
     }, maps:get(TaskId, Tasks)).
 
 pod_on_dcos(Tasks) ->
-    TaskId = <<"pod-on-dcos.instance-ea1231be-2930-11e8-96bf-70b3d5800001.pod-on-dcos">>,
+    TaskId = <<"pod-on-dcos.instance-ea1231be-2930-11e8-96bf-70b3d5800001.app">>,
     ?assertEqual(#{
         name => <<"pod-on-dcos">>,
         framework => <<"marathon">>,
