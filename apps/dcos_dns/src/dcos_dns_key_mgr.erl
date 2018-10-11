@@ -202,6 +202,8 @@ get_zookeepers() ->
     lists:map(fun ({Host, Port}) ->
         HostBin = list_to_binary(Host),
         case dcos_dns:resolve(HostBin) of
+            {ok, []} ->
+                {Host, Port};
             {ok, [IPAddr|_IPAddrs]} ->
                 {inet:ntoa(IPAddr), Port};
             {error, _} ->
