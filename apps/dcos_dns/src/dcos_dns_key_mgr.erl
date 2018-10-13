@@ -6,16 +6,20 @@
 -endif.
 
 %% API
--export([start_link/0,
-         keys/0]).
+-export([
+         start_link/0,
+    keys/0
+]).
 
 %% gen_server callbacks
--export([init/1,
-         handle_call/3,
-         handle_cast/2,
-         handle_info/2,
-         terminate/2,
-         code_change/3]).
+-export([
+    init/1,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3
+]).
 
 -define(SERVER, ?MODULE).
 -define(LASHUP_CHECK_INTERVAL, 5000).
@@ -187,8 +191,10 @@ push_data_to_lashup(#{public := Pk, secret := Sk}) ->
     true.
 
 get_zookeepers() ->
-    ZooKeeperServers = application:get_env(dcos_dns, zookeeper_servers,
-                                           ?DEFAULT_ZOOKEEPER_SERVERS),
+    ZooKeeperServers = application:get_env(
+        dcos_dns,
+        zookeeper_servers,
+        ?DEFAULT_ZOOKEEPER_SERVERS),
     lists:map(fun ({Host, Port}) ->
         case dcos_dns:resolve_mesos(Host) of
             {ok, IPAddr} ->
