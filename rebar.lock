@@ -38,7 +38,7 @@
  {<<"lager">>,{pkg,<<"lager">>,<<"3.6.4">>},0},
  {<<"lashup">>,
   {git,"https://github.com/dcos/lashup.git",
-       {ref,"5961b39ab70676d33d126b99ffef26d07004884f"}},
+       {ref,"5f4191c953994f5ad5c34db0799d4719cb4cbb24"}},
   0},
  {<<"mesos_state">>,
   {git,"https://github.com/dcos/mesos_state.git",
