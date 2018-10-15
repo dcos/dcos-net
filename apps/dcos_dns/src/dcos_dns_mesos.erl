@@ -141,28 +141,33 @@ task_records(Tasks) ->
     end, {#{}, #{}}, Tasks).
 
 -spec(task_records(task_id(), task()) -> dns:dns_rr()).
-task_records(_TaskId, Task) ->
+task_records(TaskId, Task) ->
     lists:flatten([
-        task_agentip(Task),
-        task_containerip(Task),
-        task_autoip(Task)
+        task_agentip(TaskId, Task),
+        task_containerip(TaskId, Task),
+        task_autoip(TaskId, Task)
     ]).
 
--spec(task_agentip(task()) -> [dns:dns_rr()]).
-task_agentip(#{name := Name, framework := Fwrk, agent_ip := AgentIP}) ->
+-spec(task_agentip(task_id(), task()) -> [dns:dns_rr()]).
+task_agentip(_TaskId, #{name := Name,
+        framework := Fwrk, agent_ip := AgentIP}) ->
     DName = format_name([Name, Fwrk, <<"agentip">>], ?DCOS_DOMAIN),
-    dns_records(DName, [AgentIP]).
-
--spec(task_containerip(task()) -> [dns:dns_rr()]).
-task_containerip(#{name := Name, framework := Fwrk, task_ip := TaskIPs}) ->
-    DName = format_name([Name, Fwrk, <<"containerip">>], ?DCOS_DOMAIN),
-    dns_records(DName, TaskIPs);
-task_containerip(_Task) ->
+    dns_records(DName, [AgentIP]);
+task_agentip(TaskId, Task) ->
+    lager:warning("Unexpected task ~p with ~p", [TaskId, Task]),
     [].
 
--spec(task_autoip(task()) -> [dns:dns_rr()]).
-task_autoip(#{name := Name, framework := Fwrk,
-              agent_ip := AgentIP, task_ip := TaskIPs} = Task) ->
+-spec(task_containerip(task_id(), task()) -> [dns:dns_rr()]).
+task_containerip(_TaskId, #{name := Name,
+        framework := Fwrk, task_ip := TaskIPs}) ->
+    DName = format_name([Name, Fwrk, <<"containerip">>], ?DCOS_DOMAIN),
+    dns_records(DName, TaskIPs);
+task_containerip(_TaskId, _Task) ->
+    [].
+
+-spec(task_autoip(task_id(), task()) -> [dns:dns_rr()]).
+task_autoip(_TaskId, #{name := Name, framework := Fwrk,
+        agent_ip := AgentIP, task_ip := TaskIPs} = Task) ->
     %% if task.port_mappings then agent_ip else task_ip
     DName = format_name([Name, Fwrk, <<"autoip">>], ?DCOS_DOMAIN),
     Ports = maps:get(ports, Task, []),
@@ -172,9 +177,13 @@ task_autoip(#{name := Name, framework := Fwrk,
             false -> TaskIPs
         end
     );
-task_autoip(#{name := Name, framework := Fwrk, agent_ip := AgentIP}) ->
+task_autoip(_TaskId, #{name := Name,
+        framework := Fwrk, agent_ip := AgentIP}) ->
     DName = format_name([Name, Fwrk, <<"autoip">>], ?DCOS_DOMAIN),
-    dns_records(DName, [AgentIP]).
+    dns_records(DName, [AgentIP]);
+task_autoip(TaskId, Task) ->
+    lager:warning("Unexpected task ~p with ~p", [TaskId, Task]),
+    [].
 
 -spec(is_running(dcos_net_mesos_listener:task_state()) -> boolean()).
 is_running({running, _Healthy}) ->
