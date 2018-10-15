@@ -55,7 +55,7 @@ hello_overlay_test_() ->
 
 pod_tasks_test_() ->
     {setup, fun pod_tasks_setup/0, fun cleanup/1, [
-        {"pod-tasks-foo", fun pod_tasks/0}
+        {"pod-tasks", fun pod_tasks/0}
     ]}.
 
 -define(LOCALHOST, {127, 0, 0, 1}).

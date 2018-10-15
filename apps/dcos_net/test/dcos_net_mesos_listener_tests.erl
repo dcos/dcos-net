@@ -46,15 +46,16 @@ hello_overlay_test_() ->
 
 pod_tasks_test_() ->
     {setup, fun pod_tasks_setup/0, fun cleanup/1, {with, [
-        fun pod_tasks_foo/1,
-        fun pod_tasks_bar/1
+        fun pod_tasks/1
     ]}}.
 
 vip_labels_test() ->
     [RawData] = read_lines("vip-labels.json"),
     Data = jiffy:decode(RawData, [return_maps]),
+    TaskId = <<"app.c9e19be4-6a94-11e8-bfc9-70b3d5800002">>,
+    FrameworkId = <<"3de98647-82e7-4a22-8fb5-32df27c1ef69-0001">>,
     ?assertEqual(#{
-        <<"app.c9e19be4-6a94-11e8-bfc9-70b3d5800002">> => #{
+        {FrameworkId, TaskId} => #{
             name => <<"app">>,
             framework => <<"marathon">>,
             agent_ip => {172, 17, 0, 3},
@@ -77,8 +78,10 @@ vip_labels_test() ->
 dns_hostname_test() ->
     [RawData] = read_lines("dns-hostname.json"),
     Data = jiffy:decode(RawData, [return_maps]),
+    TaskId = <<"test.f12cc459-cb38-11e8-a264-2e431fa5cff2">>,
+    FrameworkId = <<"d0a07cf9-7424-426b-b138-2be9d07b8e62-0001">>,
     ?assertEqual(#{
-        <<"test.f12cc459-cb38-11e8-a264-2e431fa5cff2">> => #{
+        {FrameworkId, TaskId} => #{
             name => <<"test">>,
             framework => <<"marathon">>,
             agent_ip => {127, 0, 0, 1},
@@ -100,6 +103,7 @@ basic_from_state(Tasks) ->
 
 none_on_host(Tasks) ->
     TaskId = <<"none-on-host.1458594c-2630-11e8-af52-70b3d5800001">>,
+    FrameworkId = <<"30257977-0153-499d-a5b0-35afd842ef4d-0001">>,
     ?assertEqual(#{
         name => <<"none-on-host">>,
         framework => <<"marathon">>,
@@ -110,20 +114,22 @@ none_on_host(Tasks) ->
               port => 13977}
         ],
         state => running
-    }, maps:get(TaskId, Tasks)).
+    }, maps:get({FrameworkId, TaskId}, Tasks)).
 
 none_on_dcos(Tasks) ->
     TaskId = <<"none-on-dcos.115c093a-2630-11e8-af52-70b3d5800001">>,
+    FrameworkId = <<"30257977-0153-499d-a5b0-35afd842ef4d-0001">>,
     ?assertEqual(#{
         name => <<"none-on-dcos">>,
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 4},
         task_ip => [{9, 0, 2, 5}],
         state => running
-    }, maps:get(TaskId, Tasks)).
+    }, maps:get({FrameworkId, TaskId}, Tasks)).
 
 ucr_on_host(Tasks) ->
     TaskId = <<"ucr-on-host.1755bacf-2630-11e8-af52-70b3d5800001">>,
+    FrameworkId = <<"30257977-0153-499d-a5b0-35afd842ef4d-0001">>,
     ?assertEqual(#{
         name => <<"ucr-on-host">>,
         framework => <<"marathon">>,
@@ -134,10 +140,11 @@ ucr_on_host(Tasks) ->
               port => 10323}
         ],
         state => running
-    }, maps:get(TaskId, Tasks)).
+    }, maps:get({FrameworkId, TaskId}, Tasks)).
 
 ucr_on_bridge(Tasks) ->
     TaskId = <<"ucr-on-bridge.1458805d-2630-11e8-af52-70b3d5800001">>,
+    FrameworkId = <<"30257977-0153-499d-a5b0-35afd842ef4d-0001">>,
     ?assertEqual(#{
         name => <<"ucr-on-bridge">>,
         framework => <<"marathon">>,
@@ -148,20 +155,22 @@ ucr_on_bridge(Tasks) ->
               host_port => 15263, port => 8080}
         ],
         state => running
-    }, maps:get(TaskId, Tasks)).
+    }, maps:get({FrameworkId, TaskId}, Tasks)).
 
 ucr_on_dcos(Tasks) ->
     TaskId = <<"ucr-on-dcos.145ec1ee-2630-11e8-af52-70b3d5800001">>,
+    FrameworkId = <<"30257977-0153-499d-a5b0-35afd842ef4d-0001">>,
     ?assertEqual(#{
         name => <<"ucr-on-dcos">>,
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 3},
         task_ip => [{9, 0, 1, 6}],
         state => running
-    }, maps:get(TaskId, Tasks)).
+    }, maps:get({FrameworkId, TaskId}, Tasks)).
 
 docker_on_host(Tasks) ->
     TaskId = <<"docker-on-host.116271db-2630-11e8-af52-70b3d5800001">>,
+    FrameworkId = <<"30257977-0153-499d-a5b0-35afd842ef4d-0001">>,
     ?assertEqual(#{
         name => <<"docker-on-host">>,
         framework => <<"marathon">>,
@@ -172,10 +181,11 @@ docker_on_host(Tasks) ->
               port => 31168}
         ],
         state => running
-    }, maps:get(TaskId, Tasks)).
+    }, maps:get({FrameworkId, TaskId}, Tasks)).
 
 docker_on_bridge(Tasks) ->
     TaskId = <<"docker-on-bridge.0ef76549-2630-11e8-af52-70b3d5800001">>,
+    FrameworkId = <<"30257977-0153-499d-a5b0-35afd842ef4d-0001">>,
     ?assertEqual(#{
         name => <<"docker-on-bridge">>,
         framework => <<"marathon">>,
@@ -186,10 +196,11 @@ docker_on_bridge(Tasks) ->
               host_port => 20560, port => 8080}
         ],
         state => running
-    }, maps:get(TaskId, Tasks)).
+    }, maps:get({FrameworkId, TaskId}, Tasks)).
 
 docker_on_dcos(Tasks) ->
     TaskId = <<"docker-on-dcos.0ebe53e8-2630-11e8-af52-70b3d5800001">>,
+    FrameworkId = <<"30257977-0153-499d-a5b0-35afd842ef4d-0001">>,
     ?assertEqual(#{
         name => <<"docker-on-dcos">>,
         framework => <<"marathon">>,
@@ -200,11 +211,12 @@ docker_on_dcos(Tasks) ->
               port => 8080}
         ],
         state => running
-    }, maps:get(TaskId, Tasks)).
+    }, maps:get({FrameworkId, TaskId}, Tasks)).
 
 docker_on_ipv6(Tasks) ->
     {ok, IPv6} = inet:parse_ipv6_address("fd01:b::2:8000:0:2"),
     TaskId = <<"docker-on-ipv6.602453f2-28e7-11e8-8cba-70b3d5800001">>,
+    FrameworkId = <<"30257977-0153-499d-a5b0-35afd842ef4d-0001">>,
     ?assertEqual(#{
         name => <<"docker-on-ipv6">>,
         framework => <<"marathon">>,
@@ -215,10 +227,11 @@ docker_on_ipv6(Tasks) ->
               port => 8080}
         ],
         state => running
-    }, maps:get(TaskId, Tasks)).
+    }, maps:get({FrameworkId, TaskId}, Tasks)).
 
 pod_on_host(Tasks) ->
     TaskId = <<"pod-on-host.instance-ea1231bf-2930-11e8-96bf-70b3d5800001.app">>,
+    FrameworkId = <<"30257977-0153-499d-a5b0-35afd842ef4d-0001">>,
     ?assertEqual(#{
         name => <<"pod-on-host">>,
         framework => <<"marathon">>,
@@ -229,10 +242,11 @@ pod_on_host(Tasks) ->
               port => 28064}
         ],
         state => running
-    }, maps:get(TaskId, Tasks)).
+    }, maps:get({FrameworkId, TaskId}, Tasks)).
 
 pod_on_bridge(Tasks) ->
     TaskId = <<"pod-on-bridge.instance-e9d06dcd-2930-11e8-96bf-70b3d5800001.app">>,
+    FrameworkId = <<"30257977-0153-499d-a5b0-35afd842ef4d-0001">>,
     ?assertEqual(#{
         name => <<"pod-on-bridge">>,
         framework => <<"marathon">>,
@@ -243,10 +257,11 @@ pod_on_bridge(Tasks) ->
               host_port => 2254, port => 8080}
         ],
         state => running
-    }, maps:get(TaskId, Tasks)).
+    }, maps:get({FrameworkId, TaskId}, Tasks)).
 
 pod_on_dcos(Tasks) ->
     TaskId = <<"pod-on-dcos.instance-ea1231be-2930-11e8-96bf-70b3d5800001.app">>,
+    FrameworkId = <<"30257977-0153-499d-a5b0-35afd842ef4d-0001">>,
     ?assertEqual(#{
         name => <<"pod-on-dcos">>,
         framework => <<"marathon">>,
@@ -257,7 +272,7 @@ pod_on_dcos(Tasks) ->
               port => 8080}
         ],
         state => running
-    }, maps:get(TaskId, Tasks)).
+    }, maps:get({FrameworkId, TaskId}, Tasks)).
 
 %%%===================================================================
 %%% Overlay Tests
@@ -265,6 +280,7 @@ pod_on_dcos(Tasks) ->
 
 hello_overlay_world(Tasks) ->
     TaskId = <<"hello-world.cea59641-2bea-11e8-93f9-6a3d376ad59c">>,
+    FrameworkId = <<"c620b0f5-ce56-472b-814a-aa36b40206af-0001">>,
     ?assertEqual(#{
         name => <<"hello-world">>,
         framework => <<"marathon">>,
@@ -275,10 +291,11 @@ hello_overlay_world(Tasks) ->
               port => 19630, vip => [<<"/api.hello-world:80">>]}
         ],
         state => running
-    }, maps:get(TaskId, Tasks)).
+    }, maps:get({FrameworkId, TaskId}, Tasks)).
 
 hello_overlay_server(Tasks) ->
     TaskId = <<"hello-overlay-0-server__7a7fe08f-7870-4def-a3ac-da5f18377dab">>,
+    FrameworkId = <<"c620b0f5-ce56-472b-814a-aa36b40206af-0002">>,
     ?assertEqual(#{
         name => <<"hello-overlay-0-server">>,
         framework => <<"hello-world">>,
@@ -291,10 +308,11 @@ hello_overlay_server(Tasks) ->
               protocol => tcp, port => 1026}
         ],
         state => running
-    }, maps:get(TaskId, Tasks)).
+    }, maps:get({FrameworkId, TaskId}, Tasks)).
 
 hello_overlay_vip(Tasks) ->
     TaskId = <<"hello-overlay-vip-0-server__3b071c4d-ef05-4344-9910-867431def3d7">>,
+    FrameworkId = <<"c620b0f5-ce56-472b-814a-aa36b40206af-0002">>,
     ?assertEqual(#{
         name => <<"hello-overlay-vip-0-server">>,
         framework => <<"hello-world">>,
@@ -305,10 +323,11 @@ hello_overlay_vip(Tasks) ->
               port => 4044, vip => [<<"overlay-vip:80">>]}
         ],
         state => running
-    }, maps:get(TaskId, Tasks)).
+    }, maps:get({FrameworkId, TaskId}, Tasks)).
 
 hello_overlay_host_vip(Tasks) ->
     TaskId = <<"hello-host-vip-0-server__2e5e76da-1d8c-4435-b152-70002de6ca9b">>,
+    FrameworkId = <<"c620b0f5-ce56-472b-814a-aa36b40206af-0002">>,
     ?assertEqual(#{
         name => <<"hello-host-vip-0-server">>,
         framework => <<"hello-world">>,
@@ -319,25 +338,25 @@ hello_overlay_host_vip(Tasks) ->
               port => 4044, vip => [<<"host-vip:80">>]}
         ],
         state => running
-    }, maps:get(TaskId, Tasks)).
+    }, maps:get({FrameworkId, TaskId}, Tasks)).
 
 %%%===================================================================
 %%% Pod Tasks Tests
 %%%===================================================================
 
-pod_tasks_foo(Tasks) ->
+pod_tasks(Tasks) ->
     TaskId = <<"app.instance-caff1565-d0db-11e8-aa23-70b3d5800002.foo">>,
-    ?assertEqual(#{
+    Framework = <<"8ae294b7-a766-42d6-960c-ad8acf0f0db6-0000">>,
+    Task = #{
         name => <<"app">>,
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 3},
         task_ip => [{9, 0, 0, 2}],
         state => running
-    }, maps:get(TaskId, Tasks)).
-
-pod_tasks_bar(Tasks) ->
-    TaskId = <<"app.instance-caff1565-d0db-11e8-aa23-70b3d5800002.bar">>,
-    ?assertEqual(false, maps:is_key(TaskId, Tasks)).
+    },
+    ?assertEqual(#{
+        {Framework, TaskId} => Task
+    }, Tasks).
 
 %%%===================================================================
 %%% From State Tests

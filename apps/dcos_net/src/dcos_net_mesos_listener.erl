@@ -16,7 +16,8 @@
 
 -export_type([task_id/0, task/0, task_state/0, task_port/0]).
 
--type task_id() :: binary().
+-opaque task_id() :: {framework_id(), binary()}.
+-type framework_id() :: binary().
 -type task() :: #{
     name => binary(),
     framework => binary() | {id, binary()},
@@ -42,7 +43,7 @@
     timeout = 15000 :: timeout(),
     timeout_ref = make_ref() :: reference(),
     agents = #{} :: #{binary() => inet:ip4_address()},
-    frameworks = #{} :: #{binary() => binary()},
+    frameworks = #{} :: #{framework_id() => binary()},
     tasks = #{} :: #{task_id() => task()},
     waiting_tasks = #{} :: #{task_id() => true},
     subs = undefined :: #{pid() => reference()} | undefined
@@ -305,7 +306,8 @@ handle_agent_hostname(Hostname) ->
 
 -spec(handle_task(jiffy:object(), state()) -> state()).
 handle_task(TaskObj, #state{tasks=T}=State) ->
-    TaskId = mget([<<"task_id">>, <<"value">>], TaskObj),
+    FrameworkId = mget([<<"framework_id">>, <<"value">>], TaskObj),
+    TaskId = {FrameworkId, mget([<<"task_id">>, <<"value">>], TaskObj)},
     Task = maps:get(TaskId, T, #{}),
     handle_task(TaskId, TaskObj, Task, State).
 
@@ -318,8 +320,9 @@ handle_task(TaskId, TaskObj, Task,
         Task0 = task(TaskObj, Task, A, F),
         add_task(TaskId, Task, Task0, State)
     catch Class:Error ->
-        lager:error("Unexpected error with ~s [~p]: ~p",
-                    [TaskId, Class, Error]),
+        lager:error(
+            "Unexpected error with ~s [~p]: ~p",
+            [id2bin(TaskId), Class, Error]),
         State
     end.
 
@@ -346,8 +349,9 @@ task(TaskObj, Task, Agents, Frameworks) ->
         try Fun(TaskObj, Acc) of Value ->
             mput(Key, Value, Acc)
         catch Class:Error ->
-            lager:error("Unexpected error with ~p [~p]: ~p",
-                        [Key, Class, Error]),
+            lager:error(
+                "Unexpected error with ~p [~p]: ~p",
+                [Key, Class, Error]),
             Acc
         end
     end, Task1, Fields).
@@ -358,7 +362,7 @@ add_task(TaskId, TaskPrev, TaskNew, State) ->
         MDiff when map_size(MDiff) =:= 0 ->
             State;
         MDiff ->
-            lager:notice("Task ~s updated with ~p", [TaskId, MDiff]),
+            lager:notice("Task ~s updated with ~p", [id2bin(TaskId), MDiff]),
             add_task(TaskId, TaskNew, State)
     end.
 
@@ -393,12 +397,17 @@ handle_waiting_tasks(Key, Id, Value, #state{waiting_tasks=TW}=State) ->
         Task = maps:get(TaskId, T),
         case maps:get(Key, Task) of
             {id, Id} ->
-                lager:notice("Task ~s updated with ~p", [TaskId, #{Key => Value}]),
+                lager:notice(
+                    "Task ~s updated with ~p",
+                    [id2bin(TaskId), #{Key => Value}]),
                 add_task(TaskId, mput(Key, Value, Task), Acc);
             _KValue ->
                 Acc
         end
     end, State, TW).
+
+id2bin({FrameworkId, TaskId}) ->
+    <<TaskId/binary, " by ", FrameworkId/binary>>.
 
 %%%===================================================================
 %%% Handle task fields
@@ -751,17 +760,19 @@ from_state_imp(Data) ->
          Frameworks :: #{binary() => binary()}).
 from_state_imp(TaskObjs, Agents, Frameworks) ->
     lists:foldl(fun (TaskObj, Acc) ->
-        Id = mget([<<"task_id">>, <<"value">>], TaskObj),
+        FrameworkId = mget([<<"framework_id">>, <<"value">>], TaskObj),
+        TaskId = {FrameworkId, mget([<<"task_id">>, <<"value">>], TaskObj)},
         try task(TaskObj, #{}, Agents, Frameworks) of
             #{agent_ip := {id, _}} ->
                 Acc;
             #{framework := {id, _}} ->
                 Acc;
             Task ->
-                mput(Id, Task, Acc)
+                mput(TaskId, Task, Acc)
         catch Class:Error ->
-            lager:error("Unexpected error with ~s [~p]: ~p",
-                        [Id, Class, Error]),
+            lager:error(
+                "Unexpected error with ~s [~p]: ~p",
+                [id2bin(TaskId), Class, Error]),
             Acc
         end
     end, #{}, TaskObjs).
