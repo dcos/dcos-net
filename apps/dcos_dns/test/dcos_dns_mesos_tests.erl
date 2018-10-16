@@ -53,6 +53,11 @@ hello_overlay_test_() ->
         {"hello-host-vip-0-server", fun hello_overlay_host_vip/0}
     ]}.
 
+pod_tasks_test_() ->
+    {setup, fun pod_tasks_setup/0, fun cleanup/1, [
+        {"pod-tasks-foo", fun pod_tasks/0}
+    ]}.
+
 -define(LOCALHOST, {127, 0, 0, 1}).
 resolve(DName) ->
     resolve(?DNS_TYPE_A, DName).
@@ -323,6 +328,21 @@ hello_overlay_host_vip() ->
                        "hello-world", "containerip"))).
 
 %%%===================================================================
+%%% Pod Tasks Tests
+%%%===================================================================
+
+pod_tasks() ->
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {172, 17, 0, 3}}}],
+        resolve(?DNAME("app", "agentip"))),
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {9, 0, 0, 2}}}],
+        resolve(?DNAME("app", "autoip"))),
+    ?assertMatch(
+        [#dns_rr{data=#dns_rrdata_a{ip = {9, 0, 0, 2}}}],
+        resolve(?DNAME("app", "containerip"))).
+
+%%%===================================================================
 %%% Setup & cleanup
 %%%===================================================================
 
@@ -331,6 +351,9 @@ basic_setup() ->
 
 hello_overlay_setup() ->
     setup(hello_overlay_setup).
+
+pod_tasks_setup() ->
+    setup(pod_tasks_setup).
 
 setup(SetupFun) ->
     meck:new(lashup_kv),

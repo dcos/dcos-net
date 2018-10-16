@@ -20,7 +20,8 @@
 
 -record(state, {
     ref :: reference(),
-    tasks :: #{ task_id() => [dns:dns_rr()] },
+    tasks :: #{task_id() => [dns:dns_rr()]},
+    records :: #{dns:dns_rr() => pos_integer()},
     masters_ref :: reference(),
     masters = [] :: [dns:dns_rr()],
     ops_ref = undefined :: reference() | undefined,
@@ -76,12 +77,12 @@ handle_init(State) ->
     case dcos_net_mesos_listener:subscribe() of
         {ok, Ref, MTasks} ->
             MRef = start_masters_timer(),
-            Tasks = task_records(MTasks),
+            {Tasks, Records} = task_records(MTasks),
             {ok, NewRRs, OldRRs} = push_tasks(Tasks),
             lager:notice(
                 "DC/OS DNS Sync: ~p records were added, ~p records were removed",
                 [length(NewRRs), length(OldRRs)]),
-            #state{ref=Ref, tasks=Tasks, masters_ref=MRef};
+            #state{ref=Ref, tasks=Tasks, records=Records, masters_ref=MRef};
         {error, timeout} ->
             exit(timeout);
         {error, subscribed} ->
@@ -97,37 +98,47 @@ handle_init(State) ->
 %%%===================================================================
 
 -spec(handle_task_updated(task_id(), task(), state()) -> state()).
-handle_task_updated(TaskId, Task, #state{tasks=Tasks}=State) ->
-    {Tasks0, Ops} = task_updated(TaskId, Task, Tasks),
-    handle_push_ops(Ops, State#state{tasks=Tasks0}).
+handle_task_updated(TaskId, Task,
+        #state{tasks=Tasks, records=Records}=State) ->
+    {Tasks0, Records0, Ops} = task_updated(TaskId, Task, Tasks, Records),
+    handle_push_ops(Ops, State#state{tasks=Tasks0, records=Records0}).
 
--spec(task_updated(task_id(), task(), Tasks) -> {Tasks, Ops}
+-spec(task_updated(task_id(), task(), Tasks, RRs) -> {Tasks, RRs, Ops}
     when Tasks :: #{task_id() => [dns:dns_rr()]},
+         RRs :: #{dns:dns_rr() => pos_integer()},
          Ops :: [riak_dt_orswot:orswot_op()]).
-task_updated(TaskId, Task, Tasks) ->
+task_updated(TaskId, Task, Tasks, RRs) ->
     TaskState = maps:get(state, Task),
     case {is_running(TaskState), maps:is_key(TaskId, Tasks)} of
         {Same, Same} ->
-            {Tasks, []};
+            {Tasks, RRs, []};
         {false, true} ->
             {Records, Tasks0} = maps:take(TaskId, Tasks),
-            {Tasks0, [{remove_all, Records}]};
+            RRs0 = update_records(Records, -1, RRs),
+            % Remove records if there is no another task with such records
+            Records0 = [RR || RR <- Records, not maps:is_key(RR, RRs0)],
+            {Tasks0, RRs0, [{remove_all, Records0} || Records0 =/= []]};
         {true, false} ->
             TaskRecords = task_records(TaskId, Task),
             Tasks0 = maps:put(TaskId, TaskRecords, Tasks),
-            {Tasks0, [{add_all, TaskRecords}]}
+            RRs0 = update_records(TaskRecords, 1, RRs),
+            {Tasks0, RRs0, [{add_all, TaskRecords}]}
     end.
 
--spec(task_records(#{task_id() => task()}) -> #{task_id() => [dns:dns_rr()]}).
+-spec(task_records(#{task_id() => task()}) ->
+    {#{task_id() => [dns:dns_rr()]}, #{dns:dns_rr() => pos_integer()}}).
 task_records(Tasks) ->
-    maps:fold(fun (TaskId, #{state := TaskState} = Task, Acc) ->
+    maps:fold(fun (TaskId, #{state := TaskState} = Task, {Acc, RRs}) ->
         case is_running(TaskState) of
             true ->
                 TaskRecords = task_records(TaskId, Task),
-                maps:put(TaskId, TaskRecords, Acc);
-            false -> Acc
+                Acc0 = maps:put(TaskId, TaskRecords, Acc),
+                RRs0 = update_records(TaskRecords, 1, RRs),
+                {Acc0, RRs0};
+            false ->
+                {Acc, RRs}
         end
-    end, #{}, Tasks).
+    end, {#{}, #{}}, Tasks).
 
 -spec(task_records(task_id(), task()) -> dns:dns_rr()).
 task_records(_TaskId, Task) ->
@@ -178,6 +189,21 @@ is_port_mapping(#{host_port := _HPort}) ->
     true;
 is_port_mapping(_Port) ->
     false.
+
+-spec(update_records([dns:dns_rr()], integer(), RRs) -> RRs
+    when RRs :: #{dns:dns_rr() => pos_integer()}).
+update_records(Records, Incr, RRs) when is_list(Records) ->
+    lists:foldl(fun (Record, Acc) ->
+        update_record(Record, Incr, Acc)
+    end, RRs, Records).
+
+-spec(update_record(dns:dns_rr(), integer(), RRs) -> RRs
+    when RRs :: #{dns:dns_rr() => pos_integer()}).
+update_record(Record, Incr, RRs) ->
+    case maps:get(Record, RRs, 0) + Incr of
+        0 -> maps:remove(Record, RRs);
+        N -> RRs#{Record => N}
+    end.
 
 %%%===================================================================
 %%% Masters functions

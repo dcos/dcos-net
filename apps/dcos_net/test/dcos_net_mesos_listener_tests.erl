@@ -5,6 +5,7 @@
 -export([
     basic_setup/0,
     hello_overlay_setup/0,
+    pod_tasks_setup/0,
     cleanup/1
 ]).
 
@@ -41,6 +42,12 @@ hello_overlay_test_() ->
         fun hello_overlay_server/1,
         fun hello_overlay_vip/1,
         fun hello_overlay_host_vip/1
+    ]}}.
+
+pod_tasks_test_() ->
+    {setup, fun pod_tasks_setup/0, fun cleanup/1, {with, [
+        fun pod_tasks_foo/1,
+        fun pod_tasks_bar/1
     ]}}.
 
 vip_labels_test() ->
@@ -315,6 +322,24 @@ hello_overlay_host_vip(Tasks) ->
     }, maps:get(TaskId, Tasks)).
 
 %%%===================================================================
+%%% Pod Tasks Tests
+%%%===================================================================
+
+pod_tasks_foo(Tasks) ->
+    TaskId = <<"app.instance-caff1565-d0db-11e8-aa23-70b3d5800002.foo">>,
+    ?assertEqual(#{
+        name => <<"app">>,
+        framework => <<"marathon">>,
+        agent_ip => {172, 17, 0, 3},
+        task_ip => [{9, 0, 0, 2}],
+        state => running
+    }, maps:get(TaskId, Tasks)).
+
+pod_tasks_bar(Tasks) ->
+    TaskId = <<"app.instance-caff1565-d0db-11e8-aa23-70b3d5800002.bar">>,
+    ?assertEqual(false, maps:is_key(TaskId, Tasks)).
+
+%%%===================================================================
 %%% From State Tests
 %%%===================================================================
 
@@ -417,6 +442,9 @@ hello_world_setup() ->
 
 hello_overlay_setup() ->
     setup("hello-overlay.json").
+
+pod_tasks_setup() ->
+    setup("pod-tasks.json").
 
 setup(FileName) ->
     Lines = read_lines(FileName),
