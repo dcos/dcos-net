@@ -1,14 +1,4 @@
-%%%-------------------------------------------------------------------
-%%% @author sdhillon
-%%% @copyright (C) 2016, <COMPANY>
-%%% @doc
-%%%
-%%% @end
-%%% Created : 02. Jun 2016 11:27 PM
-%%%-------------------------------------------------------------------
 -module(dcos_dns_key_mgr).
--author("sdhillon").
-
 -behaviour(gen_server).
 
 -ifdef(TEST).
@@ -22,12 +12,14 @@
 ]).
 
 %% gen_server callbacks
--export([init/1,
+-export([
+    init/1,
     handle_call/3,
     handle_cast/2,
     handle_info/2,
     terminate/2,
-    code_change/3]).
+    code_change/3
+]).
 
 -define(SERVER, ?MODULE).
 -define(LASHUP_CHECK_INTERVAL, 5000).
@@ -35,7 +27,7 @@
 -define(LASHUP_KEY, [navstar, key]).
 -define(ZOOKEEPER_TIMEOUT, 5000).
 -define(ZOOKEEPER_PATH, "/navstar_key").
--define(ZOOKEEPERS, [
+-define(DEFAULT_ZOOKEEPER_SERVERS, [
     {"master0.mesos", 2181},
     {"master1.mesos", 2181},
     {"master2.mesos", 2181},
@@ -199,6 +191,10 @@ push_data_to_lashup(#{public := Pk, secret := Sk}) ->
     true.
 
 get_zookeepers() ->
+    ZooKeeperServers = application:get_env(
+        dcos_dns,
+        zookeeper_servers,
+        ?DEFAULT_ZOOKEEPER_SERVERS),
     lists:map(fun ({Host, Port}) ->
         HostBin = list_to_binary(Host),
         case dcos_dns:resolve(HostBin) of
@@ -209,7 +205,7 @@ get_zookeepers() ->
             {error, _} ->
                 {Host, Port}
         end
-    end, ?ZOOKEEPERS).
+    end, ZooKeeperServers).
 
 -ifdef(TEST).
 
