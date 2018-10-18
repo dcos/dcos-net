@@ -1,25 +1,8 @@
-# Development
+# Building from the ground up
 
-You can build, check, and test dcos-net in a development image using
-`make docker-compile`, `make docker-check`, and `make docker-test` respectively.
-All makefile targets with `docker-` prefix build development image with all
-dependencies and run `rebar3` in that image on the host directory.
-
-To check your dcos-net build on DC/OS you can use DC/OS E2E a.k.a.
-[dcos-docker CLI](http://dcos-e2e.readthedocs.io/en/latest/cli.html):
-
-```sh
-curl -O https://downloads.dcos.io/dcos/testing/master/dcos_generate_config.sh
-make dcos-docker-create DCOS_DOCKER_AGENTS=3
-make dcos-docker-dev DCOS_DOCKER_NODE=master_0
-make dcos-docker-shell DCOS_DOCKER_NODE=agent_1
-make dcos-docker-destroy
-```
-
-Alternatively, here are instructions on how to run everything manually. Going
-forward, it will be assumed that there are two machines available, `node-1` and
-`node-2` respectively. They can be physical machines, virtual machines, or even
-Docker containers. Let's assume that their IPv4 addressed are:
+Going forward, it will be assumed that there are two machines available,
+`node-1` and `node-2` respectively. They can be physical machines, virtual
+machines, or even Docker containers. Let's assume that their IPv4 addressed are:
 
 ```sh
 NODE_1_IP=192.168.0.1
@@ -49,7 +32,10 @@ Once it is done, you may execute the following command to activate it:
 source $HOME/erl/activate
 ```
 
-Next step is to build Mesos itself. It is really easy to do so using
+Next step is to build Mesos itself. Firstly, please install its dependencies
+that are mentioned in its
+[docs](http://mesos.apache.org/documentation/latest/building/). Once they are
+installed, it is really easy to compile Mesos using
 [Mesos Version Manager](https://github.com/mesosphere/marathon/blob/master/tools/mvm.sh).
 In order to install it, run:
 

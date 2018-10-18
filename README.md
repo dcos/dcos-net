@@ -47,8 +47,49 @@ required too.
 
 ## Development
 
-Please refer to the [instructions](docs/dev.md) on how to build, configure,
-and run `dcos-net` locally.
+You can build, check, and test dcos-net in a development image using
+`make docker-compile`, `make docker-check`, and `make docker-test` respectively.
+All makefile targets with `docker-` prefix build development image with all
+dependencies and run `rebar3` in that image on the host directory.
+
+To check your dcos-net build on DC/OS you can use DC/OS E2E a.k.a.
+[dcos-docker CLI](http://dcos-e2e.readthedocs.io/en/latest/cli.html). In order to do so please repeat the following steps:
+
+1. Download a DC/OS build:
+
+   ```sh
+   curl -O https://downloads.dcos.io/dcos/testing/master/dcos_generate_config.sh
+   ```
+
+1. Create a DC/OS cluster with 3 agent nodes (the minimum for development would
+   be 1 node):
+
+   ```sh
+   make dcos-docker-create DCOS_DOCKER_AGENTS=3
+   ```
+
+1. Build and run `dcos-net` off you local repository on a particular node, in
+   this case it is `master_0`:
+
+   ```sh
+   make dcos-docker-dev DCOS_DOCKER_NODE=master_0
+   ```
+
+1. Open `dcos-shell` on a node (`agent_0`, `agent_1`, `...` `agent_n`):
+
+   ```sh
+   make dcos-docker-shell DCOS_DOCKER_NODE=agent_1
+   ```
+
+1. Destroy the cluster:
+
+   ```sh
+   make dcos-docker-destroy
+   ```
+
+Alternatively, you may build and run all the components yourself. Please refer
+to the [instructions](docs/build.md) on how to build, configure, and run
+`dcos-net` locally.
 
 <!-- Badges -->
 [circleci badge]: https://img.shields.io/circleci/project/github/dcos/dcos-net/master.svg?style=flat-square
