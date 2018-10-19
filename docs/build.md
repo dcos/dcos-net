@@ -17,7 +17,6 @@ available through it, please build one using [kerl](https://github.com/kerl/kerl
 KERL_CONFIGURE_OPTIONS=
 KERL_CONFIGURE_OPTIONS+="--enable-dirty-schedulers "
 KERL_CONFIGURE_OPTIONS+="--enable-kernel-poll "
-KERL_CONFIGURE_OPTIONS+="--with-hipe"
 KERL_CONFIGURE_OPTIONS+="--with-ssl"
 KERL_CONFIGURE_OPTIONS+="--without-javac "
 export KERL_CONFIGURE_OPTIONS
