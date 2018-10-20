@@ -1,17 +1,7 @@
-%%%-------------------------------------------------------------------
-%%% @author sdhillon
-%%% @copyright (C) 2016, <COMPANY>
-%%% @doc
-%%%
-%%% @end
-%%% Created : 27. May 2016 9:27 PM
-%%%-------------------------------------------------------------------
 -module(dcos_overlay_configure).
--author("sdhillon").
--author("dgoel").
 
 %% API
--export([start_link/1, stop/1, maybe_configure/2]).
+-export([start_link/1, stop/1, maybe_configure/2, configure_overlay/2]).
 
 -type config() :: #{key := term(), value := term()}.
 
@@ -92,12 +82,10 @@ configure_overlay_entry(Pid, Overlay, _VTEPIPPrefix = {VTEPIP, _PrefixLen}, Lash
     {_, MAC} = lists:keyfind({mac, riak_dt_lwwreg}, 1, LashupValue),
     {_, AgentIP} = lists:keyfind({agent_ip, riak_dt_lwwreg}, 1, LashupValue),
     {_, {SubnetIP, SubnetPrefixLen}} = lists:keyfind({subnet, riak_dt_lwwreg}, 1, LashupValue),
-
-    %% TEST only : writes the parameters to a file
-    maybe_print_parameters([AgentIP, binary_to_list(VTEPName),
-                            VTEPIP, MAC, SubnetIP, SubnetPrefixLen]),
-
     VTEPNameStr = binary_to_list(VTEPName),
+    ?MODULE:configure_overlay(Pid, [AgentIP, VTEPNameStr, VTEPIP, MAC, SubnetIP, SubnetPrefixLen]).
+
+configure_overlay(Pid, [AgentIP, VTEPNameStr, VTEPIP, MAC, SubnetIP, SubnetPrefixLen]) ->
     MACTuple = list_to_tuple(MAC),
     Family = determine_family(inet:ntoa(SubnetIP)),
     {ok, _} = dcos_overlay_netlink:ipneigh_replace(Pid, Family, VTEPIP, MACTuple, VTEPNameStr),
@@ -115,14 +103,3 @@ determine_family(IP) ->
       {ok, _} -> inet;
       _ -> inet6
     end.
-
--ifdef(TEST).
-maybe_print_parameters(Parameters) ->
-    {ok, PrivDir} = application:get_env(dcos_overlay, outputdir),
-    File = filename:join(PrivDir, node()),
-    ok = file:write_file(File, io_lib:fwrite("~p.\n", [Parameters]), [append]).
-
--else.
-maybe_print_parameters(_) ->
-    ok.
--endif.
