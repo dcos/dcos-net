@@ -9,6 +9,8 @@ NODE_1_IP=192.168.0.1
 NODE_2_IP=192.168.0.2
 ```
 
+## Compiling Erlang
+
 Firstly, the dependencies should be installed. Most of them can be installed
 using the package manager of your Linux distribution. In case Erlang 21.x is not
 available through it, please build one using [kerl](https://github.com/kerl/kerl):
@@ -30,6 +32,8 @@ Once it is done, you may execute the following command to activate it:
 ```sh
 source $HOME/erl/activate
 ```
+
+## Compiling Mesos
 
 Next step is to build Mesos itself. Firstly, please install its dependencies
 that are mentioned in its
@@ -80,6 +84,10 @@ make install
 
 All of the above steps should be performed on both machines.
 
+## Starting up dependencies
+
+### Starting up Exhibitor and Zookeeper
+
 Now we are ready to start up the components. First, start Exhibitor with
 ZooKeeper on `node-1`. Please refer to
 [Running Exhibitor](https://github.com/soabase/exhibitor/wiki/Running-Exhibitor)
@@ -97,6 +105,8 @@ docker run --rm -it \
      netflixoss/exhibitor:1.5.2 \
      --hostname $NODE_1_IP
 ```
+
+### Starting up Mesos master
 
 To start Mesos master on `node-1`, execute:
 
@@ -167,6 +177,8 @@ And the content of `/etc/mesos/overlay/master-agent-config.json` is:
 }
 ```
 
+### Starting up Mesos agent
+
 Now let's start Mesos agent on `node-2`:
 
 ```sh
@@ -219,6 +231,8 @@ And the content of `/etc/mesos/overlay/agent-config.json` is:
 }
 ```
 
+### Starting up Mesos-DNS
+
 `dcos-net` depends on Mesos-DNS, so let's tilt it up too. First, build it
 following the following [instructions](https://github.com/mesosphere/mesos-dns),
 and then run on `node-1`:
@@ -244,6 +258,8 @@ where the content of `/etc/mesos-dns.json` is:
     "SetTruncateBit": true
 }
 ```
+
+## Configuring networking
 
 `dcos-net` expects some network interfaces to be up and configured. Let's do
 this on both nodes:
@@ -273,6 +289,9 @@ nameserver 198.51.100.1
 nameserver 198.51.100.2
 nameserver 198.51.100.3
 ```
+
+
+## Compiling and starting up dcos-net
 
 Now that all the `dcos-net` dependencies are up and running, we can proceed to
 launching `dcos-net` itself. First, execute the following on `node-1`:
