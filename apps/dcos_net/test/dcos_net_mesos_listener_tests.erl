@@ -71,7 +71,8 @@ vip_labels_test() ->
                 #{name => <<"qux">>, protocol => tcp,
                   port => 10002}
             ],
-            state => {running, true}
+            state => running,
+            healthy => true
         }
     }, dcos_net_mesos_listener:from_state(Data)).
 
@@ -111,7 +112,28 @@ tcp_udp_test() ->
                 #{name => <<"foobar">>, protocol => udp,
                   port => 6417}
             ],
-            state => {running, true}
+            state => running,
+            healthy => true
+        }
+    }, dcos_net_mesos_listener:from_state(Data)).
+
+unhealthy_test() ->
+    [RawData] = read_lines("unhealthy.json"),
+    Data = jiffy:decode(RawData, [return_maps]),
+    TaskId = <<"app.7a5a8aa6-d8be-11e8-9bf3-70b3d5800001">>,
+    FrameworkId = <<"ca0f7f0e-30a7-471b-8e2e-500e1e8a3799-0000">>,
+    ?assertEqual(#{
+        {FrameworkId, TaskId} => #{
+            name => <<"app">>,
+            framework => <<"marathon">>,
+            agent_ip => {172, 17, 0, 4},
+            task_ip => [{9, 0, 1, 6}],
+            ports => [
+                #{name => <<"http">>, protocol => tcp,
+                  port => 80, vip => [<<"/foobar:80">>]}
+            ],
+            state => running,
+            healthy => false
         }
     }, dcos_net_mesos_listener:from_state(Data)).
 

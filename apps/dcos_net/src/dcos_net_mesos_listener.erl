@@ -24,9 +24,10 @@
     agent_ip => inet:ip4_address() | {id, binary()},
     task_ip => [inet:ip_address()],
     state => task_state(),
+    healthy => boolean(),
     ports => [task_port()]
 }.
--type task_state() :: true | running | {running, boolean()} | false.
+-type task_state() :: true | running | false.
 -type task_port() :: #{
     name => binary(),
     host_port => inet:port_number(),
@@ -341,6 +342,7 @@ task(TaskObj, Task, Agents, Frameworks) ->
         {name, fun handle_task_name/2},
         {task_ip, fun handle_task_ip/2},
         {state, fun handle_task_state/2},
+        {healthy, fun handle_task_healthy/2},
         {ports, fun handle_task_ports/2}
     ],
     Task0 = mput(agent_ip, Agent, Task),
@@ -432,16 +434,20 @@ handle_task_state(TaskObj, _Task) ->
         TaskState when ?IS_TERMINAL(TaskState) ->
             false;
         <<"TASK_RUNNING">> ->
-            Status = handle_task_status(TaskObj),
-            case mget(<<"healthy">>, Status, undefined) of
-                undefined -> running;
-                Healthy ->
-                    % NOTE: it doesn't work, see CORE-1458
-                    {running, Healthy}
-            end;
+            running;
         _TaskState ->
             true
     end.
+
+-spec(handle_task_healthy(jiffy:object(), task()) -> undefined | boolean()).
+handle_task_healthy(TaskObj, _Task) ->
+    IsHealthy =
+        case maps:is_key(<<"health_check">>, TaskObj) of
+            false -> undefined;
+            true -> false
+        end,
+    Status = handle_task_status(TaskObj),
+    mget(<<"healthy">>, Status, IsHealthy).
 
 -spec(handle_task_name(jiffy:object(), task()) -> binary() | undefined).
 handle_task_name(TaskObj, _Task) ->
