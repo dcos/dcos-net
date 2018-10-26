@@ -27,7 +27,7 @@
     healthy => boolean(),
     ports => [task_port()]
 }.
--type task_state() :: true | running | false.
+-type task_state() :: preparing | running | terminal.
 -type task_port() :: #{
     name => binary(),
     host_port => inet:port_number(),
@@ -369,7 +369,7 @@ add_task(TaskId, TaskPrev, TaskNew, State) ->
     end.
 
 -spec(add_task(task_id(), task(), state()) -> state()).
-add_task(TaskId, #{state := false} = Task, #state{
+add_task(TaskId, #{state := terminal} = Task, #state{
         tasks=T, waiting_tasks=TW}=State) ->
     State0 = notify(TaskId, Task, State),
     State0#state{
@@ -432,11 +432,11 @@ id2bin({FrameworkId, TaskId}) ->
 handle_task_state(TaskObj, _Task) ->
     case maps:get(<<"state">>, TaskObj) of
         TaskState when ?IS_TERMINAL(TaskState) ->
-            false;
+            terminal;
         <<"TASK_RUNNING">> ->
             running;
         _TaskState ->
-            true
+            preparing
     end.
 
 -spec(handle_task_healthy(jiffy:object(), task()) -> undefined | boolean()).
@@ -681,9 +681,9 @@ merge_ports(PortA, PortB) ->
     maps:merge(PortA, PortB).
 
 -spec(merge_host_ports(task(), [task_port()]) -> [task_port()]).
-merge_host_ports(#{state := true}, Ports) ->
+merge_host_ports(#{state := preparing}, Ports) ->
     Ports;
-merge_host_ports(#{state := false}, Ports) ->
+merge_host_ports(#{state := terminal}, Ports) ->
     Ports;
 merge_host_ports(#{agent_ip := AgentIP, task_ip := [AgentIP]}, Ports) ->
     PortsMap = merge_host_ports(Ports),
