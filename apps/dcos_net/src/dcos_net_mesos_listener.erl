@@ -688,11 +688,12 @@ merge_host_ports(_Task, Ports) ->
 -spec(merge_host_ports([task_port()]) -> #{inet:port_number() => [task_port()]}).
 merge_host_ports(Ports) ->
     lists:foldl(fun (Port, Acc) ->
-        #{port := Key} = PortA =
+        PortA =
             case maps:take(host_port, Port) of
-                {K, P} -> P#{port => K};
+                {K, Port0} -> Port0#{port => K};
                 error -> Port
             end,
+        Key = {maps:get(protocol, PortA), maps:get(port, PortA)},
         PortB = maps:get(Key, Acc, #{}),
         Acc#{Key => merge_ports(PortA, PortB)}
     end, #{}, Ports).

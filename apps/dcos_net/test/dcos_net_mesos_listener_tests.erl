@@ -90,6 +90,31 @@ dns_hostname_test() ->
         }
     }, dcos_net_mesos_listener:from_state(Data)).
 
+tcp_udp_test() ->
+    [RawData] = read_lines("tcp-and-udp.json"),
+    Data = jiffy:decode(RawData, [return_maps]),
+    TaskId = <<"app.80eefa01-d956-11e8-8b68-70b3d5800002">>,
+    FrameworkId = <<"0e559f52-e43a-497a-90b8-11688d98f60c-0000">>,
+    ?assertEqual(#{
+        {FrameworkId, TaskId} => #{
+            name => <<"app">>,
+            framework => <<"marathon">>,
+            agent_ip => {172, 17, 0, 3},
+            task_ip => [{172, 17, 0, 3}],
+            ports => [
+                #{name => <<"http">>, protocol => tcp,
+                  port => 6416, vip => [<<"/app:80">>]},
+                #{name => <<"foobar">>, protocol => tcp,
+                  port => 6417},
+                #{name => <<"http">>, protocol => udp,
+                  port => 6416, vip => [<<"/app:80">>]},
+                #{name => <<"foobar">>, protocol => udp,
+                  port => 6417}
+            ],
+            state => {running, true}
+        }
+    }, dcos_net_mesos_listener:from_state(Data)).
+
 %%%===================================================================
 %%% Basic Tests
 %%%===================================================================
