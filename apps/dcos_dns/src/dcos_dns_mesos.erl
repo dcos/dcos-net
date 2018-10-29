@@ -186,8 +186,6 @@ task_autoip(TaskId, Task) ->
     [].
 
 -spec(is_running(dcos_net_mesos_listener:task_state()) -> boolean()).
-is_running({running, _Healthy}) ->
-    true;
 is_running(running) ->
     true;
 is_running(_TaskState) ->

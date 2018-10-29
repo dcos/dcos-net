@@ -106,6 +106,7 @@ stuck_fun({global, _F, _A}) -> false;
 stuck_fun({prim_eval, _F, _A}) -> false;
 stuck_fun({io, _F, _A}) -> false;
 stuck_fun({shell, _F, _A}) -> false;
+stuck_fun({recon_trace, _F, _A}) -> false;
 stuck_fun({_M, F, _A}) ->
     Fun = atom_to_binary(F, latin1),
     binary:match(Fun, <<"loop">>) =:= nomatch.

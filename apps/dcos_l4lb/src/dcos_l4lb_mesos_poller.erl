@@ -108,10 +108,10 @@ is_healthy(_TaskId, Task) ->
     is_healthy(Task).
 
 -spec(is_healthy(task()) -> boolean()).
+is_healthy(#{healthy := IsHealthy, state := running}) ->
+    IsHealthy;
 is_healthy(#{state := running}) ->
     true;
-is_healthy(#{state := {running, IsHealthy}}) ->
-    IsHealthy;
 is_healthy(_Task) ->
     false.
 
