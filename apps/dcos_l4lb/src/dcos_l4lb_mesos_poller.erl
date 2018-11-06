@@ -257,18 +257,22 @@ unflatten_vips(VIPBes) ->
         ),
     orddict:map(fun(_Key, Value) -> ordsets:from_list(Value) end, VIPBEsDict).
 
--spec is_healthy(task() | task_status()) -> boolean().
-is_healthy(#task{state = running, statuses = []}) ->
-    true;
-is_healthy(#task{state = running, statuses = TaskStatuses}) ->
+-spec is_healthy(task_status()) -> boolean().
+is_healthy(#task{statuses = []}) ->
+    false;
+is_healthy(#task{state = running, statuses = TaskStatuses} = Task) ->
     TaskStatuses0 = lists:keysort(#task_status.timestamp, TaskStatuses),
     TaskStatus = lists:last(TaskStatuses0),
-    is_healthy(TaskStatus);
-is_healthy(#task_status{state = running, healthy = undefined}) ->
+    is_healthy(Task, TaskStatus);
+is_healthy(_Task) ->
+    false.
+
+-spec is_healthy(task(), task_status()) -> boolean().
+is_healthy(#task{health_check = undefined}, #task_status{state = running, healthy = undefined}) ->
     true;
-is_healthy(#task_status{state = running, healthy = true}) ->
+is_healthy(_Task, #task_status{state = running, healthy = true}) ->
     true;
-is_healthy(_) ->
+is_healthy(_Task, _TaskStatus) ->
     false.
 
 -spec(collect_vips(MesosState :: mesos_state_client:mesos_agent_state(), State :: state()) ->
@@ -735,4 +739,18 @@ flatten_vips_test() ->
     Expected = [#vip_be2{vip_ip = {2, 2, 2, 2}, vip_port = 5000, protocol = tcp,
                          agent_ip = {1, 1, 1, 1}, backend_port = 12049, backend_ip = {10, 0, 0, 243}}],
     ?assertEqual(Expected, FlatVIPs).
+
+is_healthy_test() ->
+    {ok, [Tasks]} = file:consult("apps/dcos_l4lb/testdata/healthy.term"),
+    lists:foreach(
+        fun (#task{name = <<"unhealthy">>} = Task) ->
+                false = is_healthy(Task);
+            (#task{name = <<"nohealthcheck">>} = Task) ->
+                true = is_healthy(Task);
+            (#task{name = <<"healthy">>} = Task) ->
+                true = is_healthy(Task);
+            (#task{name = <<"slowstart">>} = Task) ->
+                false = is_healthy(Task)
+        end, Tasks).
+
 -endif.
