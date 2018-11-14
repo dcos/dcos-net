@@ -165,7 +165,7 @@ init_worker(tcp, Pid, Upstreams, Request) ->
 
 -spec(udp_worker(pid(), upstream(), binary()) -> ok).
 udp_worker(Pid, Upstream = {IP, Port}, Request) ->
-    StartTime = erlang:system_time(millisecond),
+    StartTime = erlang:monotonic_time(millisecond),
     Opts = [{reuseaddr, true}, {active, once}, binary],
     case gen_udp:open(0, Opts) of
         {ok, Socket} ->
@@ -202,7 +202,7 @@ udp_worker(StartTime, Pid, Socket, Upstream = {IP, Port}) ->
 
 -spec(tcp_worker(pid(), upstream(), binary()) -> ok).
 tcp_worker(Pid, Upstream = {IP, Port}, Request) ->
-    StartTime = erlang:system_time(millisecond),
+    StartTime = erlang:monotonic_time(millisecond),
     Opts = [{active, once}, binary, {packet, 2}, {send_timeout, ?TIMEOUT}],
     case gen_tcp:connect(IP, Port, Opts, ?TIMEOUT) of
         {ok, Socket} ->
@@ -220,7 +220,7 @@ tcp_worker(Pid, Upstream = {IP, Port}, Request) ->
 tcp_worker(StartTime, Pid, Socket, Upstream) ->
     MonRef = erlang:monitor(process, Pid),
     try
-        Timeout = ?TIMEOUT - (erlang:system_time(millisecond) - StartTime),
+        Timeout = ?TIMEOUT - (erlang:monotonic_time(millisecond) - StartTime),
         receive
             {'DOWN', MonRef, process, _Pid, normal} ->
                 ok;
@@ -244,7 +244,7 @@ tcp_worker(StartTime, Pid, Socket, Upstream) ->
 
 -spec(report_latency([term()], pos_integer()) -> ok).
 report_latency(Metric, StartTime) ->
-    Diff = max(erlang:system_time(millisecond) - StartTime, 0),
+    Diff = max(erlang:monotonic_time(millisecond) - StartTime, 0),
     dcos_dns_metrics:update(Metric, Diff, ?HISTOGRAM).
 
 %%%===================================================================
