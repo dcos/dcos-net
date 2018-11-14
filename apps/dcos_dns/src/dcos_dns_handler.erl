@@ -249,7 +249,7 @@ take_upstreams(Upstreams) ->
 
 -spec(choose(N :: pos_integer(), [T]) -> [T] when T :: any()).
 choose(1, [Element]) ->
-    Element;
+    [Element];
 choose(N, List) ->
     % Shuffle list and take N first elements
     List0 = [{rand:uniform(), X} || X <- List],
