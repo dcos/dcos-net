@@ -32,6 +32,8 @@ loop(Socket, Transport, Opts) ->
                 {error, Error} ->
                     exit(Error)
             end;
+        {error, closed} ->
+            ok;
         {error, Error} ->
             Transport:close(Socket),
             exit(Error)
