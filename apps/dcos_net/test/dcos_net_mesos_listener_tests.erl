@@ -57,6 +57,7 @@ vip_labels_test() ->
     ?assertEqual(#{
         {FrameworkId, TaskId} => #{
             name => <<"app">>,
+            runtime => mesos,
             framework => <<"marathon">>,
             agent_ip => {172, 17, 0, 3},
             task_ip => [{172, 17, 0, 3}],
@@ -84,6 +85,7 @@ dns_hostname_test() ->
     ?assertEqual(#{
         {FrameworkId, TaskId} => #{
             name => <<"test">>,
+            runtime => docker,
             framework => <<"marathon">>,
             agent_ip => {127, 0, 0, 1},
             task_ip => [{127, 0, 0, 1}],
@@ -99,6 +101,7 @@ tcp_udp_test() ->
     ?assertEqual(#{
         {FrameworkId, TaskId} => #{
             name => <<"app">>,
+            runtime => docker,
             framework => <<"marathon">>,
             agent_ip => {172, 17, 0, 3},
             task_ip => [{172, 17, 0, 3}],
@@ -125,6 +128,7 @@ unhealthy_test() ->
     ?assertEqual(#{
         {FrameworkId, TaskId} => #{
             name => <<"app">>,
+            runtime => mesos,
             framework => <<"marathon">>,
             agent_ip => {172, 17, 0, 4},
             task_ip => [{9, 0, 1, 6}],
@@ -153,6 +157,7 @@ none_on_host(Tasks) ->
     FrameworkId = <<"30257977-0153-499d-a5b0-35afd842ef4d-0001">>,
     ?assertEqual(#{
         name => <<"none-on-host">>,
+        runtime => mesos,
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 4},
         task_ip => [{172, 17, 0, 4}],
@@ -168,6 +173,7 @@ none_on_dcos(Tasks) ->
     FrameworkId = <<"30257977-0153-499d-a5b0-35afd842ef4d-0001">>,
     ?assertEqual(#{
         name => <<"none-on-dcos">>,
+        runtime => mesos,
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 4},
         task_ip => [{9, 0, 2, 5}],
@@ -179,6 +185,7 @@ ucr_on_host(Tasks) ->
     FrameworkId = <<"30257977-0153-499d-a5b0-35afd842ef4d-0001">>,
     ?assertEqual(#{
         name => <<"ucr-on-host">>,
+        runtime => mesos,
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 3},
         task_ip => [{172, 17, 0, 3}],
@@ -194,6 +201,7 @@ ucr_on_bridge(Tasks) ->
     FrameworkId = <<"30257977-0153-499d-a5b0-35afd842ef4d-0001">>,
     ?assertEqual(#{
         name => <<"ucr-on-bridge">>,
+        runtime => mesos,
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 3},
         task_ip => [{172, 31, 254, 3}],
@@ -209,6 +217,7 @@ ucr_on_dcos(Tasks) ->
     FrameworkId = <<"30257977-0153-499d-a5b0-35afd842ef4d-0001">>,
     ?assertEqual(#{
         name => <<"ucr-on-dcos">>,
+        runtime => mesos,
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 3},
         task_ip => [{9, 0, 1, 6}],
@@ -220,6 +229,7 @@ docker_on_host(Tasks) ->
     FrameworkId = <<"30257977-0153-499d-a5b0-35afd842ef4d-0001">>,
     ?assertEqual(#{
         name => <<"docker-on-host">>,
+        runtime => docker,
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 4},
         task_ip => [{172, 17, 0, 4}],
@@ -235,6 +245,7 @@ docker_on_bridge(Tasks) ->
     FrameworkId = <<"30257977-0153-499d-a5b0-35afd842ef4d-0001">>,
     ?assertEqual(#{
         name => <<"docker-on-bridge">>,
+        runtime => docker,
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 4},
         task_ip => [{172, 18, 0, 2}],
@@ -250,6 +261,7 @@ docker_on_dcos(Tasks) ->
     FrameworkId = <<"30257977-0153-499d-a5b0-35afd842ef4d-0001">>,
     ?assertEqual(#{
         name => <<"docker-on-dcos">>,
+        runtime => docker,
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 4},
         task_ip => [{9, 0, 2, 130}],
@@ -266,6 +278,7 @@ docker_on_ipv6(Tasks) ->
     FrameworkId = <<"30257977-0153-499d-a5b0-35afd842ef4d-0001">>,
     ?assertEqual(#{
         name => <<"docker-on-ipv6">>,
+        runtime => docker,
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 4},
         task_ip => [{172, 19, 0, 2}, IPv6],
@@ -281,6 +294,7 @@ pod_on_host(Tasks) ->
     FrameworkId = <<"30257977-0153-499d-a5b0-35afd842ef4d-0001">>,
     ?assertEqual(#{
         name => <<"pod-on-host">>,
+        runtime => mesos,
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 4},
         task_ip => [{172, 17, 0, 4}],
@@ -296,6 +310,7 @@ pod_on_bridge(Tasks) ->
     FrameworkId = <<"30257977-0153-499d-a5b0-35afd842ef4d-0001">>,
     ?assertEqual(#{
         name => <<"pod-on-bridge">>,
+        runtime => mesos,
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 3},
         task_ip => [{172, 31, 254, 4}],
@@ -311,6 +326,7 @@ pod_on_dcos(Tasks) ->
     FrameworkId = <<"30257977-0153-499d-a5b0-35afd842ef4d-0001">>,
     ?assertEqual(#{
         name => <<"pod-on-dcos">>,
+        runtime => mesos,
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 3},
         task_ip => [{9, 0, 1, 3}],
@@ -330,6 +346,7 @@ hello_overlay_world(Tasks) ->
     FrameworkId = <<"c620b0f5-ce56-472b-814a-aa36b40206af-0001">>,
     ?assertEqual(#{
         name => <<"hello-world">>,
+        runtime => unknown,
         framework => <<"marathon">>,
         agent_ip => {10, 0, 0, 49},
         task_ip => [{10, 0, 0, 49}],
@@ -345,6 +362,7 @@ hello_overlay_server(Tasks) ->
     FrameworkId = <<"c620b0f5-ce56-472b-814a-aa36b40206af-0002">>,
     ?assertEqual(#{
         name => <<"hello-overlay-0-server">>,
+        runtime => mesos,
         framework => <<"hello-world">>,
         agent_ip => {10, 0, 0, 49},
         task_ip => [{9, 0, 2, 2}],
@@ -362,6 +380,7 @@ hello_overlay_vip(Tasks) ->
     FrameworkId = <<"c620b0f5-ce56-472b-814a-aa36b40206af-0002">>,
     ?assertEqual(#{
         name => <<"hello-overlay-vip-0-server">>,
+        runtime => mesos,
         framework => <<"hello-world">>,
         agent_ip => {10, 0, 0, 49},
         task_ip => [{9, 0, 2, 3}],
@@ -377,6 +396,7 @@ hello_overlay_host_vip(Tasks) ->
     FrameworkId = <<"c620b0f5-ce56-472b-814a-aa36b40206af-0002">>,
     ?assertEqual(#{
         name => <<"hello-host-vip-0-server">>,
+        runtime => mesos,
         framework => <<"hello-world">>,
         agent_ip => {10, 0, 0, 49},
         task_ip => [{10, 0, 0, 49}],
@@ -396,6 +416,7 @@ pod_tasks(Tasks) ->
     Framework = <<"8ae294b7-a766-42d6-960c-ad8acf0f0db6-0000">>,
     Task = #{
         name => <<"app">>,
+        runtime => mesos,
         framework => <<"marathon">>,
         agent_ip => {172, 17, 0, 3},
         task_ip => [{9, 0, 0, 2}],
