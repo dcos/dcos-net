@@ -124,10 +124,12 @@ is_healthy(_Task) ->
          Container :: {inet:ip_address(), inet:port_number()}).
 collect_port_mappings(Tasks) ->
     maps:fold(fun (_TaskId, Task, Acc) ->
+        Runtime = maps:get(runtime, Task),
         [TaskIP | _TaskIPs] = maps:get(task_ip, Task),
         PMs = [{{Protocol, Host}, {TaskIP, Port}}
               || #{host_port := Host, protocol := Protocol,
-                   port := Port} <- maps:get(ports, Task, [])],
+                   port := Port} <- maps:get(ports, Task, []),
+                 Runtime =/= docker],
         PMs ++ Acc
     end, [], Tasks).
 

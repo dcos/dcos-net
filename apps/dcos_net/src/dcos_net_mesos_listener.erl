@@ -14,19 +14,21 @@
 -export([init/1, handle_call/3, handle_cast/2,
     handle_info/2, terminate/2, code_change/3]).
 
--export_type([task_id/0, task/0, task_state/0, task_port/0]).
+-export_type([task_id/0, task/0, task_state/0, task_port/0, runtime/0]).
 
 -opaque task_id() :: {framework_id(), binary()}.
 -type framework_id() :: binary().
 -type task() :: #{
     name => binary(),
     framework => binary() | {id, binary()},
+    runtime => runtime(),
     agent_ip => inet:ip4_address() | {id, binary()},
     task_ip => [inet:ip_address()],
     state => task_state(),
     healthy => boolean(),
     ports => [task_port()]
 }.
+-type runtime() :: docker | mesos | unknown.
 -type task_state() :: preparing | running | terminal.
 -type task_port() :: #{
     name => binary(),
@@ -343,7 +345,8 @@ task(TaskObj, Task, Agents, Frameworks) ->
         {task_ip, fun handle_task_ip/2},
         {state, fun handle_task_state/2},
         {healthy, fun handle_task_healthy/2},
-        {ports, fun handle_task_ports/2}
+        {ports, fun handle_task_ports/2},
+        {runtime, fun handle_task_runtime/2}
     ],
     Task0 = mput(agent_ip, Agent, Task),
     Task1 = mput(framework, Framework, Task0),
@@ -453,6 +456,22 @@ handle_task_healthy(TaskObj, _Task) ->
 handle_task_name(TaskObj, _Task) ->
     Name = mget(<<"name">>, TaskObj, undefined),
     mget([<<"discovery">>, <<"name">>], TaskObj, Name).
+
+-spec(handle_task_runtime(jiffy:object(), task()) -> runtime()).
+handle_task_runtime(TaskObj, Task) ->
+    Default = maps:get(runtime, Task, unknown),
+    try mget([<<"container">>, <<"type">>], TaskObj) of
+        <<"MESOS">> ->
+            mesos;
+        <<"DOCKER">> ->
+            docker;
+        Type ->
+            lager:warning("Received an unknown container runtime
+                ~p for task ~p", [Type, Task]),
+            unknown
+    catch error:{badkey, _} ->
+        Default
+    end.
 
 -spec(handle_task_ip(jiffy:object(), task()) -> [inet:ip_address()]).
 handle_task_ip(TaskObj, _Task) ->
