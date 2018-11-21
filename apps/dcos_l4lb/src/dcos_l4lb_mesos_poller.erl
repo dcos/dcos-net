@@ -29,7 +29,6 @@
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
--export([handle_poll_state/2]).
 -endif.
 
 -include("dcos_l4lb.hrl").
@@ -299,12 +298,6 @@ collect_port_mappings(#task{
     PMs = [P || #network_info{port_mappings=P} <- NIs, is_list(P)],
     PMs0 = lists:flatten(PMs),
     collect_port_mappings(IP, PMs0);
-collect_port_mappings(#task{container=
-        #container{type=docker, docker=#docker{
-            port_mappings=PMs}
-        }}=Task) when is_list(PMs) ->
-    [IP|_] = task_ip_addresses(Task),
-    collect_port_mappings(IP, PMs);
 collect_port_mappings(#task{}) ->
     [].
 
