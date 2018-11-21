@@ -17,6 +17,7 @@ setup_cowboy() ->
             {"/lashup/kv/[...]", dcos_rest_lashup_handler, []},
             {"/lashup/key", dcos_rest_key_handler, []},
             {"/v1/vips", dcos_rest_vips_handler, []},
+            {"/v1/nodes", dcos_rest_nodes_handler, []},
 
             {"/v1/version", dcos_rest_dns_handler, [version]},
             {"/v1/config", dcos_rest_dns_handler, [config]},
