@@ -1,20 +1,26 @@
 -module(dcos_l4lb_mesos_poller_SUITE).
 
+-include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
 -include("dcos_l4lb.hrl").
 
 -export([
     all/0,
     init_per_suite/1, end_per_suite/1,
-    init_per_testcase/2, end_per_testcase/2,
-    test_gen_server/1,
-    test_handle_poll_state/1
+    init_per_testcase/2, end_per_testcase/2
+]).
+
+-export([
+    test_lashup/1,
+    test_mesos_portmapping/1
 ]).
 
 
 %% root tests
-all() ->
-  [test_gen_server, test_handle_poll_state].
+all() -> [
+    test_lashup,
+    test_mesos_portmapping
+].
 
 init_per_suite(Config) ->
     Config.
@@ -23,7 +29,16 @@ end_per_suite(Config) ->
     Config.
 
 init_per_testcase(_, Config) ->
+    meck:new(dcos_net_mesos, [no_link]),
+    meck:expect(dcos_net_mesos, poll, fun (_) -> meck_mesos_poll(Config) end),
+
+    meck:new(dcos_l4lb_mgr, [no_link]),
+    meck:expect(dcos_l4lb_mgr, local_port_mappings, fun (_) -> ok end),
+
     {ok, _} = application:ensure_all_started(dcos_l4lb),
+    meck:wait(dcos_net_mesos, poll, '_', 5000),
+    meck:wait(dcos_l4lb_mgr, local_port_mappings, '_', 100),
+    timer:sleep(100),
     Config.
 
 end_per_testcase(_, _Config) ->
@@ -33,24 +48,20 @@ end_per_testcase(_, _Config) ->
     end || {App, _, _} <- application:which_applications(),
     not lists:member(App, [stdlib, kernel]) ],
     os:cmd("rm -rf Mnesia.*"),
+    meck:unload(dcos_net_mesos),
+    meck:unload(dcos_l4lb_mgr),
     ok.
 
-test_gen_server(_Config) ->
-    hello = erlang:send(dcos_l4lb_mesos_poller, hello),
-    ok = gen_server:call(dcos_l4lb_mesos_poller, hello),
-    ok = gen_server:cast(dcos_l4lb_mesos_poller, hello),
-    sys:suspend(dcos_l4lb_mesos_poller),
-    sys:change_code(dcos_l4lb_mesos_poller, random_old_vsn, dcos_l4lb_mesos_poller, []),
-    sys:resume(dcos_l4lb_mesos_poller).
-
-test_handle_poll_state(Config) ->
-    AgentIP = {10, 0, 0, 243},
+meck_mesos_poll(Config) ->
     DataDir = ?config(data_dir, Config),
-    %%ok = mnesia:dirty_delete(kv2, [minuteman, vips]),
-    {ok, Data} = file:read_file(filename:join(DataDir, "named-base-vips.json")),
-    {ok, MesosState} = mesos_state_client:parse_response(Data),
-    State = {state, AgentIP, 0},
-    dcos_l4lb_mesos_poller:handle_poll_state(MesosState, State),
-    LashupValue2 = lashup_kv:value(?VIPS_KEY2),
-    [{_, [{{10, 0, 0, 243}, {{10, 0, 0, 243}, 12049}}]}] = LashupValue2.
+    {ok, Data} = file:read_file(filename:join(DataDir, "state.json")),
+    mesos_state_client:parse_response(Data).
 
+test_lashup(_Config) ->
+    Value = lashup_kv:value(?VIPS_KEY2),
+    [{_, [{{10, 0, 0, 40}, {{10, 0, 0, 40}, 12564}}]}] = Value.
+
+test_mesos_portmapping(_Config) ->
+    Expected = [{{tcp, 12564}, {{9, 0, 2, 2}, 80}}],
+    Actual = meck:capture(first, dcos_l4lb_mgr, local_port_mappings, '_', 1),
+    ?assertMatch(Expected, Actual).
