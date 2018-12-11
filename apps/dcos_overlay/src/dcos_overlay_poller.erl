@@ -231,7 +231,7 @@ create_vtep_addr(Pid, VXLan) ->
       {false, _} ->
           lager:notice("Overlay network is disabled [ipv6], ~s => ~p", [VTEPName, VTEPIP6]);
       _ ->
-          ok = try_enable_ipv6(VTEPNameStr),
+          ok = try_enable_ipv6(VTEPName),
           {ParsedVTEPIP6, PrefixLen6} = parse_subnet(VTEPIP6),
           {ok, _} = dcos_overlay_netlink:ipaddr_replace(Pid, inet6, ParsedVTEPIP6, PrefixLen6, VTEPNameStr),
           lager:notice("Overlay VTEP address was configured [ipv6], ~s => ~p", [VTEPName, VTEPIP6])
@@ -239,15 +239,14 @@ create_vtep_addr(Pid, VXLan) ->
 
 
 try_enable_ipv6(IfName) ->
-    Var = lists:flatten(io_lib:format("net.ipv6.conf.~s.disable_ipv6=0", [IfName])),
-    Cmd = lists:flatten(io_lib:format("/sbin/sysctl -w ~s", [Var])),
-    Port = open_port({spawn, Cmd}, [exit_status]),
-    receive
-        {Port, {exit_status, 0}} ->
+    Opt = <<"net.ipv6.conf.", IfName/binary, ".disable_ipv6=0">>,
+    case dcos_net_utils:system([<<"/sbin/sysctl">>, <<"-w">>, Opt]) of
+        {ok, _} ->
             ok;
-        {Port, {exit_status, ExitCode}} ->
-            lager:error("Couldn't enable IPv6 on ~s interface due to ~p", [IfName, ExitCode]),
-            ExitCode
+        {error, Error} ->
+            lager:error(
+                "Couldn't enable IPv6 on ~s interface due to ~p",
+                [IfName, Error])
     end.
 
 maybe_add_ip_rule(#{<<"info">> := #{<<"subnet">> := Subnet},
