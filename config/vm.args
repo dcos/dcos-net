@@ -2,7 +2,7 @@
 -name ${NAME}
 
 ## Cookie for distributed erlang
--setcookie minuteman
+-setcookie ${COOKIE}
 
 ## Increase number of concurrent ports/sockets
 -env ERL_MAX_PORTS 16384
