@@ -12,7 +12,6 @@
     handle_info/2, terminate/2, code_change/3]).
 
 -include("dcos_l4lb.hrl").
--include_lib("dns/include/dns.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 
 -record(state, {
@@ -269,82 +268,28 @@ int2ip(inet6, IntIP) ->
 
 -spec(push_dns_records() -> ok).
 push_dns_records() ->
-    Zones = erldns_zone_cache:zone_names_and_versions(),
     lists:foreach(fun (ZoneComponents) ->
-        Zone = {ZoneName, Sha, Records} = zone(ZoneComponents),
-        case lists:keyfind(ZoneName, 1, Zones) of
-            {ZoneName, Sha} -> ok;
-            _Other ->
-                ok = erldns_zone_cache:put_zone(Zone),
-                lager:notice("DNS Zone ~s was updated (~p records, sha: ~s)",
-                             [ZoneName, length(Records), bin_to_hex(Sha)])
-        end
+        ZoneName = to_name(ZoneComponents),
+        Records = records(ZoneComponents),
+        ok = dcos_dns:push_zone(ZoneName, Records)
     end, ?ZONE_NAMES).
 
--spec(zone([binary()]) -> {Name :: binary(), Sha :: binary(), [dns:rr()]}).
-zone(ZoneComponents) ->
-    ZoneName = to_name(ZoneComponents),
-    Records = ets:foldl(
+-spec(records([binary()]) -> [dns:rr()]).
+records(ZoneComponents) ->
+    ets:foldl(
         fun ({Key, Value}, Acc) ->
             Record = to_record(ZoneComponents, Key, Value),
             [Record | Acc]
-        end, zone_records(ZoneName), ?NAME2IP),
-    Sha = crypto:hash(sha, term_to_binary(Records)),
-    {ZoneName, Sha, Records}.
+        end, [], ?NAME2IP).
 
 -spec(to_record([binary()], MappingKey, inet:ip_address()) -> dns:rr()
     when MappingKey :: {family(), binary(), binary()}).
-to_record(ZoneComponents, {inet, FwName, Label}, IP) ->
+to_record(ZoneComponents, {_Family, FwName, Label}, IP) ->
     RecordName = to_name([Label, FwName | ZoneComponents]),
-    #dns_rr{
-        name = RecordName,
-        ttl = 5,
-        type = ?DNS_TYPE_A,
-        data = #dns_rrdata_a{ip = IP}
-    };
-to_record(ZoneComponents, {inet6, FwName, Label}, IP) ->
-    RecordName = to_name([Label, FwName | ZoneComponents]),
-    #dns_rr{
-        name = RecordName,
-        ttl = 5,
-        type = ?DNS_TYPE_AAAA,
-        data = #dns_rrdata_aaaa{ip = IP}
-    }.
+    dcos_dns:dns_record(RecordName, IP).
 
 -spec(to_name([binary()]) -> binary()).
 to_name(Binaries) ->
     Bins = lists:map(fun mesos_state:domain_frag/1, Binaries),
     <<$., Name/binary>> = << <<$., Bin/binary>> || Bin <- Bins >>,
     Name.
-
--spec(zone_records(binary()) -> [dns:rr()]).
-zone_records(ZoneName) ->
-    [
-        #dns_rr{
-            name = ZoneName,
-            type = ?DNS_TYPE_SOA,
-            ttl = 3600,
-            data = #dns_rrdata_soa{
-                mname = <<"ns.spartan">>,
-                rname = <<"support.mesosphere.com">>,
-                serial = 1,
-                refresh = 60,
-                retry = 180,
-                expire = 86400,
-                minimum = 1
-            }
-        },
-        #dns_rr{
-            name = ZoneName,
-            type = ?DNS_TYPE_NS,
-            ttl = 3600,
-            data = #dns_rrdata_ns{
-                dname = <<"ns.spartan">>
-            }
-        }
-    ].
-
--spec(bin_to_hex(binary()) -> binary()).
-bin_to_hex(Bin) ->
-    Bin0 = << <<(integer_to_binary(N, 16))/binary>> || <<N:4>> <= Bin >>,
-    cowboy_bstr:to_lower(Bin0).
