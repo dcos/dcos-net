@@ -43,6 +43,7 @@ handle_info({timeout, Ref, kill}, #state{ref=Ref, reductions=Prev}=State) ->
                 _Other -> Acc
             end
         end, [], Rs),
+    true = maybe_kill_dist_proxy(),
     lists:foreach(fun maybe_kill/1, StuckProcesses),
     Timeout = application:get_env(dcos_net, killer_timeout, timer:minutes(5)),
     Ref0 = erlang:start_timer(Timeout, self(), kill),
@@ -70,6 +71,41 @@ reductions() ->
         end
     end, #{}, erlang:processes()).
 
+-spec(maybe_kill_dist_proxy() -> true | no_return()).
+maybe_kill_dist_proxy() ->
+    Pid = whereis(ssl_tls_dist_proxy),
+    maybe_kill_dist_proxy(Pid).
+
+-spec(maybe_kill_dist_proxy(undefined | pid()) -> true | no_return()).
+maybe_kill_dist_proxy(undefined) ->
+    true;
+maybe_kill_dist_proxy(Pid) ->
+    case erlang:process_info(Pid, messages) of
+        {messages, Messages} ->
+            maybe_kill_dist_proxy(Pid, Messages);
+        undefined ->
+            true
+    end.
+
+-spec(maybe_kill_dist_proxy(pid(), [term()]) -> true | no_return()).
+maybe_kill_dist_proxy(Pid, Messages) ->
+    MaxMsgs = application:get_env(dcos_net, ssl_tls_dist_proxy_max_msgs, 64),
+    Messages0 = lists:sort([Msg || {'$gen_call', _Tag, Msg} <- Messages]),
+    MapMsgCounts =
+        lists:foldl(fun (Msg, Acc) ->
+            maps:update_with(Msg, fun (V) -> V + 1 end, 1, Acc)
+        end, #{}, Messages0),
+    MsgCounts = maps:values(MapMsgCounts),
+    case lists:max([0 | MsgCounts]) of
+        N when N > MaxMsgs ->
+            lager:alert(
+                "ssl_tls_dist_proxy hung, ~p/~p messages",
+                [N, length(Messages)]),
+            kill(Pid);
+        _N ->
+            true
+    end.
+
 -spec(maybe_kill(pid()) -> true | no_return()).
 maybe_kill(Pid) ->
     case erlang:process_info(Pid, current_function) of
@@ -88,6 +124,10 @@ maybe_kill(Pid, MFA) ->
 -spec(kill(pid(), mfa()) -> true | no_return()).
 kill(Pid, MFA) ->
     lager:alert("~p got stuck: ~p", [Pid, MFA]),
+    kill(Pid).
+
+-spec(kill(pid()) -> true | no_return()).
+kill(Pid) ->
     case application:get_env(dcos_net, killer, disabled) of
         disabled -> true;
         enabled -> exit(Pid, kill);
@@ -98,7 +138,7 @@ kill(Pid, MFA) ->
 stuck_fun({erlang, hibernate, 3}) -> false;
 stuck_fun({erts_code_purger, wait_for_request, 0}) -> false;
 stuck_fun({gen_event, fetch_msg, 6}) -> false;
-stuck_fun({prim_inet, accept0, 2}) -> false;
+stuck_fun({prim_inet, accept0, _}) -> false;
 stuck_fun({prim_inet, recv0, 2}) -> false;
 stuck_fun({timer, sleep, 1}) -> false;
 stuck_fun({group, _F, _A}) -> false;
@@ -106,6 +146,7 @@ stuck_fun({global, _F, _A}) -> false;
 stuck_fun({prim_eval, _F, _A}) -> false;
 stuck_fun({io, _F, _A}) -> false;
 stuck_fun({shell, _F, _A}) -> false;
+stuck_fun({recon_trace, _F, _A}) -> false;
 stuck_fun({_M, F, _A}) ->
     Fun = atom_to_binary(F, latin1),
     binary:match(Fun, <<"loop">>) =:= nomatch.
