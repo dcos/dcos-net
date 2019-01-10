@@ -21,21 +21,13 @@
          dns_cache_test/1
         ]).
 
--include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
--include_lib("kernel/include/inet.hrl").
-
-
--include_lib("dns/include/dns_terms.hrl").
--include_lib("dns/include/dns_records.hrl").
-
--define(CONFIG, "../../../../config/sys.config").
 
 %% ===================================================================
 %% common_test callbacks
 %% ===================================================================
 
-init_per_suite(_Config) ->
+init_per_suite(Config) ->
     Workers = [
         dcos_dns_key_mgr,
         dcos_dns_poll_server,
@@ -47,7 +39,7 @@ init_per_suite(_Config) ->
     meck:unload(Workers),
     generate_fixture_mesos_zone(),
     generate_thisdcos_directory_zone(),
-    _Config.
+    Config.
 
 end_per_suite(Config) ->
     [ begin
@@ -83,92 +75,24 @@ meck_mods(Mod) ->
     meck:expect(Mod, start_link, fun () -> {ok, self()} end).
 
 generate_fixture_mesos_zone() ->
-    Records = [
-        generate_soa_ns(<<"mesos">>),
-        #dns_rr{
-            name = <<"master.mesos">>,
-            type = ?DNS_TYPE_A,
-            ttl = 5,
-            data = #dns_rrdata_a{ip = {127, 0, 0, 1}}
-        },
-        generate_ns()
-    ],
-    Sha = crypto:hash(sha, term_to_binary(Records)),
-    ok = erldns_zone_cache:put_zone({<<"mesos">>, Sha, Records}).
+    ok = dcos_dns:push_zone(
+        <<"mesos">>,
+        [dcos_dns:dns_record(<<"master.mesos">>, {127, 0, 0, 1})]).
 
 generate_thisdcos_directory_zone() ->
-    Records = [
-        generate_soa_ns(<<"thisdcos.directory">>),
-        generate_thisdcos_directory_records(),
-        generate_thisdcos_directory_srv_records()
-    ],
-    Records0 = lists:flatten(Records),
-    Sha = crypto:hash(sha, term_to_binary(Records0)),
-    ok = erldns_zone_cache:put_zone({<<"thisdcos.directory">>, Sha, Records0}).
-
-generate_thisdcos_directory_records() ->
-    [
-        #dns_rr{
-            name = <<"commontest.thisdcos.directory">>,
-            type = ?DNS_TYPE_A,
-            ttl = 5,
-            data = #dns_rrdata_a{ip = {127, 0, 0, 1}}
-        },
-        generate_ns()
-    ].
-
-generate_thisdcos_directory_srv_records() ->
-    [
-        #dns_rr{
-            name = <<"_service._tcp.commontest.thisdcos.directory">>,
-            type = ?DNS_TYPE_SRV,
-            ttl = 5,
-            data = #dns_rrdata_srv{
-                priority = 0,
-                weight = 0,
-                port = 1024,
-                target = <<"commontest.thisdcos.directory">>
-            }
-        },
-        #dns_rr{
-            name = <<"_service._tcp.commontest.thisdcos.directory">>,
-            type = ?DNS_TYPE_SRV,
-            ttl = 5,
-            data = #dns_rrdata_srv{
-                priority = 0,
-                weight = 0,
-                port = 2048,
-                target = <<"commontest.thisdcos.directory">>
-            }
-        }
-    ].
-
-generate_soa_ns(Name) ->
-    #dns_rr{
-        name = Name,
-        type = ?DNS_TYPE_SOA,
-        ttl = 5,
-        data = #dns_rrdata_soa{
-            mname = <<"ns.spartan">>, %% Nameserver
-            rname = <<"support.mesosphere.com">>,
-            serial = 0,
-            refresh = 60,
-            retry = 180,
-            expire = 86400,
-            minimum = 1
-        }
-    }.
-
-generate_ns() ->
-    #dns_rr{
-        name = <<"spartan">>,
-        type = ?DNS_TYPE_NS,
-        ttl = 3600,
-        data = #dns_rrdata_ns{
-            dname = <<"ns.spartan">>
-        }
-    }.
-
+    ok = dcos_dns:push_zone(
+        <<"thisdcos.directory">>,
+        [
+            dcos_dns:dns_record(
+                <<"commontest.thisdcos.directory">>,
+                {127, 0, 0, 1}),
+            dcos_dns:srv_record(
+                <<"_service._tcp.commontest.thisdcos.directory">>,
+                {<<"commontest.thisdcos.directory">>, 1024}),
+            dcos_dns:srv_record(
+                <<"_service._tcp.commontest.thisdcos.directory">>,
+                {<<"commontest.thisdcos.directory">>, 2048})
+        ]).
 
 %% ===================================================================
 %% tests
@@ -288,7 +212,7 @@ http_records_test(_Config) ->
                                 <<"commontest.thisdcos.directory">>,
                                 <<"_service._tcp.commontest.thisdcos.directory">>])
         end, Records),
-    ?assertMatch(8, length(Records0)).
+    ?assertMatch(7, length(Records0)).
 
 %% @doc Assert if we can read newly added record
 dns_cache_test(_Config) ->
@@ -298,18 +222,9 @@ dns_cache_test(_Config) ->
     ?assertMatch({127, 0, 0, 1}, resolve(Name)).
 
 add_record(Name) ->
-    Records = [
-        generate_soa_ns(<<"thisdcos.directory">>),
-        #dns_rr{
-            name = list_to_binary(Name),
-            type = ?DNS_TYPE_A,
-            ttl = 5,
-            data = #dns_rrdata_a{ip = {127, 0, 0, 1}}
-        },
-        generate_ns()
-    ],
-    Sha = crypto:hash(sha, term_to_binary(Records)),
-    ok = erldns_zone_cache:put_zone({<<"thisdcos.directory">>, Sha, Records}).
+    dcos_dns:push_zone(
+        <<"thisdcos.directory">>,
+        [dcos_dns:dns_record(list_to_binary(Name), {127, 0, 0, 1})]).
 
 resolve(Name) ->
     {ok, DnsMsg} = inet_res:resolve(Name, in, a, resolver_options()),

@@ -1,7 +1,7 @@
 -module(dcos_dns_mesos_tests).
 
 -include_lib("eunit/include/eunit.hrl").
--include_lib("stdlib/include/ms_transform.hrl").
+-include_lib("dns/include/dns.hrl").
 -include_lib("erldns/include/erldns.hrl").
 -include("dcos_dns.hrl").
 
@@ -411,8 +411,7 @@ value(?LASHUP_KEY(ZoneName)) ->
 request_op(LKey = ?LASHUP_KEY(ZoneName), {update, Updates}) ->
     [{?RECORDS_FIELD, Records}] = lashup_kv:value(LKey),
     Records0 = apply_op(Records, Updates),
-    Sha = crypto:hash(sha, term_to_binary(Records0)),
-    erldns_zone_cache:put_zone({ZoneName, Sha, Records0}),
+    ok = dcos_dns:push_prepared_zone(ZoneName, Records0),
     {ok, value(LKey)}.
 
 apply_op(List, Updates) ->

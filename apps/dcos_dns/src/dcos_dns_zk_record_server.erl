@@ -18,8 +18,6 @@
 -define(REFRESH_MESSAGE,  refresh).
 
 -include("dcos_dns.hrl").
--include_lib("dns/include/dns_terms.hrl").
--include_lib("dns/include/dns_records.hrl").
 
 %% State record.
 -record(state, {}).
@@ -91,71 +89,20 @@ code_change(_OldVsn, State, _Extra) ->
 %% @private
 -spec update_zone(Zookeepers :: [inet:ip4_address()]) -> ok.
 update_zone([]) ->
-    Records = Records = [soa()] ++ ns_records(),
-    ok = push_records(Records);
+    ok = dcos_dns:push_zone(<<?TLD>>, []);
 update_zone(Zookeepers) ->
     RepeatCount = ceiling(?ZOOKEEPER_RECORDS / length(Zookeepers)),
     RepeatedZookeepers = lists:flatten(lists:duplicate(RepeatCount, Zookeepers)),
     ToCreate = lists:zip(lists:seq(1, ?ZOOKEEPER_RECORDS), lists:sublist(RepeatedZookeepers, ?ZOOKEEPER_RECORDS)),
-    Records = [soa()] ++ ns_records() ++ [generate_record(R) || R <- ToCreate],
-    ok = push_records(Records),
-    ok.
+    Records = [generate_record(R) || R <- ToCreate],
+    ok = dcos_dns:push_zone(<<?TLD>>, Records).
 
-push_records(Records) ->
-    Sha = crypto:hash(sha, term_to_binary(Records)),
-    ok = erldns_zone_cache:put_zone({<<?TLD>>, Sha, Records}),
-    ok.
-
-%% @private
-soa() ->
-    #dns_rr{
-        name = list_to_binary(?TLD),
-        type = ?DNS_TYPE_SOA,
-        ttl = 3600,
-        data = #dns_rrdata_soa{
-            mname = ns_name(),
-            rname = <<"support.mesosphere.com">>,
-            serial = 1,
-            refresh = 600,
-            retry = 300,
-            expire = 86400,
-            minimum = 1
-        }
-    }.
-
-ns_records() ->
-    [
-        #dns_rr{
-            name = ns_name(),
-            type = ?DNS_TYPE_A,
-            ttl = 3600,
-            %% The IANA Blackhole server
-            data = #dns_rrdata_a{ip = {192, 175, 48, 6}}
-        },
-        #dns_rr{
-            name = list_to_binary(?TLD),
-            type = ?DNS_TYPE_NS,
-            ttl = 3600,
-            data = #dns_rrdata_ns{
-                dname = ns_name()
-            }
-        }
-    ]
-    .
-
-ns_name() ->
-    list_to_binary(string:join(["ns", ?TLD], ".")).
 
 %% @private
 -spec(generate_record({N :: non_neg_integer(), IPAddress :: inet:ip4_address()}) -> dns:rr()).
 generate_record({N, IpAddress}) ->
     NewHostname = "zk-" ++ integer_to_list(N) ++ "." ++ ?TLD,
-    #dns_rr{
-        name = list_to_binary(NewHostname),
-        type = ?DNS_TYPE_A,
-        ttl = 5,
-        data = #dns_rrdata_a{ip = IpAddress}
-    }.
+    dcos_dns:dns_record(list_to_binary(NewHostname), IpAddress).
 
 %% Borrowed from: https://erlangcentral.org/wiki/index.php?title=Floating_Point_Rounding
 %% @private

@@ -1,6 +1,8 @@
 -module(dcos_dns).
 
+-include("dcos_dns.hrl").
 -include_lib("dns/include/dns_records.hrl").
+-include_lib("erldns/include/erldns.hrl").
 
 %% API
 -export([
@@ -9,6 +11,18 @@
     resolve/2,
     resolve/3,
     get_leader_addr/0
+]).
+
+%% DNS Zone functions
+-export([
+    ns_record/1,
+    soa_record/1,
+    dns_record/2,
+    dns_records/2,
+    srv_record/2,
+    cname_record/2,
+    push_zone/2,
+    push_prepared_zone/2
 ]).
 
 -spec family(inet:ip_address()) -> inet | inet6.
@@ -78,3 +92,109 @@ imp_resolve(DNSName, Family, Timeout) ->
         {error, Error} ->
             {error, Error}
     end.
+
+%%%===================================================================
+%%% DNS Zone functions
+%%%===================================================================
+
+-spec(soa_record(dns:dname()) -> dns:dns_rr()).
+soa_record(Name) ->
+    #dns_rr{
+        name = Name,
+        type = ?DNS_TYPE_SOA,
+        ttl = 5,
+        data = #dns_rrdata_soa{
+            mname = <<"ns.spartan">>, %% Nameserver
+            rname = <<"support.mesosphere.com">>,
+            serial = 1,
+            refresh = 60,
+            retry = 180,
+            expire = 86400,
+            minimum = 1
+        }
+    }.
+
+-spec(ns_record(dns:dname()) -> dns:dns_rr()).
+ns_record(Name) ->
+    #dns_rr{
+        name = Name,
+        type = ?DNS_TYPE_NS,
+        ttl = 3600,
+        data = #dns_rrdata_ns{
+            dname = <<"ns.spartan">>
+        }
+    }.
+
+-spec(dns_records(dns:dname(), [inet:ip_address()]) -> [dns:dns_rr()]).
+dns_records(DName, IPs) ->
+    [dns_record(DName, IP) || IP <- IPs].
+
+-spec(dns_record(dns:dname(), inet:ip_address()) -> dns:dns_rr()).
+dns_record(DName, IP) ->
+    {Type, Data} =
+        case dcos_dns:family(IP) of
+            inet -> {?DNS_TYPE_A, #dns_rrdata_a{ip = IP}};
+            inet6 -> {?DNS_TYPE_AAAA, #dns_rrdata_aaaa{ip = IP}}
+        end,
+    #dns_rr{name = DName, type = Type, ttl = ?DCOS_DNS_TTL, data = Data}.
+
+-spec(srv_record(dns:dname(), {dns:dname(), inet:port_number()}) -> dns:rr()).
+srv_record(DName, {Host, Port}) ->
+    #dns_rr{
+        name = DName,
+        type = ?DNS_TYPE_SRV,
+        ttl = ?DCOS_DNS_TTL,
+        data = #dns_rrdata_srv{
+            target = Host,
+            port = Port,
+            weight = 1,
+            priority = 1
+        }
+    }.
+
+-spec(cname_record(dns:dname(), dns:dname()) -> dns:dns_rr()).
+cname_record(CName, Name) ->
+    #dns_rr{
+        name = CName,
+        type = ?DNS_TYPE_CNAME,
+        ttl = 5,
+        data = #dns_rrdata_cname{dname=Name}
+    }.
+
+-spec(push_zone(dns:dname(), [dns:dns_rr()]) ->
+    ok | {error, Reason :: term()}).
+push_zone(ZoneName, Records) ->
+    Records0 = [ns_record(ZoneName), soa_record(ZoneName) | Records],
+    push_prepared_zone(ZoneName, Records0).
+
+-spec(push_prepared_zone(dns:dname(), [dns:dns_rr()]) ->
+    ok | {error, Reason :: term()}).
+push_prepared_zone(ZoneName, Records) ->
+    try erldns_zone_cache:get_zone_with_records(ZoneName) of
+        {ok, #zone{records=Records}} ->
+            ok;
+        _Other ->
+            Hash = crypto:hash(sha, term_to_binary(Records)),
+            case erldns_zone_cache:put_zone({ZoneName, Hash, Records}) of
+                ok ->
+                    lager:notice(
+                        "DNS Zone ~s was updated (~p records, sha: ~s)",
+                        [ZoneName, length(Records), bin_to_hex(Hash)]),
+                    ok;
+                {error, Error} ->
+                    lager:error(
+                        "Failed to push DNS Zone \"~s\": ~p",
+                        [ZoneName, Error]),
+                    {error, Error}
+            end
+    catch error:Error ->
+        lager:error(
+            "Failed to push DNS Zone \"~s\": ~p",
+            [ZoneName, Error]),
+        {error, Error}
+    end.
+
+-spec(bin_to_hex(binary()) -> binary()).
+bin_to_hex(Bin) ->
+    Bin0 = << <<(integer_to_binary(N, 16))/binary>> || <<N:4>> <= Bin >>,
+    cowboy_bstr:to_lower(Bin0).
