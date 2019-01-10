@@ -2,7 +2,7 @@
 -name ${NAME}
 
 ## Cookie for distributed erlang
--setcookie minuteman
+-setcookie ${COOKIE}
 
 ## Enable kernel poll and a few async threads
 +K true
