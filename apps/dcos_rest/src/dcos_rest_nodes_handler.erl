@@ -30,8 +30,8 @@ get_metadata(Req, State) ->
               []}], Req),
     Data = dcos_net_node:get_metadata(Opts),
     Result =
-        maps:fold(fun(K, V, Acc) ->
-            [get_node(K, V) | Acc]
+        maps:fold(fun (K, V, Acc) ->
+            [format_node(K, V) | Acc]
         end, [], Data),
     {jiffy:encode(Result), Req, State}.
 
@@ -39,17 +39,16 @@ get_metadata(Req, State) ->
 %%% Internal functions
 %%%===================================================================
 
--spec(get_node(inet:ip4_address(), dcos_net_node:metadata()) ->
+-spec(format_node(inet:ip4_address(), dcos_net_node:metadata()) ->
     jiffy:json_object()).
-get_node(PrivateIP, Metadata) ->
-    #{public_ips := PublicIPs,
-      hostname := Hostname,
-      updated := Updated} = Metadata,
-
-    #{private_ip => ntoa(PrivateIP),
-      public_ips => [ntoa(IP) || IP <- PublicIPs],
-      hostname => Hostname,
-      updated => iso8601(Updated)}.
+format_node(PrivateIP, Metadata) ->
+    Updated = maps:get(updated, Metadata),
+    PublicIPs = maps:get(public_ips, Metadata),
+    Metadata#{
+        private_ip => ntoa(PrivateIP),
+        public_ips => [ntoa(IP) || IP <- PublicIPs],
+        updated => iso8601(Updated)
+    }.
 
 -spec(iso8601(non_neg_integer()) -> binary()).
 iso8601(Timestamp) ->

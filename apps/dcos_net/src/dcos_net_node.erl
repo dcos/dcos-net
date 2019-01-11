@@ -17,7 +17,8 @@
 -type metadata() :: #{
     public_ips => [inet:ip_address()],
     hostname => binary(),
-    updated => non_neg_integer()
+    updated => non_neg_integer(),
+    distance => non_neg_integer()
 }.
 
 -record(state, {
@@ -164,8 +165,16 @@ get_hostname() ->
 
 -spec(dump([{term(), term()}]) -> #{inet:ip4_address() => metadata()}).
 dump(List) ->
+    Tree = lashup_gm_route:get_tree(node()),
     List0 = [{IP, Info} || {{IP, riak_dt_lwwreg}, Info} <- List, is_tuple(IP)],
-    maps:from_list(List0).
+    maps:map(fun (IP, Metadata) ->
+        case distance(Tree, IP) of
+            infinity ->
+                Metadata;
+            Distance ->
+                Metadata#{distance => Distance}
+        end
+    end, maps:from_list(List0)).
 
 %%%===================================================================
 %%% Force dump functions
@@ -258,3 +267,12 @@ reachable_nodes() ->
             {error, _Error} -> []
         end
     end, lashup_gm_route:reachable_nodes(Tree)).
+
+-spec(distance(false | {tree, lashup_gm_route:tree()}, inet:ip4_address()) ->
+    non_neg_integer() | infinity).
+distance(false, _IP) ->
+    false;
+distance({tree, Tree}, IP) ->
+    [NodeName, _] = string:split(atom_to_list(node()), "@"),
+    Node = list_to_atom(NodeName ++ "@" ++ inet:ntoa(IP)),
+    lashup_gm_route:distance(Node, Tree).
