@@ -126,7 +126,7 @@ update_node_info() ->
     {ok, _Info} = lashup_kv:request_op(
         ?LASHUP_KEY,
         {update, [{update, {Key, riak_dt_lwwreg}, Op}]}),
-    ok.
+    ok = push_dns_records(Key, Value).
 
 -spec(get_public_ips() -> [inet:ip_address()]).
 get_public_ips() ->
@@ -258,3 +258,16 @@ reachable_nodes() ->
             {error, _Error} -> []
         end
     end, lashup_gm_route:reachable_nodes(Tree)).
+
+%%%===================================================================
+%%% DNS functions
+%%%===================================================================
+
+-spec(push_dns_records(inet:ip4_address(), metadata()) -> ok).
+push_dns_records(PrivateIP, #{public_ips := PublicIPs}) ->
+    ZoneName = <<"thisnode.thisdcos.directory">>,
+    Records =
+        [ dcos_dns:dns_record(ZoneName, PrivateIP)
+        | dcos_dns:dns_records(<<"public.", ZoneName/binary>>, PublicIPs) ],
+    _Result = dcos_dns:push_zone(ZoneName, Records),
+    ok.
