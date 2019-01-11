@@ -11,6 +11,7 @@
     ranch,
     inets,
     ssl,
+    erldns,
     telemetry
    ]},
   {env,[]},
