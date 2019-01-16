@@ -7,7 +7,6 @@
 %% API
 -export([
     start_link/0,
-    dns_records/2,
     push_zone/2
 ]).
 
@@ -152,7 +151,7 @@ task_records(TaskId, Task) ->
 task_agentip(_TaskId, #{name := Name,
         framework := Fwrk, agent_ip := AgentIP}) ->
     DName = format_name([Name, Fwrk, <<"agentip">>], ?DCOS_DOMAIN),
-    dns_records(DName, [AgentIP]);
+    dcos_dns:dns_records(DName, [AgentIP]);
 task_agentip(TaskId, Task) ->
     lager:warning("Unexpected task ~p with ~p", [TaskId, Task]),
     [].
@@ -161,7 +160,7 @@ task_agentip(TaskId, Task) ->
 task_containerip(_TaskId, #{name := Name,
         framework := Fwrk, task_ip := TaskIPs}) ->
     DName = format_name([Name, Fwrk, <<"containerip">>], ?DCOS_DOMAIN),
-    dns_records(DName, TaskIPs);
+    dcos_dns:dns_records(DName, TaskIPs);
 task_containerip(_TaskId, _Task) ->
     [].
 
@@ -171,7 +170,7 @@ task_autoip(_TaskId, #{name := Name, framework := Fwrk,
     %% if task.port_mappings then agent_ip else task_ip
     DName = format_name([Name, Fwrk, <<"autoip">>], ?DCOS_DOMAIN),
     Ports = maps:get(ports, Task, []),
-    dns_records(DName,
+    dcos_dns:dns_records(DName,
         case lists:any(fun is_port_mapping/1, Ports) of
             true -> [AgentIP];
             false -> TaskIPs
@@ -180,7 +179,7 @@ task_autoip(_TaskId, #{name := Name, framework := Fwrk,
 task_autoip(_TaskId, #{name := Name,
         framework := Fwrk, agent_ip := AgentIP}) ->
     DName = format_name([Name, Fwrk, <<"autoip">>], ?DCOS_DOMAIN),
-    dns_records(DName, [AgentIP]);
+    dcos_dns:dns_records(DName, [AgentIP]);
 task_autoip(TaskId, Task) ->
     lager:warning("Unexpected task ~p with ~p", [TaskId, Task]),
     [].
@@ -238,7 +237,7 @@ handle_masters(#state{masters=MRRs}=State) ->
 -spec(master_records(dns:dname()) -> [dns:dns_rr()]).
 master_records(ZoneName) ->
     Masters = [IP || {IP, _} <- dcos_dns_config:mesos_resolvers()],
-    dns_records(<<"master.", ZoneName/binary>>, Masters).
+    dcos_dns:dns_records(<<"master.", ZoneName/binary>>, Masters).
 
 -spec(leader_records(dns:dname()) -> dns:dns_rr()).
 leader_records(ZoneName) ->
@@ -246,7 +245,7 @@ leader_records(ZoneName) ->
     % operator API works only on a leader mesos,
     % so this node is the leader node
     IP = dcos_net_dist:nodeip(),
-    dns_record(<<"leader.", ZoneName/binary>>, IP).
+    dcos_dns:dns_record(<<"leader.", ZoneName/binary>>, IP).
 
 -spec(start_masters_timer() -> reference()).
 start_masters_timer() ->
@@ -265,23 +264,11 @@ push_tasks(Tasks) ->
     Records0 =
         lists:flatten([
             Records,
-            zone_records(ZoneName),
+            dcos_dns:ns_record(ZoneName),
+            dcos_dns:soa_record(ZoneName),
             leader_records(ZoneName)
         ]),
     push_zone(ZoneName, Records0).
-
--spec(dns_records(dns:dname(), [inet:ip_address()]) -> [dns:dns_rr()]).
-dns_records(DName, IPs) ->
-    [dns_record(DName, IP) || IP <- IPs].
-
--spec(dns_record(dns:dname(), inet:ip_address()) -> dns:dns_rr()).
-dns_record(DName, IP) ->
-    {Type, Data} =
-        case dcos_dns:family(IP) of
-            inet -> {?DNS_TYPE_A, #dns_rrdata_a{ip = IP}};
-            inet6 -> {?DNS_TYPE_AAAA, #dns_rrdata_aaaa{ip = IP}}
-        end,
-    #dns_rr{name = DName, type = Type, ttl = ?DCOS_DNS_TTL, data = Data}.
 
 -spec(format_name([binary()], binary()) -> binary()).
 format_name(ListOfNames, Postfix) ->
@@ -335,33 +322,6 @@ push_ops(ZoneName, Ops) ->
     case lashup_kv:request_op(Key, {update, Updates}) of
         {ok, _} -> ok
     end.
-
--spec(zone_records(dns:dname()) -> [dns:dns_rr()]).
-zone_records(ZoneName) ->
-    [
-        #dns_rr{
-            name = ZoneName,
-            type = ?DNS_TYPE_SOA,
-            ttl = 3600,
-            data = #dns_rrdata_soa{
-                mname = <<"ns.spartan">>,
-                rname = <<"support.mesosphere.com">>,
-                serial = 1,
-                refresh = 60,
-                retry = 180,
-                expire = 86400,
-                minimum = 1
-            }
-        },
-        #dns_rr{
-            name = ZoneName,
-            type = ?DNS_TYPE_NS,
-            ttl = 3600,
-            data = #dns_rrdata_ns{
-                dname = <<"ns.spartan">>
-            }
-        }
-    ].
 
 -spec(handle_push_ops([riak_dt_orswot:orswot_op()], state()) -> state()).
 handle_push_ops([], State) ->

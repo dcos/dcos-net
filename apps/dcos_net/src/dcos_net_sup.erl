@@ -12,5 +12,6 @@ init([]) ->
     MChildren = [?CHILD(dcos_net_mesos_listener) || IsMaster],
     {ok, {#{intensity => 10000, period => 1}, [
         ?CHILD(dcos_net_masters),
-        ?CHILD(dcos_net_killer) | MChildren
+        ?CHILD(dcos_net_killer),
+        ?CHILD(dcos_net_node) | MChildren
     ]}}.
