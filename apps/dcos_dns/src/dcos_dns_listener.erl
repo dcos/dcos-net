@@ -85,35 +85,18 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-zone(ZoneName, LashupValue) ->
-    {_, Records} = lists:keyfind(?RECORDS_FIELD, 1, LashupValue),
-    Sha = crypto:hash(sha, term_to_binary(Records)),
-    {ZoneName, Sha, Records}.
-
 handle_event(#{key := ?LASHUP_KEY(ZoneName), value := Value}, State) ->
-    Zone = zone(ZoneName, Value),
-    ok = push_zone(Zone),
+    {?RECORDS_FIELD, Records} = lists:keyfind(?RECORDS_FIELD, 1, Value),
+    ok = push_zone(ZoneName, Records),
     State.
 
-push_zone(Zone = {ZoneName, Sha, Records}) ->
-    Size = length(Records),
-    ok = erldns_zone_cache:put_zone(Zone),
-    lager:notice("DNS Zone ~s was updated (~p records, sha: ~s)",
-                 [ZoneName, Size, bin_to_hex(Sha)]),
-    case sign_zone(Zone) of
-        {no_key, _Zone} -> ok;
-        {ok, SignedZone} ->
-            ok = erldns_zone_cache:put_zone(SignedZone)
-    end.
-
-sign_zone(Zone = {ZoneName, _ZoneSha, Records}) ->
+push_zone(ZoneName, Records) ->
+    ok = dcos_dns:push_prepared_zone(ZoneName, Records),
     case dcos_dns_key_mgr:keys() of
-        false ->
-            {no_key, Zone};
+        false -> ok;
         #{public_key := PublicKey} ->
-            {ZoneName0, Records0} = convert_zone(PublicKey, ZoneName, Records),
-            Sha = crypto:hash(sha, term_to_binary(Records0)),
-            {ok, {ZoneName0, Sha, Records0}}
+            {SignedZoneName, SignedRecords} = convert_zone(PublicKey, ZoneName, Records),
+            ok = dcos_dns:push_prepared_zone(SignedZoneName, SignedRecords)
     end.
 
 convert_zone(PublicKey, ZoneName0, Records0) ->
@@ -150,11 +133,6 @@ convert_record(Record0 = #dns_rr{name = Name0}, Postfix, NewPostfix) ->
     Name1 = convert_name(Name0, Postfix, NewPostfix),
     Record1 = Record0#dns_rr{name = Name1},
     {true, Record1}.
-
--spec(bin_to_hex(binary()) -> binary()).
-bin_to_hex(Bin) ->
-    Bin0 = << <<(integer_to_binary(N, 16))/binary>> || <<N:4>> <= Bin >>,
-    cowboy_bstr:to_lower(Bin0).
 
 -ifdef(TEST).
 zone_convert_test() ->

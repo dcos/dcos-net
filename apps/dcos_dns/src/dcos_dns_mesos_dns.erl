@@ -2,7 +2,6 @@
 -behavior(gen_server).
 
 -include("dcos_dns.hrl").
--include_lib("dns/include/dns.hrl").
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -111,7 +110,9 @@ handle_data(Data, State) ->
     MesosDNSDomain = maps:get(<<"Domain">>, Data, <<"mesos">>),
     MesosDNSRecords = maps:get(<<"Records">>, Data, #{}),
 
-    Records = zone_records(?MESOS_DOMAIN),
+    Records =
+        [ dcos_dns:soa_record(?MESOS_DOMAIN),
+          dcos_dns:ns_record(?MESOS_DOMAIN) ],
 
     ARecords = maps:get(<<"As">>, MesosDNSRecords, #{}),
     Records0 =
@@ -160,7 +161,7 @@ parse_ip(IPBin) ->
 dns_records(DName, IPs, MesosDNSDomain) ->
     IPs0 = parse_ips(IPs),
     DName0 = dname(DName, MesosDNSDomain),
-    dcos_dns_mesos:dns_records(DName0, IPs0).
+    dcos_dns:dns_records(DName0, IPs0).
 
 -spec(srv_records(dns:dname(), HPs, Domain) -> [dns:dns_rr()]
     when HPs :: [binary()], Domain :: binary()).
@@ -170,55 +171,10 @@ srv_records(DName, HPs, MesosDNSDomain) ->
         [Host, Port] = binary:split(HP, <<":">>),
         Host0 = dname(Host, MesosDNSDomain),
         Port0 = binary_to_integer(Port),
-        srv_record(DName0, Host0, Port0)
+        dcos_dns:srv_record(DName0, {Host0, Port0})
     end, HPs).
 
 -spec(push_zone([dns:dns_rr()]) ->
     {ok, New :: [dns:dns_rr()], Old :: [dns:dns_rr()]}).
 push_zone(Records) ->
     dcos_dns_mesos:push_zone(?MESOS_DOMAIN, Records).
-
-%%%===================================================================
-%%% DNS functions
-%%%===================================================================
-
--spec(srv_record(dns:dname(), dns:dname(), inet:port_number()) -> dns:rr()).
-srv_record(DName, Host, Port) ->
-    #dns_rr{
-        name = DName,
-        type = ?DNS_TYPE_SRV,
-        ttl = ?DCOS_DNS_TTL,
-        data = #dns_rrdata_srv{
-            target = Host,
-            port = Port,
-            weight = 1,
-            priority = 1
-        }
-    }.
-
--spec(zone_records(dns:dname()) -> [dns:dns_rr()]).
-zone_records(ZoneName) ->
-    [
-        #dns_rr{
-            name = ZoneName,
-            type = ?DNS_TYPE_SOA,
-            ttl = 3600,
-            data = #dns_rrdata_soa{
-                mname = <<"ns.spartan">>,
-                rname = <<"support.mesosphere.com">>,
-                serial = 1,
-                refresh = 60,
-                retry = 180,
-                expire = 86400,
-                minimum = 1
-            }
-        },
-        #dns_rr{
-            name = ZoneName,
-            type = ?DNS_TYPE_NS,
-            ttl = 3600,
-            data = #dns_rrdata_ns{
-                dname = <<"ns.spartan">>
-            }
-        }
-    ].
