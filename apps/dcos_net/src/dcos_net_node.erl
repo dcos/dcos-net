@@ -122,11 +122,31 @@ update_node_info() ->
         hostname => get_hostname(),
         updated => Updated
     },
-    Op = {assign, Value, Updated},
+    ok = update_node_info(Key, Value),
+    ok = push_dns_records(Key, Value).
+
+-spec(update_node_info(inet:ip4_address(), metadata()) -> ok).
+update_node_info(Key, Value) ->
+    OldList = lashup_kv:value(?LASHUP_KEY),
+
+    LKey = {Key, riak_dt_lwwreg},
+    Op = {assign, Value, maps:get(updated, Value)},
     {ok, _Info} = lashup_kv:request_op(
         ?LASHUP_KEY,
-        {update, [{update, {Key, riak_dt_lwwreg}, Op}]}),
-    ok = push_dns_records(Key, Value).
+        {update, [{update, LKey, Op}]}),
+
+    case lists:keyfind(LKey, 1, OldList) of
+        {LKey, OldValue} ->
+            OldValue0 = maps:remove(updated, OldValue),
+            case maps:remove(updated, Value) of
+                OldValue0 ->
+                    ok;
+                _Value0 ->
+                    ok = lager:notice("Node metadata was updated: ~p", [Value])
+            end;
+        false ->
+            ok = lager:notice("Node metadata was added: ~p", [Value])
+    end.
 
 -spec(get_public_ips() -> [inet:ip_address()]).
 get_public_ips() ->
