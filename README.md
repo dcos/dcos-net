@@ -52,8 +52,7 @@ You can build, check, and test dcos-net in a development image using
 All makefile targets with `docker-` prefix build development image with all
 dependencies and run `rebar3` in that image on the host directory.
 
-To check your dcos-net build on DC/OS you can use DC/OS E2E a.k.a.
-[dcos-docker CLI](http://dcos-e2e.readthedocs.io/en/latest/cli.html). In order to do so please repeat the following steps:
+To check your dcos-net build on DC/OS you can use [minidcos](https://dcos-e2e-cli.readthedocs.io/en/latest/). In order to do so please repeat the following steps:
 
 1. Download a DC/OS build:
 
