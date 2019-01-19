@@ -138,10 +138,10 @@ DCOS_DOCKER_NODE ?= master_0
 DCOS_DOCKER_WEB_PORT ?= 443
 
 dcos-docker-create:
-	@ dcos-docker inspect \
+	@ minidcos docker inspect \
 	      --cluster-id $(DCOS_DOCKER_CLUSTER_ID) \
 	      > /dev/null 2> /dev/null || \
-	( dcos-docker create dcos_generate_config.sh \
+	( minidcos docker create dcos_generate_config.sh \
 	      --transport $(DCOS_DOCKER_TRANSPORT) \
 	      --masters $(DCOS_DOCKER_MASTERS) \
 	      --agents $(DCOS_DOCKER_AGENTS) \
@@ -149,7 +149,7 @@ dcos-docker-create:
 	      --cluster-id $(DCOS_DOCKER_CLUSTER_ID) \
 	      --custom-volume $(DCOS_DOCKER_CUSTOM_VOLUME) \
 	      $(DCOS_DOCKER_OPTS) && \
-	  dcos-docker wait \
+	  minidcos docker wait \
 	      --transport $(DCOS_DOCKER_TRANSPORT) \
 	      --cluster-id $(DCOS_DOCKER_CLUSTER_ID) \
 	      --skip-http-checks )
@@ -159,7 +159,7 @@ dcos-docker-destroy:
 	    --filter label=dcos-e2e-web-id=$(DCOS_DOCKER_CLUSTER_ID) \
 	    --format '{{.ID}}' \
 	| xargs docker kill > /dev/null
-	@ dcos-docker destroy --cluster-id $(DCOS_DOCKER_CLUSTER_ID)
+	@ minidcos docker destroy --cluster-id $(DCOS_DOCKER_CLUSTER_ID)
 
 dcos-docker-web: dcos-docker-create
 	@ docker ps \
@@ -170,13 +170,13 @@ dcos-docker-web: dcos-docker-create
 	@ docker run \
 	    --rm --detach \
 	    --publish $(DCOS_DOCKER_WEB_PORT):$(DCOS_DOCKER_WEB_PORT) \
-	    --name $(shell dcos-docker inspect --cluster-id $(DCOS_DOCKER_CLUSTER_ID) | \
+	    --name $(shell minidcos docker inspect --cluster-id $(DCOS_DOCKER_CLUSTER_ID) | \
 	                   jq -r .Nodes.masters[0].docker_container_name | \
 	                   sed -re 's/-master-0/-web-$(DCOS_DOCKER_WEB_PORT)/') \
 	    --label dcos-e2e-web-id=$(DCOS_DOCKER_CLUSTER_ID) \
 	    --label dcos-e2e-web-port=$(DCOS_DOCKER_WEB_PORT) \
 	    alpine/socat TCP4-LISTEN:$(DCOS_DOCKER_WEB_PORT),bind=0.0.0.0,reuseaddr,fork,su=nobody \
-	                 TCP4:$(shell dcos-docker inspect --cluster-id $(DCOS_DOCKER_CLUSTER_ID) | \
+	                 TCP4:$(shell minidcos docker inspect --cluster-id $(DCOS_DOCKER_CLUSTER_ID) | \
 	                              jq '.Nodes | .[] | .[]' | \
 	                              jq 'select (.e2e_reference == "$(DCOS_DOCKER_NODE)")' | \
 	                              jq -r .ip_address \
@@ -185,14 +185,14 @@ dcos-docker-web: dcos-docker-create
 	open https://localhost:$(DCOS_DOCKER_WEB_PORT)/
 
 dcos-docker-shell: dcos-docker-create
-	@ dcos-docker run \
+	@ minidcos docker run \
 	    --transport $(DCOS_DOCKER_TRANSPORT) \
 	    --cluster-id $(DCOS_DOCKER_CLUSTER_ID) \
 	    --node $(DCOS_DOCKER_NODE) \
 	    -- 'cd $(BASE_DIR) && exec /opt/mesosphere/bin/dcos-shell'
 
 dcos-docker-dev: dcos-docker-create
-	@ dcos-docker run \
+	@ minidcos docker run \
 	    --transport $(DCOS_DOCKER_TRANSPORT) \
 	    --cluster-id $(DCOS_DOCKER_CLUSTER_ID) \
 	    --node $(DCOS_DOCKER_NODE) \
