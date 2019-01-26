@@ -24,7 +24,9 @@ setup_cowboy() ->
             {"/v1/hosts/:host", dcos_rest_dns_handler, [hosts]},
             {"/v1/services/:service", dcos_rest_dns_handler, [services]},
             {"/v1/enumerate", dcos_rest_dns_handler, [enumerate]},
-            {"/v1/records", dcos_rest_dns_handler, [records]}
+            {"/v1/records", dcos_rest_dns_handler, [records]},
+
+            {"/v1/metrics/[:registry]", dcos_rest_metrics_handler, []}
         ]}
     ]),
     {ok, Ip} = application:get_env(dcos_rest, ip),
