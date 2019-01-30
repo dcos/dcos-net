@@ -97,3 +97,5 @@ jobs:
               codecov -X gcov -f _build/test/covertool/dcos_l4lb.covertool.xml
               codecov -X gcov -f _build/test/covertool/dcos_overlay.covertool.xml
               codecov -X gcov -f _build/test/covertool/dcos_rest.covertool.xml
+      - store_artifacts:
+          path: ~/dcos-net/_build/test/logs
