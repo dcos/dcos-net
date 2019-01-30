@@ -60,6 +60,9 @@ jobs:
               sudo apt-get install -y --no-install-recommends \
                   iproute2 dnsutils ipvsadm
       - run:
+          name: Starting EPMD
+          command: epmd -daemon
+      - run:
           name: Checking eunit tests
           command: ./rebar3 eunit -v
       - run:
@@ -94,3 +97,5 @@ jobs:
               codecov -X gcov -f _build/test/covertool/dcos_l4lb.covertool.xml
               codecov -X gcov -f _build/test/covertool/dcos_overlay.covertool.xml
               codecov -X gcov -f _build/test/covertool/dcos_rest.covertool.xml
+      - store_artifacts:
+          path: ~/dcos-net/_build/test/logs
