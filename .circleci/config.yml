@@ -60,6 +60,9 @@ jobs:
               sudo apt-get install -y --no-install-recommends \
                   iproute2 dnsutils ipvsadm
       - run:
+          name: Starting EPMD
+          command: epmd -daemon
+      - run:
           name: Checking eunit tests
           command: ./rebar3 eunit -v
       - run:
