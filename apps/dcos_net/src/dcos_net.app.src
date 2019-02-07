@@ -1,23 +1,24 @@
-{application, dcos_net,
- [{description, "An OTP application"},
-  {vsn, "0.1.0"},
-  {registered, []},
-  {mod, {dcos_net_app, []}},
-  {applications,
-   [kernel,
-    stdlib,
-    lashup,
-    lager,
-    ranch,
-    inets,
-    ssl,
-    erldns,
-    telemetry
-   ]},
-  {env,[]},
-  {modules, []},
+{application, dcos_net, [
+    {description, "An OTP application"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {mod, {dcos_net_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        lashup,
+        lager,
+        ranch,
+        inets,
+        ssl,
+        erldns,
+        telemetry,
+        prometheus
+    ]},
+    {env,[]},
+    {modules, []},
 
-  {contributors, []},
-  {licenses, []},
-  {links, []}
- ]}.
+    {contributors, []},
+    {licenses, []},
+    {links, []}
+]}.

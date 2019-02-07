@@ -10,7 +10,8 @@
         jsx,
         cowboy,
         lager,
-        lashup
+        lashup,
+        prometheus
     ]},
     {env,[
         {ip, {127, 0, 0, 1}},

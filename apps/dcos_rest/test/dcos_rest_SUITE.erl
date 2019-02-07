@@ -1,5 +1,7 @@
 -module(dcos_rest_SUITE).
 
+-include_lib("eunit/include/eunit.hrl").
+
 -export([
     all/0,
     init_per_suite/1, end_per_suite/1,
@@ -54,14 +56,16 @@ json_ok(_Config) ->
 skip(_Config) ->
     lists:foreach(fun (Path) ->
         ct:pal("checking ~s", [Path]),
-        {ok, {_S, _H, _B}} =
+        {ok, {{_V, Code, _S}, _H, _B}} =
             httpc:request(
                 get, {"http://localhost:62080" ++ Path, []},
-                [], [{body_format, binary}])
+                [], [{body_format, binary}]),
+        ?assertNotMatch(Code when Code > 404 andalso Code < 501, Code)
     end, [
         "/lashup/key",
         "/v1/config",
         "/v1/hosts/foobar",
         "/v1/services/bazqux",
-        "/v1/enumerate"
+        "/v1/enumerate",
+        "/v1/metrics"
     ]).
