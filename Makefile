@@ -162,9 +162,9 @@ dcos-docker-destroy:
 	@ minidcos docker destroy --cluster-id $(DCOS_DOCKER_CLUSTER_ID)
 
 dcos-docker-web: dcos-docker-create
-	@ docker ps \
-	    --filter label=dcos-e2e-web-id=$(DCOS_DOCKER_CLUSTER_ID) \
-	    --filter label=dcos-e2e-web-port=$(DCOS_DOCKER_WEB_PORT) \
+	-@ docker ps \
+	    --filter label=minidcos-web-id=$(DCOS_DOCKER_CLUSTER_ID) \
+	    --filter label=minidcos-web-port=$(DCOS_DOCKER_WEB_PORT) \
 	    --format '{{.ID}}' \
 	| xargs docker kill > /dev/null
 	@ docker run \
@@ -173,8 +173,8 @@ dcos-docker-web: dcos-docker-create
 	    --name $(shell minidcos docker inspect --cluster-id $(DCOS_DOCKER_CLUSTER_ID) | \
 	                   jq -r .Nodes.masters[0].docker_container_name | \
 	                   sed -re 's/-master-0/-web-$(DCOS_DOCKER_WEB_PORT)/') \
-	    --label dcos-e2e-web-id=$(DCOS_DOCKER_CLUSTER_ID) \
-	    --label dcos-e2e-web-port=$(DCOS_DOCKER_WEB_PORT) \
+	    --label minidcos-web-id=$(DCOS_DOCKER_CLUSTER_ID) \
+	    --label minidcos-web-port=$(DCOS_DOCKER_WEB_PORT) \
 	    alpine/socat TCP4-LISTEN:$(DCOS_DOCKER_WEB_PORT),bind=0.0.0.0,reuseaddr,fork,su=nobody \
 	                 TCP4:$(shell minidcos docker inspect --cluster-id $(DCOS_DOCKER_CLUSTER_ID) | \
 	                              jq '.Nodes | .[] | .[]' | \
