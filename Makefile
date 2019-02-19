@@ -125,76 +125,76 @@ dev: dev-install dev-stop
 	  /opt/mesosphere/bin/dcos-net-env console
 
 ##
-## DC/OS E2E
+## MINI DC/OS
 ##
 
-DCOS_DOCKER_TRANSPORT ?= docker-exec
-DCOS_DOCKER_CUSTOM_VOLUME ?= "$(BASE_DIR):$(BASE_DIR):rw"
-DCOS_DOCKER_CLUSTER_ID ?= default
-DCOS_DOCKER_MASTERS ?= 1
-DCOS_DOCKER_AGENTS ?= 1
-DCOS_DOCKER_PUBLIC_AGENTS ?= 0
-DCOS_DOCKER_NODE ?= master_0
-DCOS_DOCKER_WEB_PORT ?= 443
+MINIDCOS_TRANSPORT ?= docker-exec
+MINIDCOS_CUSTOM_VOLUME ?= "$(BASE_DIR):$(BASE_DIR):rw"
+MINIDCOS_CLUSTER_ID ?= default
+MINIDCOS_MASTERS ?= 1
+MINIDCOS_AGENTS ?= 1
+MINIDCOS_PUBLIC_AGENTS ?= 0
+MINIDCOS_NODE ?= master_0
+MINIDCOS_WEB_PORT ?= 443
 
-dcos-docker-create:
+minidcos-create:
 	@ minidcos docker inspect \
-	      --cluster-id $(DCOS_DOCKER_CLUSTER_ID) \
+	      --cluster-id $(MINIDCOS_CLUSTER_ID) \
 	      > /dev/null 2> /dev/null || \
 	( minidcos docker create dcos_generate_config.sh \
-	      --transport $(DCOS_DOCKER_TRANSPORT) \
-	      --masters $(DCOS_DOCKER_MASTERS) \
-	      --agents $(DCOS_DOCKER_AGENTS) \
-	      --public-agents $(DCOS_DOCKER_PUBLIC_AGENTS) \
-	      --cluster-id $(DCOS_DOCKER_CLUSTER_ID) \
-	      --custom-volume $(DCOS_DOCKER_CUSTOM_VOLUME) \
-	      $(DCOS_DOCKER_OPTS) && \
+	      --transport $(MINIDCOS_TRANSPORT) \
+	      --masters $(MINIDCOS_MASTERS) \
+	      --agents $(MINIDCOS_AGENTS) \
+	      --public-agents $(MINIDCOS_PUBLIC_AGENTS) \
+	      --cluster-id $(MINIDCOS_CLUSTER_ID) \
+	      --custom-volume $(MINIDCOS_CUSTOM_VOLUME) \
+	      $(MINIDCOS_OPTS) && \
 	  minidcos docker wait \
-	      --transport $(DCOS_DOCKER_TRANSPORT) \
-	      --cluster-id $(DCOS_DOCKER_CLUSTER_ID) \
+	      --transport $(MINIDCOS_TRANSPORT) \
+	      --cluster-id $(MINIDCOS_CLUSTER_ID) \
 	      --skip-http-checks )
 
-dcos-docker-destroy:
+minidcos-destroy:
 	@ docker ps \
-	    --filter label=dcos-e2e-web-id=$(DCOS_DOCKER_CLUSTER_ID) \
+	    --filter label=dcos-e2e-web-id=$(MINIDCOS_CLUSTER_ID) \
 	    --format '{{.ID}}' \
 	| xargs docker kill > /dev/null
-	@ minidcos docker destroy --cluster-id $(DCOS_DOCKER_CLUSTER_ID)
+	@ minidcos docker destroy --cluster-id $(MINIDCOS_CLUSTER_ID)
 
-dcos-docker-web: dcos-docker-create
+minidcos-web: minidcos-create
 	-@ docker ps \
-	    --filter label=minidcos-web-id=$(DCOS_DOCKER_CLUSTER_ID) \
-	    --filter label=minidcos-web-port=$(DCOS_DOCKER_WEB_PORT) \
+	    --filter label=minidcos-web-id=$(MINIDCOS_CLUSTER_ID) \
+	    --filter label=minidcos-web-port=$(MINIDCOS_WEB_PORT) \
 	    --format '{{.ID}}' \
 	| xargs docker kill > /dev/null
 	@ docker run \
 	    --rm --detach \
-	    --publish $(DCOS_DOCKER_WEB_PORT):$(DCOS_DOCKER_WEB_PORT) \
-	    --name $(shell minidcos docker inspect --cluster-id $(DCOS_DOCKER_CLUSTER_ID) | \
+	    --publish $(MINIDCOS_WEB_PORT):$(MINIDCOS_WEB_PORT) \
+	    --name $(shell minidcos docker inspect --cluster-id $(MINIDCOS_CLUSTER_ID) | \
 	                   jq -r .Nodes.masters[0].docker_container_name | \
-	                   sed -re 's/-master-0/-web-$(DCOS_DOCKER_WEB_PORT)/') \
-	    --label minidcos-web-id=$(DCOS_DOCKER_CLUSTER_ID) \
-	    --label minidcos-web-port=$(DCOS_DOCKER_WEB_PORT) \
-	    alpine/socat TCP4-LISTEN:$(DCOS_DOCKER_WEB_PORT),bind=0.0.0.0,reuseaddr,fork,su=nobody \
-	                 TCP4:$(shell minidcos docker inspect --cluster-id $(DCOS_DOCKER_CLUSTER_ID) | \
+	                   sed -re 's/-master-0/-web-$(MINIDCOS_WEB_PORT)/') \
+	    --label minidcos-web-id=$(MINIDCOS_CLUSTER_ID) \
+	    --label minidcos-web-port=$(MINIDCOS_WEB_PORT) \
+	    alpine/socat TCP4-LISTEN:$(MINIDCOS_WEB_PORT),bind=0.0.0.0,reuseaddr,fork,su=nobody \
+	                 TCP4:$(shell minidcos docker inspect --cluster-id $(MINIDCOS_CLUSTER_ID) | \
 	                              jq '.Nodes | .[] | .[]' | \
-	                              jq 'select (.e2e_reference == "$(DCOS_DOCKER_NODE)")' | \
+	                              jq 'select (.e2e_reference == "$(MINIDCOS_NODE)")' | \
 	                              jq -r .ip_address \
-	                       ):$(DCOS_DOCKER_WEB_PORT),bind=0.0.0.0 \
+	                       ):$(MINIDCOS_WEB_PORT),bind=0.0.0.0 \
 	    > /dev/null
-	open https://localhost:$(DCOS_DOCKER_WEB_PORT)/
+	open https://localhost:$(MINIDCOS_WEB_PORT)/
 
-dcos-docker-shell: dcos-docker-create
+minidcos-shell: minidcos-create
 	@ minidcos docker run \
-	    --transport $(DCOS_DOCKER_TRANSPORT) \
-	    --cluster-id $(DCOS_DOCKER_CLUSTER_ID) \
-	    --node $(DCOS_DOCKER_NODE) \
+	    --transport $(MINIDCOS_TRANSPORT) \
+	    --cluster-id $(MINIDCOS_CLUSTER_ID) \
+	    --node $(MINIDCOS_NODE) \
 	    -- 'cd $(BASE_DIR) && exec /opt/mesosphere/bin/dcos-shell'
 
-dcos-docker-dev: dcos-docker-create
+minidcos-dev: minidcos-create
 	@ minidcos docker run \
-	    --transport $(DCOS_DOCKER_TRANSPORT) \
-	    --cluster-id $(DCOS_DOCKER_CLUSTER_ID) \
-	    --node $(DCOS_DOCKER_NODE) \
+	    --transport $(MINIDCOS_TRANSPORT) \
+	    --cluster-id $(MINIDCOS_CLUSTER_ID) \
+	    --node $(MINIDCOS_NODE) \
 	    -- '(which make > /dev/null 2> /dev/null || sudo yum install -y make) ' \
 	    '&& (cd $(BASE_DIR) && exec make dev)'
