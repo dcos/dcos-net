@@ -156,7 +156,7 @@ minidcos-create:
 
 minidcos-destroy:
 	@ docker ps \
-	    --filter label=dcos-e2e-web-id=$(MINIDCOS_CLUSTER_ID) \
+	    --filter label=minidcos-web-id=$(MINIDCOS_CLUSTER_ID) \
 	    --format '{{.ID}}' \
 	| xargs --no-run-if-empty docker kill > /dev/null
 	@ minidcos docker destroy --cluster-id $(MINIDCOS_CLUSTER_ID)

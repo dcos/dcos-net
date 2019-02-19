@@ -64,26 +64,26 @@ To check your dcos-net build on DC/OS you can use [minidcos](https://dcos-e2e-cl
    be 1 node):
 
    ```sh
-   make dcos-docker-create DCOS_DOCKER_AGENTS=3
+   make minidcos-create MINIDCOS_AGENTS=3
    ```
 
 1. Build and run `dcos-net` off you local repository on a particular node, in
    this case it is `master_0`:
 
    ```sh
-   make dcos-docker-dev DCOS_DOCKER_NODE=master_0
+   make minidcos-dev MINIDCOS_NODE=master_0
    ```
 
 1. Open `dcos-shell` on a node (`agent_0`, `agent_1`, `...` `agent_n`):
 
    ```sh
-   make dcos-docker-shell DCOS_DOCKER_NODE=agent_1
+   make minidcos-shell MINIDCOS_NODE=agent_1
    ```
 
 1. Destroy the cluster:
 
    ```sh
-   make dcos-docker-destroy
+   make minidcos-destroy
    ```
 
 Alternatively, you may build and run all the components yourself. Please refer
