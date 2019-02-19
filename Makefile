@@ -158,7 +158,7 @@ minidcos-destroy:
 	@ docker ps \
 	    --filter label=dcos-e2e-web-id=$(MINIDCOS_CLUSTER_ID) \
 	    --format '{{.ID}}' \
-	| xargs docker kill > /dev/null
+	| xargs --no-run-if-empty docker kill > /dev/null
 	@ minidcos docker destroy --cluster-id $(MINIDCOS_CLUSTER_ID)
 
 minidcos-web: minidcos-create
@@ -166,7 +166,7 @@ minidcos-web: minidcos-create
 	    --filter label=minidcos-web-id=$(MINIDCOS_CLUSTER_ID) \
 	    --filter label=minidcos-web-port=$(MINIDCOS_WEB_PORT) \
 	    --format '{{.ID}}' \
-	| xargs docker kill > /dev/null
+	| xargs --no-run-if-empty docker kill > /dev/null
 	@ docker run \
 	    --rm --detach \
 	    --publish $(MINIDCOS_WEB_PORT):$(MINIDCOS_WEB_PORT) \
