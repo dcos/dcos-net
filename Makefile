@@ -125,7 +125,7 @@ dev: dev-install dev-stop
 	  /opt/mesosphere/bin/dcos-net-env console
 
 ##
-## MINI DC/OS
+## miniDC/OS
 ##
 
 MINIDCOS_TRANSPORT ?= docker-exec
@@ -156,18 +156,18 @@ minidcos-create:
 
 minidcos-destroy:
 	@ docker ps \
-      --filter label=dcos_e2e.cluster_id=$(MINIDCOS_CLUSTER_ID) \
-      --filter label=dcos_e2e.web_port \
+	    --filter label=dcos_e2e.cluster_id=$(MINIDCOS_CLUSTER_ID) \
+	    --filter label=dcos_e2e.web_port \
 	    --format '{{.ID}}' \
-	| xargs --no-run-if-empty docker kill > /dev/null
+	    | while read id; do [ -z "$id" ] || docker kill $id; done > /dev/null
 	@ minidcos docker destroy --cluster-id $(MINIDCOS_CLUSTER_ID)
 
 minidcos-web: minidcos-create
-	-@ docker ps \
+	@ docker ps \
 	    --filter label=dcos_e2e.cluster_id=$(MINIDCOS_CLUSTER_ID) \
 	    --filter label=dcos_e2e.web_port=$(MINIDCOS_WEB_PORT) \
 	    --format '{{.ID}}' \
-	| xargs --no-run-if-empty docker kill > /dev/null
+	    | while read id; do [ -z "$id" ] || docker kill $id; done > /dev/null
 	@ docker run \
 	    --rm --detach \
 	    --publish $(MINIDCOS_WEB_PORT):$(MINIDCOS_WEB_PORT) \
