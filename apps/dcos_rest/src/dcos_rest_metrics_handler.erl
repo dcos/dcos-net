@@ -19,7 +19,7 @@ allowed_methods(Req, State) ->
 
 content_types_provided(Req, State) ->
     {[
-        {{<<"text">>, <<"plain">>, []}, metrics}
+        {{<<"text">>, <<"plain">>, '*'}, metrics}
     ], Req, State}.
 
 metrics(Req, State) ->
