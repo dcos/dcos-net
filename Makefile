@@ -102,7 +102,7 @@ dev-stop:
 	    echo "options attempts:3" && \
 	    echo $(shell source /opt/mesosphere/etc/dns_config && \
 	                 echo $${RESOLVERS} | \
-	                 sed -e 's/(^|[,])/\nnameserver /g') \
+	                 sed -e 's/\(^\|[,]\)/\nnameserver /g') \
 	  ) > /etc/resolv.conf
 
 dev-start:
