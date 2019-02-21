@@ -102,7 +102,7 @@ dev-stop:
 	    echo "options attempts:3" && \
 	    echo $(shell source /opt/mesosphere/etc/dns_config && \
 	                 echo $${RESOLVERS} | \
-	                 sed -re 's/(^|[,])/\nnameserver /g') \
+	                 sed -e 's/(^|[,])/\nnameserver /g') \
 	  ) > /etc/resolv.conf
 
 dev-start:
@@ -118,7 +118,7 @@ console: dev-shell
 
 dev: dev-install dev-stop
 	@ export ENABLE_CHECK_TIME=false && \
-	  systemctl cat dcos-net | sed -nre 's/ExecStartPre=//p' | tr '\n' '\0' | \
+	  systemctl cat dcos-net | sed -ne 's/ExecStartPre=//p' | tr '\n' '\0' | \
 	    xargs -0 -n 1 /opt/mesosphere/bin/dcos-shell bash -c
 	@ DCOS_NET_ENV_CMD="make" \
 	  DCOS_NET_EBIN="$(BUILD_DIR)/default/lib/dcos_net/ebin" \
@@ -173,7 +173,7 @@ minidcos-web: minidcos-create
 	    --publish $(MINIDCOS_WEB_PORT):$(MINIDCOS_WEB_PORT) \
 	    --name $(shell minidcos docker inspect --cluster-id $(MINIDCOS_CLUSTER_ID) | \
 	                   jq -r .Nodes.masters[0].docker_container_name | \
-	                   sed -re 's/-master-0/-web-$(MINIDCOS_WEB_PORT)/') \
+	                   sed -e 's/-master-0/-web-$(MINIDCOS_WEB_PORT)/') \
 	    --label dcos_e2e.cluster_id=$(MINIDCOS_CLUSTER_ID) \
 	    --label dcos_e2e.web_port=$(MINIDCOS_WEB_PORT) \
 	    alpine/socat TCP4-LISTEN:$(MINIDCOS_WEB_PORT),bind=0.0.0.0,reuseaddr,fork,su=nobody \
