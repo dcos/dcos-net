@@ -102,7 +102,7 @@ dev-stop:
 	    echo "options attempts:3" && \
 	    echo $(shell source /opt/mesosphere/etc/dns_config && \
 	                 echo $${RESOLVERS} | \
-	                 sed -re 's/(^|[,])/\nnameserver /g') \
+	                 sed -e 's/(^|[,])/\nnameserver /g') \
 	  ) > /etc/resolv.conf
 
 dev-start:
@@ -118,83 +118,84 @@ console: dev-shell
 
 dev: dev-install dev-stop
 	@ export ENABLE_CHECK_TIME=false && \
-	  systemctl cat dcos-net | sed -nre 's/ExecStartPre=//p' | tr '\n' '\0' | \
+	  systemctl cat dcos-net | sed -ne 's/ExecStartPre=//p' | tr '\n' '\0' | \
 	    xargs -0 -n 1 /opt/mesosphere/bin/dcos-shell bash -c
 	@ DCOS_NET_ENV_CMD="make" \
 	  DCOS_NET_EBIN="$(BUILD_DIR)/default/lib/dcos_net/ebin" \
 	  /opt/mesosphere/bin/dcos-net-env console
 
 ##
-## DC/OS E2E
+## miniDC/OS
 ##
 
-DCOS_DOCKER_TRANSPORT ?= docker-exec
-DCOS_DOCKER_CUSTOM_VOLUME ?= "$(BASE_DIR):$(BASE_DIR):rw"
-DCOS_DOCKER_CLUSTER_ID ?= default
-DCOS_DOCKER_MASTERS ?= 1
-DCOS_DOCKER_AGENTS ?= 1
-DCOS_DOCKER_PUBLIC_AGENTS ?= 0
-DCOS_DOCKER_NODE ?= master_0
-DCOS_DOCKER_WEB_PORT ?= 443
+MINIDCOS_TRANSPORT ?= docker-exec
+MINIDCOS_CUSTOM_VOLUME ?= "$(BASE_DIR):$(BASE_DIR):rw"
+MINIDCOS_CLUSTER_ID ?= default
+MINIDCOS_MASTERS ?= 1
+MINIDCOS_AGENTS ?= 1
+MINIDCOS_PUBLIC_AGENTS ?= 0
+MINIDCOS_NODE ?= master_0
+MINIDCOS_WEB_PORT ?= 443
 
-dcos-docker-create:
-	@ dcos-docker inspect \
-	      --cluster-id $(DCOS_DOCKER_CLUSTER_ID) \
+minidcos-create:
+	@ minidcos docker inspect \
+	      --cluster-id $(MINIDCOS_CLUSTER_ID) \
 	      > /dev/null 2> /dev/null || \
-	( dcos-docker create dcos_generate_config.sh \
-	      --transport $(DCOS_DOCKER_TRANSPORT) \
-	      --masters $(DCOS_DOCKER_MASTERS) \
-	      --agents $(DCOS_DOCKER_AGENTS) \
-	      --public-agents $(DCOS_DOCKER_PUBLIC_AGENTS) \
-	      --cluster-id $(DCOS_DOCKER_CLUSTER_ID) \
-	      --custom-volume $(DCOS_DOCKER_CUSTOM_VOLUME) \
-	      $(DCOS_DOCKER_OPTS) && \
-	  dcos-docker wait \
-	      --transport $(DCOS_DOCKER_TRANSPORT) \
-	      --cluster-id $(DCOS_DOCKER_CLUSTER_ID) \
+	( minidcos docker create dcos_generate_config.sh \
+	      --transport $(MINIDCOS_TRANSPORT) \
+	      --masters $(MINIDCOS_MASTERS) \
+	      --agents $(MINIDCOS_AGENTS) \
+	      --public-agents $(MINIDCOS_PUBLIC_AGENTS) \
+	      --cluster-id $(MINIDCOS_CLUSTER_ID) \
+	      --custom-volume $(MINIDCOS_CUSTOM_VOLUME) \
+	      $(MINIDCOS_OPTS) && \
+	  minidcos docker wait \
+	      --transport $(MINIDCOS_TRANSPORT) \
+	      --cluster-id $(MINIDCOS_CLUSTER_ID) \
 	      --skip-http-checks )
 
-dcos-docker-destroy:
+minidcos-destroy:
 	@ docker ps \
-	    --filter label=dcos-e2e-web-id=$(DCOS_DOCKER_CLUSTER_ID) \
+	    --filter label=dcos_e2e.cluster_id=$(MINIDCOS_CLUSTER_ID) \
+	    --filter label=dcos_e2e.web_port \
 	    --format '{{.ID}}' \
-	| xargs docker kill > /dev/null
-	@ dcos-docker destroy --cluster-id $(DCOS_DOCKER_CLUSTER_ID)
+	| while read id; do [ -z "$$id" ] || docker kill $$id; done > /dev/null
+	@ minidcos docker destroy --cluster-id $(MINIDCOS_CLUSTER_ID)
 
-dcos-docker-web: dcos-docker-create
+minidcos-web: minidcos-create
 	@ docker ps \
-	    --filter label=dcos-e2e-web-id=$(DCOS_DOCKER_CLUSTER_ID) \
-	    --filter label=dcos-e2e-web-port=$(DCOS_DOCKER_WEB_PORT) \
+	    --filter label=dcos_e2e.cluster_id=$(MINIDCOS_CLUSTER_ID) \
+	    --filter label=dcos_e2e.web_port=$(MINIDCOS_WEB_PORT) \
 	    --format '{{.ID}}' \
-	| xargs docker kill > /dev/null
+	| while read id; do [ -z "$$id" ] || docker kill $$id; done > /dev/null
 	@ docker run \
 	    --rm --detach \
-	    --publish $(DCOS_DOCKER_WEB_PORT):$(DCOS_DOCKER_WEB_PORT) \
-	    --name $(shell dcos-docker inspect --cluster-id $(DCOS_DOCKER_CLUSTER_ID) | \
+	    --publish $(MINIDCOS_WEB_PORT):$(MINIDCOS_WEB_PORT) \
+	    --name $(shell minidcos docker inspect --cluster-id $(MINIDCOS_CLUSTER_ID) | \
 	                   jq -r .Nodes.masters[0].docker_container_name | \
-	                   sed -re 's/-master-0/-web-$(DCOS_DOCKER_WEB_PORT)/') \
-	    --label dcos-e2e-web-id=$(DCOS_DOCKER_CLUSTER_ID) \
-	    --label dcos-e2e-web-port=$(DCOS_DOCKER_WEB_PORT) \
-	    alpine/socat TCP4-LISTEN:$(DCOS_DOCKER_WEB_PORT),bind=0.0.0.0,reuseaddr,fork,su=nobody \
-	                 TCP4:$(shell dcos-docker inspect --cluster-id $(DCOS_DOCKER_CLUSTER_ID) | \
+	                   sed -e 's/-master-0/-web-$(MINIDCOS_WEB_PORT)/') \
+	    --label dcos_e2e.cluster_id=$(MINIDCOS_CLUSTER_ID) \
+	    --label dcos_e2e.web_port=$(MINIDCOS_WEB_PORT) \
+	    alpine/socat TCP4-LISTEN:$(MINIDCOS_WEB_PORT),bind=0.0.0.0,reuseaddr,fork,su=nobody \
+	                 TCP4:$(shell minidcos docker inspect --cluster-id $(MINIDCOS_CLUSTER_ID) | \
 	                              jq '.Nodes | .[] | .[]' | \
-	                              jq 'select (.e2e_reference == "$(DCOS_DOCKER_NODE)")' | \
+	                              jq 'select (.e2e_reference == "$(MINIDCOS_NODE)")' | \
 	                              jq -r .ip_address \
-	                       ):$(DCOS_DOCKER_WEB_PORT),bind=0.0.0.0 \
+	                       ):$(MINIDCOS_WEB_PORT),bind=0.0.0.0 \
 	    > /dev/null
-	open https://localhost:$(DCOS_DOCKER_WEB_PORT)/
+	open https://localhost:$(MINIDCOS_WEB_PORT)/
 
-dcos-docker-shell: dcos-docker-create
-	@ dcos-docker run \
-	    --transport $(DCOS_DOCKER_TRANSPORT) \
-	    --cluster-id $(DCOS_DOCKER_CLUSTER_ID) \
-	    --node $(DCOS_DOCKER_NODE) \
+minidcos-shell: minidcos-create
+	@ minidcos docker run \
+	    --transport $(MINIDCOS_TRANSPORT) \
+	    --cluster-id $(MINIDCOS_CLUSTER_ID) \
+	    --node $(MINIDCOS_NODE) \
 	    -- 'cd $(BASE_DIR) && exec /opt/mesosphere/bin/dcos-shell'
 
-dcos-docker-dev: dcos-docker-create
-	@ dcos-docker run \
-	    --transport $(DCOS_DOCKER_TRANSPORT) \
-	    --cluster-id $(DCOS_DOCKER_CLUSTER_ID) \
-	    --node $(DCOS_DOCKER_NODE) \
+minidcos-dev: minidcos-create
+	@ minidcos docker run \
+	    --transport $(MINIDCOS_TRANSPORT) \
+	    --cluster-id $(MINIDCOS_CLUSTER_ID) \
+	    --node $(MINIDCOS_NODE) \
 	    -- '(which make > /dev/null 2> /dev/null || sudo yum install -y make) ' \
 	    '&& (cd $(BASE_DIR) && exec make dev)'

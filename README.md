@@ -52,8 +52,7 @@ You can build, check, and test dcos-net in a development image using
 All makefile targets with `docker-` prefix build development image with all
 dependencies and run `rebar3` in that image on the host directory.
 
-To check your dcos-net build on DC/OS you can use DC/OS E2E a.k.a.
-[dcos-docker CLI](http://dcos-e2e.readthedocs.io/en/latest/cli.html). In order to do so please repeat the following steps:
+To check your dcos-net build on DC/OS you can use [miniDC/OS](https://dcos-e2e-cli.readthedocs.io/en/latest/). In order to do so please repeat the following steps:
 
 1. Download a DC/OS build:
 
@@ -65,26 +64,26 @@ To check your dcos-net build on DC/OS you can use DC/OS E2E a.k.a.
    be 1 node):
 
    ```sh
-   make dcos-docker-create DCOS_DOCKER_AGENTS=3
+   make minidcos-create MINIDCOS_AGENTS=3
    ```
 
 1. Build and run `dcos-net` off you local repository on a particular node, in
    this case it is `master_0`:
 
    ```sh
-   make dcos-docker-dev DCOS_DOCKER_NODE=master_0
+   make minidcos-dev MINIDCOS_NODE=master_0
    ```
 
 1. Open `dcos-shell` on a node (`agent_0`, `agent_1`, `...` `agent_n`):
 
    ```sh
-   make dcos-docker-shell DCOS_DOCKER_NODE=agent_1
+   make minidcos-shell MINIDCOS_NODE=agent_1
    ```
 
 1. Destroy the cluster:
 
    ```sh
-   make dcos-docker-destroy
+   make minidcos-destroy
    ```
 
 Alternatively, you may build and run all the components yourself. Please refer
