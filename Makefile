@@ -136,12 +136,13 @@ MINIDCOS_AGENTS ?= 1
 MINIDCOS_PUBLIC_AGENTS ?= 0
 MINIDCOS_NODE ?= master_0
 MINIDCOS_WEB_PORT ?= 443
+MINIDCOS_INTALLER ?= dcos_generate_config.sh
 
 minidcos-create:
 	@ minidcos docker inspect \
 	      --cluster-id $(MINIDCOS_CLUSTER_ID) \
 	      > /dev/null 2> /dev/null || \
-	( minidcos docker create dcos_generate_config.sh \
+	( minidcos docker create $(MINIDCOS_INTALLER) \
 	      --transport $(MINIDCOS_TRANSPORT) \
 	      --masters $(MINIDCOS_MASTERS) \
 	      --agents $(MINIDCOS_AGENTS) \
