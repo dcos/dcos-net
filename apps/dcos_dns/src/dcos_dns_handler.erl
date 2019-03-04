@@ -379,4 +379,16 @@ init_metrics() ->
         {labels, [zone]},
         {duration_unit, seconds},
         {buckets, [0.001, 0.005, 0.010, 0.050, 0.100, 0.500, 1.000, 5.000]},
-        {help, "The time spent processing DNS requests."}]).
+        {help, "The time spent processing DNS requests."}]),
+    prometheus_counter:new([
+        {registry, dns},
+        {name, forwarder_worker_failures_total},
+        {labels, [zone, protocol]},
+        {help, "Total number of worker failures processing DNS requests."}]),
+    prometheus_histogram:new([
+        {registry, dns},
+        {name, forwarder_worker_requests_duration_seconds},
+        {labels, [zone, protocol]},
+        {duration_unit, seconds},
+        {buckets, [0.001, 0.005, 0.010, 0.050, 0.100, 0.500, 1.000, 5.000]},
+        {help, "The time spent a worker spent processing DNS requests."}]).
