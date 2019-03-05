@@ -1,13 +1,10 @@
 -module(dcos_net_utils).
 
--ifdef(TEST).
--include_lib("eunit/include/eunit.hrl").
--endif.
-
 -export([
     complement/2,
     system/1,
-    system/2
+    system/2,
+    join/2
 ]).
 
 %%%===================================================================
@@ -37,19 +34,6 @@ complement([A|_]=ListA, [B|ListB], Acc, Bcc) when A > B ->
     complement(ListA, ListB, Acc, [B|Bcc]);
 complement([A|ListA], [B|_]=ListB, Acc, Bcc) when A < B ->
     complement(ListA, ListB, [A|Acc], Bcc).
-
--ifdef(TEST).
-
-complement_test() ->
-    {A, B} =
-        complement(
-            [a, 0, b, 1, c, 2],
-            [e, 0, d, 1, f, 2]),
-    ?assertEqual(
-        {[a, b, c], [d, e, f]},
-        {lists:sort(A), lists:sort(B)}).
-
--endif.
 
 %%%===================================================================
 %%% System functions
@@ -88,26 +72,10 @@ system_loop(Port, EndTime, Acc) ->
         {error, timeout}
     end.
 
--ifdef(TEST).
-
-system_test() ->
-    case system([<<"/bin/pwd">>]) of
-        {error, enoent} -> ok;
-        {ok, Pwd} ->
-            {ok, Cwd} = file:get_cwd(),
-            ?assertEqual(iolist_to_binary([Cwd, "\n"]), Pwd)
-    end.
-
-system_timeout_test() ->
-    case system([<<"/bin/dd">>], 100) of
-        {error, enoent} -> ok;
-        {error, timeout} -> ok
-    end.
 %%%===================================================================
 %%% Binary functions
 %%%===================================================================
 
--endif.
 -spec(join([binary()], binary()) -> binary()).
 join([], _Sep) ->
     <<>>;

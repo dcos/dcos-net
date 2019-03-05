@@ -1,6 +1,29 @@
 -module(dcos_net_utils_tests).
 -include_lib("eunit/include/eunit.hrl").
 
+complement_test() ->
+    {A, B} =
+        dcos_net_utils:complement(
+          [a, 0, b, 1, c, 2],
+          [e, 0, d, 1, f, 2]),
+    ?assertEqual(
+       {[a, b, c], [d, e, f]},
+       {lists:sort(A), lists:sort(B)}).
+
+system_test() ->
+    case dcos_net_utils:system([<<"/bin/pwd">>]) of
+        {error, enoent} -> ok;
+        {ok, Pwd} ->
+            {ok, Cwd} = file:get_cwd(),
+            ?assertEqual(iolist_to_binary([Cwd, "\n"]), Pwd)
+    end.
+
+system_timeout_test() ->
+    case dcos_net_utils:system([<<"/bin/dd">>], 100) of
+        {error, enoent} -> ok;
+        {error, timeout} -> ok
+    end.
+
 join_empty_bin_test_() -> [
     ?_assertEqual(
        <<>>,
