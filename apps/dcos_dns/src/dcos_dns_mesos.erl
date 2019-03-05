@@ -274,15 +274,8 @@ push_tasks(Tasks) ->
 format_name(ListOfNames, Postfix) ->
     ListOfNames1 = lists:map(fun mesos_state:label/1, ListOfNames),
     ListOfNames2 = lists:map(fun list_to_binary/1, ListOfNames1),
-    Prefix = join(ListOfNames2, <<".">>),
+    Prefix = dcos_net_utils:join(ListOfNames2, <<".">>),
     <<Prefix/binary, ".", Postfix/binary>>.
-
--spec(join([binary()], binary()) -> binary()).
-join(List, Sep) ->
-    SepSize = size(Sep),
-    <<Sep:SepSize/binary, Result/binary>> =
-        << <<Sep/binary, X/binary>> || X <- List >>,
-    Result.
 
 %%%===================================================================
 %%% Lashup functions

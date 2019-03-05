@@ -10,7 +10,8 @@
 -export([upstreams_from_questions/1]).
 
 %% @doc Resolvers based on a set of "questions"
--spec(upstreams_from_questions(dns:questions()) -> [upstream()] | internal).
+-spec(upstreams_from_questions(dns:questions()) ->
+    {[upstream()] | internal, binary()}).
 upstreams_from_questions([#dns_query{name=Name}]) ->
     Labels = dcos_dns_app:parse_upstream_name(Name),
     find_upstream(Labels);
@@ -37,43 +38,47 @@ default_resolvers() ->
     lists:map(fun validate_upstream/1, Resolvers).
 
 %% @private
--spec(find_upstream(Labels :: [binary()]) -> [upstream()] | internal).
+-spec(find_upstream(Labels :: [binary()]) ->
+    {[upstream()] | internal, binary()}).
 find_upstream([<<"mesos">>|_]) ->
-    dcos_dns_config:mesos_resolvers();
+   {dcos_dns_config:mesos_resolvers(), <<"mesos.">>};
 find_upstream([<<"localhost">>|_]) ->
-    internal;
+    {internal, <<"localhost.">>};
 find_upstream([<<"zk">>|_]) ->
-    internal;
+    {internal, <<"zk.">>};
 find_upstream([<<"spartan">>|_]) ->
-    internal;
-find_upstream([<<"directory">>, <<"thisdcos">>|_]) ->
-    internal;
-find_upstream([<<"global">>, <<"thisdcos">>|_]) ->
-    internal;
-find_upstream([<<"directory">>, <<"dcos">>|_]) ->
-    internal;
+    {internal, <<"spartan.">>};
+find_upstream([<<"directory">>, <<"thisdcos">>, Label |_]) ->
+    {internal, <<Label/binary, ".thisdcos.directory.">>};
+find_upstream([<<"global">>, <<"thisdcos">>, Label |_]) ->
+    {internal, <<Label/binary, ".thisdcos.global.">>};
+find_upstream([<<"directory">>, <<"dcos">>, Id, Label |_]) ->
+    {internal, <<Label/binary, ".", Id/binary, ".dcos.directory.">>};
 find_upstream(Labels) ->
     case find_custom_upstream(Labels) of
-        [] ->
-            default_resolvers();
-        Resolvers ->
-            lager:debug("resolving ~p with custom upstream: ~p", [Labels, Resolvers]),
-            Resolvers
+        {[], _ZoneLabels} ->
+            {default_resolvers(), <<".">>};
+        {Resolvers, ZoneLabels} ->
+            ReverseZoneLabels = lists:reverse([<<>> | ZoneLabels]),
+            Zone = dcos_net_utils:join(ReverseZoneLabels, <<".">>),
+            {Resolvers, Zone}
     end.
 
--spec(find_custom_upstream(Labels :: [binary()]) -> [upstream()]).
+-spec(find_custom_upstream(Labels :: [binary()]) ->
+     {[upstream()] | internal, [binary()]}).
 find_custom_upstream(QueryLabels) ->
     ForwardZones = dcos_dns_config:forward_zones(),
     UpstreamFilter = upstream_filter_fun(QueryLabels),
-    maps:fold(UpstreamFilter, [], ForwardZones).
+    maps:fold(UpstreamFilter, {[], []}, ForwardZones).
 
 -spec(upstream_filter_fun([dns:labels()]) ->
-    fun(([dns:labels()], upstream(), [upstream()]) -> [upstream()])).
+    fun(([dns:labels()], upstream(), [upstream()]) ->
+        {[upstream()] | internal, [binary()]})).
 upstream_filter_fun(QueryLabels) ->
-    fun(Labels, Upstream, Acc) ->
-        case lists:prefix(Labels, QueryLabels) of
+    fun(ZoneLabels, Upstream, Acc) ->
+        case lists:prefix(ZoneLabels, QueryLabels) of
             true ->
-                Upstream;
+                {Upstream, ZoneLabels};
             false ->
                 Acc
         end
