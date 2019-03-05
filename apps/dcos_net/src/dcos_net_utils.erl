@@ -103,5 +103,16 @@ system_timeout_test() ->
         {error, enoent} -> ok;
         {error, timeout} -> ok
     end.
+%%%===================================================================
+%%% Binary functions
+%%%===================================================================
 
 -endif.
+-spec(join([binary()], binary()) -> binary()).
+join([], _Sep) ->
+    <<>>;
+join(List, Sep) ->
+    SepSize = size(Sep),
+    <<Sep:SepSize/binary, Result/binary>> =
+        << <<Sep/binary, X/binary>> || X <- List >>,
+    Result.
