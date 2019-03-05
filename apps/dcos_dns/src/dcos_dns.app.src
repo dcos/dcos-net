@@ -22,7 +22,8 @@
         ranch,
         sidejob,
         cowboy,
-        dcos_net
+        dcos_net,
+        prometheus
     ]},
     {env,[]},
     {modules, []},
