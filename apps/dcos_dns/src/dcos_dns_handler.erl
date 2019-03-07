@@ -201,15 +201,15 @@ udp_worker(Pid, {Upstream = {IP, Port}, Address}, Request) ->
             case gen_udp:send(Socket, IP, Port, Request) of
                 ok ->
                     udp_worker(StartTime, Pid, Socket, {Upstream, Address});
-                {error, Error} ->
+                {error, Reason} ->
                     lager:warning(
                         "DNS worker ~p failed with ~p",
-                        [Address, Error]),
-                    emit_worker_failure(Address, udp, send)
+                        [Address, Reason]),
+                    emit_worker_failure(Address, udp, Reason)
             end;
-        {error, Error} ->
-            lager:warning("DNS worker ~p failed with ~p", [Address, Error]),
-            emit_worker_failure(Address, udp, connect)
+        {error, Reason} ->
+            lager:warning("DNS worker ~p failed with ~p", [Address, Reason]),
+            emit_worker_failure(Address, udp, Reason)
     end.
 
 -spec(udp_worker(integer(), pid(), gen_udp:socket(), {upstream(), binary()}) -> ok).
@@ -244,13 +244,13 @@ tcp_worker(Pid, { Upstream = {IP, Port}, Address}, Request) ->
             case gen_tcp:send(Socket, Request) of
                 ok ->
                     tcp_worker(StartTime, Pid, Socket, {Upstream, Address});
-                {error, Error} ->
-                    lager:warning("DNS worker [tcp] ~p failed with ~p", [Address, Error]),
-                    emit_worker_failure(Address, tcp, send)
+                {error, Reason} ->
+                    lager:warning("DNS worker [tcp] ~p failed with ~p", [Address, Reason]),
+                    emit_worker_failure(Address, tcp, Reason)
             end;
-        {error, Error} ->
-            lager:warning("DNS worker [tcp] ~p failed with ~p", [Address, Error]),
-            emit_worker_failure(Address, tcp, connect)
+        {error, Reason} ->
+            lager:warning("DNS worker [tcp] ~p failed with ~p", [Address, Reason]),
+            emit_worker_failure(Address, tcp, Reason)
     end.
 
 -spec(tcp_worker(integer(), pid(), gen_tcp:socket(), {upstream(), binary()}) -> ok).
@@ -288,12 +288,6 @@ tcp_worker(StartTime, Pid, Socket, {Upstream, Address}) ->
 report_latency(Metric, StartTime) ->
     Diff = max(erlang:monotonic_time(millisecond) - StartTime, 0),
     dcos_dns_metrics:update(Metric, Diff, ?HISTOGRAM).
-
--spec(upstream_to_binary(upstream()) -> binary()).
-upstream_to_binary({Ip, Port}) ->
-    IpBin = list_to_binary(inet:ntoa(Ip)),
-    PortBin = integer_to_binary(Port),
-    <<IpBin/binary, ":", PortBin/binary>>.
 
 %%===================================================================
 %%% Upstreams functions
@@ -338,6 +332,12 @@ upstream_failures(Upstream) ->
             {one, Failures} = lists:keyfind(one, 1, Metric),
             Failures
     end.
+
+-spec(upstream_to_binary(upstream()) -> binary()).
+upstream_to_binary({Ip, Port}) ->
+    IpBin = list_to_binary(inet:ntoa(Ip)),
+    PortBin = integer_to_binary(Port),
+    <<IpBin/binary, ":", PortBin/binary>>.
 
 %%%===================================================================
 %%% DNS functions
