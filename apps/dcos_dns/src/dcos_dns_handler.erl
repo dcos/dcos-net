@@ -415,7 +415,7 @@ init_metrics() ->
         {labels, [upstream_address, protocol]},
         {duration_unit, seconds},
         {buckets, [0.001, 0.005, 0.010, 0.050, 0.100, 0.500, 1.000, 5.000]},
-        {help, "The time spent a worker spent processing DNS requests."}]).
+        {help, "The time a worker spent processing DNS requests."}]).
 
 -spec(emit_worker_failure(binary(), udp | tcp, atom()) -> ok).
 emit_worker_failure(Address, Protocol, Reason) ->
