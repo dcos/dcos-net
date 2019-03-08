@@ -17,7 +17,7 @@ upstreams_from_questions([#dns_query{name=Name}]) ->
     find_upstream(Labels);
 upstreams_from_questions([Question|Others]) ->
     %% There is more than one question. This is beyond our capabilities at the moment
-    dcos_dns_metrics:update([dcos_dns, ignored_questions], length(Others), ?COUNTER),
+    %% TODO replace it with a forwarder metrics
     Result = upstreams_from_questions([Question]),
     lager:debug("~p will be forwarded to ~p", [Others, Result]),
     Result.

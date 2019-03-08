@@ -12,7 +12,6 @@ init([false]) ->
     {ok, {#{}, []}};
 init([true]) ->
     %% Configure metrics.
-    dcos_dns_metrics:setup(),
     dcos_dns_handler:init_metrics(),
 
     %% Setup ready.spartan zone / record

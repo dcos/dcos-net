@@ -12,7 +12,6 @@
         inets,
         jsx,
         dns,
-        exometer_core,
         mesos_state,
         lashup,
         enacl,
