@@ -13,7 +13,7 @@
 ]).
 
 %% Private functions
--export([start_link/4, init/5]).
+-export([start_link/4, init/5, worker/4]).
 
 -export_type([reply_fun/0, protocol/0]).
 
@@ -133,8 +133,9 @@ internal_resolve(Protocol, DNSMessage) ->
 resolve(Begin, Protocol, Upstreams, Request, Fun, FailMsg, Zone) ->
     Workers =
         lists:map(fun (Upstream) ->
-            Pid = start_worker(Protocol, Upstream, Request),
-            MonRef = monitor(process, Pid),
+            Args = [Protocol, self(), Upstream, Request],
+            Pid = proc_lib:spawn(?MODULE, worker, Args),
+            MonRef = erlang:monitor(process, Pid),
             {Upstream, Pid, MonRef}
         end, Upstreams),
     resolve_loop(Begin, Workers, Fun, FailMsg, Zone).
@@ -174,102 +175,104 @@ resolve_loop(Begin, Workers, Fun, FailMsg, Zone) ->
 %%% Workers
 %%%===================================================================
 
--spec(start_worker(protocol(), upstream(), binary()) -> pid()).
-start_worker(Protocol, Upstream, Request) ->
-    Pid = self(),
-    proc_lib:spawn(fun () ->
-        init_worker(Protocol, Pid, Upstream, Request)
-    end).
+-spec(worker(protocol(), pid(), upstream(), binary()) -> ok).
+worker(Protocol, Pid, Upstream, Request) ->
+    Begin = erlang:monotonic_time(),
+    UpstreamAddress = upstream_to_binary(Upstream),
+    try worker_resolve(Protocol, Begin, Pid, Upstream, Request) of
+        {ok, Response} ->
+            Pid ! {reply, self(), Response},
+            report_latency([?MODULE, Upstream, latency], Begin);
+        {error, Reason} ->
+            lager:warning(
+                "DNS worker [~p] ~s failed with ~p",
+                [Protocol, UpstreamAddress, Reason]),
+            prometheus_counter:inc(
+                dns, worker_failures_total,
+                [Protocol, UpstreamAddress, Reason], 1)
+    after
+        prometheus_histogram:observe(
+            dns, worker_requests_duration_seconds,
+            [Protocol, UpstreamAddress],
+            erlang:monotonic_time() - Begin)
+    end.
 
--spec(init_worker(protocol(), pid(), upstream(), binary()) -> ok).
-init_worker(udp, Pid, Upstreams, Request) ->
-    udp_worker(Pid, Upstreams, Request);
-init_worker(tcp, Pid, Upstreams, Request) ->
-    tcp_worker(Pid, Upstreams, Request).
+-spec(worker_resolve(protocol(), integer(), pid(), upstream(), binary()) ->
+    {ok, binary()} | {error, atom()}).
+worker_resolve(udp, Begin, Pid, Upstream, Request) ->
+    udp_worker_resolve(Begin, Pid, Upstream, Request);
+worker_resolve(tcp, Begin, Pid, Upstream, Request) ->
+    tcp_worker_resolve(Begin, Pid, Upstream, Request).
 
--spec(udp_worker(pid(), upstream(), binary()) -> ok).
-udp_worker(Pid, Upstream = {IP, Port}, Request) ->
-    StartTime = erlang:monotonic_time(millisecond),
+-spec(udp_worker_resolve(integer(), pid(), upstream(), binary()) ->
+    {ok, binary()} | {error, atom()}).
+udp_worker_resolve(Begin, Pid, {IP, Port}, Request) ->
     Opts = [{reuseaddr, true}, {active, once}, binary],
     case gen_udp:open(0, Opts) of
         {ok, Socket} ->
-            case gen_udp:send(Socket, IP, Port, Request) of
+            try gen_udp:send(Socket, IP, Port, Request) of
                 ok ->
-                    udp_worker(StartTime, Pid, Socket, Upstream);
-                {error, Error} ->
-                    lager:warning("DNS worker ~p failed with ~p", [Upstream, Error])
+                    wait_for_response(Begin, Pid, Socket);
+                {error, Reason} ->
+                    {error, Reason}
+            after
+                gen_udp:close(Socket)
             end;
-        {error, Error} ->
-            lager:warning("DNS worker ~p failed with ~p", [Upstream, Error])
+        {error, Reason} ->
+            {error, Reason}
     end.
 
--spec(udp_worker(integer(), pid(), gen_udp:socket(), upstream()) -> ok).
-udp_worker(StartTime, Pid, Socket, Upstream = {IP, Port}) ->
-    MonRef = erlang:monitor(process, Pid),
-    try
-        receive
-            {'DOWN', MonRef, process, _Pid, normal} ->
-                ok;
-            {'DOWN', MonRef, process, _Pid, Reason} ->
-                exit(Reason);
-            {udp, Socket, IP, Port, Response} ->
-                Pid ! {reply, self(), Response},
-                report_latency([?MODULE, Upstream, latency], StartTime);
-            {timeout, Pid} ->
-                lager:warning("DNS worker ~p timed out", [Upstream])
-        after ?TIMEOUT ->
-            ok
-        end
-    after
-        gen_udp:close(Socket)
-    end.
-
--spec(tcp_worker(pid(), upstream(), binary()) -> ok).
-tcp_worker(Pid, Upstream = {IP, Port}, Request) ->
-    StartTime = erlang:monotonic_time(millisecond),
+-spec(tcp_worker_resolve(integer(), pid(), upstream(), binary()) ->
+   {ok, binary()} | {error, atom()}).
+tcp_worker_resolve(Begin, Pid, {IP, Port}, Request) ->
     Opts = [{active, once}, binary, {packet, 2}, {send_timeout, ?TIMEOUT}],
     case gen_tcp:connect(IP, Port, Opts, ?TIMEOUT) of
         {ok, Socket} ->
-            case gen_tcp:send(Socket, Request) of
+            try gen_tcp:send(Socket, Request) of
                 ok ->
-                    tcp_worker(StartTime, Pid, Socket, Upstream);
-                {error, Error} ->
-                    lager:warning("DNS worker [tcp] ~p failed with ~p", [Upstream, Error])
+                    wait_for_response(Begin, Pid, Socket);
+                {error, Reason} ->
+                    {error, Reason}
+            after
+                gen_tcp:close(Socket)
             end;
-        {error, Error} ->
-            lager:warning("DNS worker [tcp] ~p failed with ~p", [Upstream, Error])
+        {error, Reason} ->
+            {error, Reason}
     end.
 
--spec(tcp_worker(integer(), pid(), gen_tcp:socket(), upstream()) -> ok).
-tcp_worker(StartTime, Pid, Socket, Upstream) ->
+-spec(wait_for_response(integer(), pid(), Socket) ->
+    {ok, binary()} | {error, atom()}
+        when Socket :: gen_udp:socket() | gen_tcp:socket()).
+wait_for_response(Begin, Pid, Socket) ->
+    Diff = erlang:monotonic_time() - Begin,
+    Timeout = ?TIMEOUT - erlang:convert_time_unit(Diff, native, millisecond),
     MonRef = erlang:monitor(process, Pid),
     try
-        Timeout = ?TIMEOUT - (erlang:monotonic_time(millisecond) - StartTime),
         receive
-            {'DOWN', MonRef, process, _Pid, normal} ->
-                ok;
-            {'DOWN', MonRef, process, _Pid, Reason} ->
-                exit(Reason);
+            {'DOWN', MonRef, process, _Pid, _Reason} ->
+                {error, down};
+            {udp, Socket, _IP, _Port, Response} ->
+                {ok, Response};
             {tcp, Socket, Response} ->
-                Pid ! {reply, self(), Response},
-                report_latency([?MODULE, Upstream, latency], StartTime);
+                {ok, Response};
             {tcp_closed, Socket} ->
-                lager:warning("DNS worker [tcp] ~p failed with ~p", [Upstream, closed]);
-            {tcp_error, Socket, Reason} ->
-                lager:warning("DNS worker [tcp] ~p failed with ~p", [Upstream, Reason]);
+                {error, tcp_closed};
+            {tcp_error, Socket, _Reason} ->
+                {error, tcp_error};
             {timeout, Pid} ->
-                lager:warning("DNS worker [tcp] ~p timed out", [Upstream])
+                {error, timeout}
         after Timeout ->
-            ok
+            {error, timeout}
         end
     after
-        gen_tcp:close(Socket)
+        _ = erlang:demonitor(MonRef, [flush])
     end.
 
--spec(report_latency([term()], pos_integer()) -> ok).
-report_latency(Metric, StartTime) ->
-    Diff = max(erlang:monotonic_time(millisecond) - StartTime, 0),
-    dcos_dns_metrics:update(Metric, Diff, ?HISTOGRAM).
+-spec(report_latency([term()], integer()) -> ok).
+report_latency(Metric, Begin) ->
+    Diff = erlang:monotonic_time() - Begin,
+    DiffMs = erlang:convert_time_unit(Diff, native, millisecond),
+    dcos_dns_metrics:update(Metric, DiffMs, ?HISTOGRAM).
 
 %%%===================================================================
 %%% Upstreams functions
@@ -314,6 +317,12 @@ upstream_failures(Upstream) ->
             {one, Failures} = lists:keyfind(one, 1, Metric),
             Failures
     end.
+
+-spec(upstream_to_binary(upstream()) -> binary()).
+upstream_to_binary({Ip, Port}) ->
+    IpBin = list_to_binary(inet:ntoa(Ip)),
+    PortBin = integer_to_binary(Port),
+    <<IpBin/binary, ":", PortBin/binary>>.
 
 %%%===================================================================
 %%% DNS functions
@@ -379,4 +388,16 @@ init_metrics() ->
         {labels, [zone]},
         {duration_unit, seconds},
         {buckets, [0.001, 0.005, 0.010, 0.050, 0.100, 0.500, 1.000, 5.000]},
-        {help, "The time spent processing DNS requests."}]).
+        {help, "The time spent processing DNS requests."}]),
+    prometheus_counter:new([
+        {registry, dns},
+        {name, worker_failures_total},
+        {labels, [protocol, upstream_address, reason]},
+        {help, "Total number of worker failures processing DNS requests."}]),
+    prometheus_histogram:new([
+        {registry, dns},
+        {name, worker_requests_duration_seconds},
+        {labels, [protocol, upstream_address]},
+        {duration_unit, seconds},
+        {buckets, [0.001, 0.005, 0.010, 0.050, 0.100, 0.500, 1.000, 5.000]},
+        {help, "The time a worker spent processing DNS requests."}]).
