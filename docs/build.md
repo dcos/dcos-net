@@ -23,8 +23,8 @@ KERL_CONFIGURE_OPTIONS+="--with-ssl"
 KERL_CONFIGURE_OPTIONS+="--without-javac "
 export KERL_CONFIGURE_OPTIONS
 
-kerl build 21.1 21.1
-kerl install 21.1 $HOME/erl
+kerl build 21.3 21.3
+kerl install 21.3 $HOME/erl
 ```
 
 Once it is done, you may execute the following command to activate it:
