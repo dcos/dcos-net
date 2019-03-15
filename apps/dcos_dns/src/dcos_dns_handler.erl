@@ -75,7 +75,6 @@ init(Begin, Parent, Protocol, Request, Fun) ->
     Questions = DNSMessage#dns_message.questions,
     case dcos_dns_router:upstreams_from_questions(Questions) of
         {[], Zone} ->
-            report_status([?APP, no_upstreams_available]),
             Response = failed_msg(Protocol, DNSMessage),
             ok = reply(Begin, Fun, Response, Zone),
             prometheus_counter:inc(dns, forwarder_failures_total, [Zone], 1);
@@ -110,10 +109,6 @@ resolve_reply_fun(Pid, Ref, Response) ->
     Pid ! {reply, Ref, Response},
     ok.
 
--spec(report_status([term()]) -> ok).
-report_status(Metric) ->
-    dcos_dns_metrics:update(Metric, 1, ?SPIRAL).
-
 %%%===================================================================
 %%% Resolvers
 %%%===================================================================
@@ -136,12 +131,12 @@ resolve(Begin, Protocol, Upstreams, Request, Fun, FailMsg, Zone) ->
             Args = [Protocol, self(), Upstream, Request],
             Pid = proc_lib:spawn(?MODULE, worker, Args),
             MonRef = erlang:monitor(process, Pid),
-            {Upstream, Pid, MonRef}
+            {Pid, MonRef}
         end, Upstreams),
     resolve_loop(Begin, Workers, Fun, FailMsg, Zone).
 
 -spec(resolve_loop(Begin, Workers, Fun, FailMsg, Zone) -> ok
-    when Begin :: integer(), Workers :: [{upstream(), pid(), reference()}],
+    when Begin :: integer(), Workers :: [{pid(), reference()}],
          Fun :: reply_fun(), FailMsg :: binary(), Zone :: binary()).
 resolve_loop(_Begin, [], skip, _FailMsg, _Zone) ->
     ok;
@@ -151,21 +146,18 @@ resolve_loop(Begin, [], Fun, FailMsg, Zone) ->
 resolve_loop(Begin, Workers, Fun, FailMsg, Zone) ->
     receive
         {reply, Pid, Response} ->
-            {value, {Upstream, Pid, MonRef}, Workers0} =
-                lists:keytake(Pid, 2, Workers),
+            {value, {Pid, MonRef}, Workers0} =
+                lists:keytake(Pid, 1, Workers),
             _ = reply(Begin, Fun, Response, Zone),
             erlang:demonitor(MonRef, [flush]),
-            report_status([?MODULE, Upstream, successes]),
             resolve_loop(Begin, Workers0, skip, FailMsg, Zone);
         {'DOWN', MonRef, process, Pid, _Reason} ->
-            {value, {Upstream, Pid, MonRef}, Workers0} =
-                lists:keytake(Pid, 2, Workers),
-            report_status([?MODULE, Upstream, failures]),
+            {value, {Pid, MonRef}, Workers0} =
+                 lists:keytake(Pid, 1, Workers),
             resolve_loop(Begin, Workers0, Fun, FailMsg, Zone)
     after 2 * ?TIMEOUT ->
-        lists:foreach(fun ({Upstream, Pid, MonRef}) ->
+        lists:foreach(fun ({Pid, MonRef}) ->
             erlang:demonitor(MonRef, [flush]),
-            report_status([?MODULE, Upstream, failures]),
             Pid ! {timeout, self()}
         end, Workers),
         resolve_loop(Begin, [], Fun, FailMsg, Zone)
@@ -181,8 +173,7 @@ worker(Protocol, Pid, Upstream, Request) ->
     UpstreamAddress = upstream_to_binary(Upstream),
     try worker_resolve(Protocol, Begin, Pid, Upstream, Request) of
         {ok, Response} ->
-            Pid ! {reply, self(), Response},
-            report_latency([?MODULE, Upstream, latency], Begin);
+            Pid ! {reply, self(), Response};
         {error, Reason} ->
             lager:warning(
                 "DNS worker [~p] ~s failed with ~p",
@@ -268,12 +259,6 @@ wait_for_response(Begin, Pid, Socket) ->
         _ = erlang:demonitor(MonRef, [flush])
     end.
 
--spec(report_latency([term()], integer()) -> ok).
-report_latency(Metric, Begin) ->
-    Diff = erlang:monotonic_time() - Begin,
-    DiffMs = erlang:convert_time_unit(Diff, native, millisecond),
-    dcos_dns_metrics:update(Metric, DiffMs, ?HISTOGRAM).
-
 %%%===================================================================
 %%% Upstreams functions
 %%%===================================================================
@@ -282,21 +267,36 @@ report_latency(Metric, Begin) ->
 take_upstreams(Upstreams) when length(Upstreams) < 3 ->
     Upstreams;
 take_upstreams(Upstreams) ->
-    ClassifiedUpstreams =
-        lists:map(fun (Upstream) ->
-            {upstream_failures(Upstream), Upstream}
-        end, Upstreams),
-    Buckets = lists:foldl(
-        fun({N, Upstream}, Acc) ->
-            orddict:append_list(N, [Upstream], Acc)
-        end,
-        orddict:new(), ClassifiedUpstreams),
+    Buckets = upstream_buckets(Upstreams),
     case lists:unzip(Buckets) of
         {_N, [[_, _ | _] = Bucket | _Buckets]} ->
             choose(2, Bucket);
         {_N, [[Upstream], Bucket | _Buckets]} ->
             [Upstream | choose(1, Bucket)]
     end.
+
+-spec(upstream_failures() -> orddict:orddict(upstream(), pos_integer())).
+upstream_failures() ->
+    AllFailures = prometheus_counter:values(dns, worker_failures_total),
+    Failures = [{Address, Count} || {Labels, Count} <- AllFailures,
+                                    {"upstream_address", Address} <- Labels],
+    lists:foldl(fun ({Address, Count}, Acc) ->
+        orddict:update_counter(Address, Count, Acc)
+    end, orddict:new(), Failures).
+
+-spec(upstream_buckets([upstream()]) ->
+    orddict:orddict(non_neg_integer(), [upstream()])).
+upstream_buckets(Upstreams) ->
+    Failures = upstream_failures(),
+    lists:foldl(fun (Upstream, Acc) ->
+        Address = upstream_to_binary(Upstream),
+        Count =
+            case orddict:find(Address, Failures) of
+                {ok, N} -> N;
+                error -> 0
+            end,
+        orddict:append_list(Count, [Upstream], Acc)
+    end, orddict:new(), Upstreams).
 
 -spec(choose(N :: pos_integer(), [T]) -> [T] when T :: any()).
 choose(1, [Element]) ->
@@ -307,16 +307,6 @@ choose(N, List) ->
     List1 = lists:sort(List0),
     List2 = [X || {_, X} <- List1],
     lists:sublist(List2, N).
-
--spec(upstream_failures([upstream()]) -> non_neg_integer()).
-upstream_failures(Upstream) ->
-    case exometer:get_value([?MODULE, Upstream, failures]) of
-        {error, _Error} ->
-            0;
-        {ok, Metric} ->
-            {one, Failures} = lists:keyfind(one, 1, Metric),
-            Failures
-    end.
 
 -spec(upstream_to_binary(upstream()) -> binary()).
 upstream_to_binary({Ip, Port}) ->

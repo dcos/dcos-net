@@ -15,12 +15,23 @@
 upstreams_from_questions([#dns_query{name=Name}]) ->
     Labels = dcos_dns_app:parse_upstream_name(Name),
     find_upstream(Labels);
-upstreams_from_questions([Question|Others]) ->
-    %% There is more than one question. This is beyond our capabilities at the moment
-    dcos_dns_metrics:update([dcos_dns, ignored_questions], length(Others), ?COUNTER),
-    Result = upstreams_from_questions([Question]),
-    lager:debug("~p will be forwarded to ~p", [Others, Result]),
-    Result.
+upstreams_from_questions(Questions) ->
+    AllUpstreams = [upstreams_from_questions([Q]) || Q <- Questions],
+    case lists:usort(AllUpstreams) of
+        [Upstream] ->
+            Upstream;
+        _Upstreams ->
+            lager:warning(
+                "DNS queries with mixed-upstream questions are not supported, "
+                "the query will be resolved through internal DNS server: ~p",
+                [Questions]),
+            lists:foreach(fun (Zone) ->
+                prometheus_counter:inc(
+                    dns, forwarder_failures_total,
+                    [Zone], 1)
+            end, [Z || {U, Z} <- AllUpstreams, U =/= internal]),
+            {internal, <<".">>}
+    end.
 
 -spec(validate_upstream(upstream()) -> upstream()).
 validate_upstream({{_, _, _, _}, Port} = Upstream) when is_integer(Port) ->
