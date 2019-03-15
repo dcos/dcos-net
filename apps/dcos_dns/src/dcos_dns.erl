@@ -10,7 +10,8 @@
     resolve/1,
     resolve/2,
     resolve/3,
-    get_leader_addr/0
+    get_leader_addr/0,
+    init_metrics/0
 ]).
 
 %% DNS Zone functions
@@ -170,23 +171,12 @@ push_zone(ZoneName, Records) ->
 -spec(push_prepared_zone(dns:dname(), [dns:dns_rr()]) ->
     ok | {error, Reason :: term()}).
 push_prepared_zone(ZoneName, Records) ->
+    Begin = erlang:monotonic_time(),
     try erldns_zone_cache:get_zone_with_records(ZoneName) of
         {ok, #zone{records=Records}} ->
             ok;
         _Other ->
-            Hash = crypto:hash(sha, term_to_binary(Records)),
-            case erldns_zone_cache:put_zone({ZoneName, Hash, Records}) of
-                ok ->
-                    lager:notice(
-                        "DNS Zone ~s was updated (~p records, sha: ~s)",
-                        [ZoneName, length(Records), bin_to_hex(Hash)]),
-                    ok;
-                {error, Error} ->
-                    lager:error(
-                        "Failed to push DNS Zone \"~s\": ~p",
-                        [ZoneName, Error]),
-                    {error, Error}
-            end
+            put_zone(Begin, ZoneName, Records)
     catch error:Error ->
         lager:error(
             "Failed to push DNS Zone \"~s\": ~p",
@@ -194,7 +184,57 @@ push_prepared_zone(ZoneName, Records) ->
         {error, Error}
     end.
 
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
 -spec(bin_to_hex(binary()) -> binary()).
 bin_to_hex(Bin) ->
     Bin0 = << <<(integer_to_binary(N, 16))/binary>> || <<N:4>> <= Bin >>,
     cowboy_bstr:to_lower(Bin0).
+
+-spec(put_zone(integer(), binary(), [dns:dns_rr()]) -> ok).
+put_zone(Begin, ZoneName, Records) ->
+    Hash = crypto:hash(sha, term_to_binary(Records)),
+    case erldns_zone_cache:put_zone({ZoneName, Hash, Records}) of
+        ok ->
+            Duration = erlang:monotonic_time() - Begin,
+            ZoneName0 = <<ZoneName/binary, ".">>,
+            lager:notice(
+                "DNS Zone ~s was updated (~p records, sha: ~s, duration: ~pms)",
+                [ZoneName0, length(Records), bin_to_hex(Hash),
+                erlang:convert_time_unit(Duration, native, millisecond)]),
+            try
+                prometheus_summary:observe(
+                    dns, zone_push_duration_seconds,
+                    [ZoneName0], Duration),
+                prometheus_gauge:set(
+                    dns, zone_records,
+                    [ZoneName0], length(Records))
+            catch error:_Error ->
+                    ok
+            end;
+        {error, Error} ->
+            lager:error(
+                "Failed to push DNS Zone \"~s\": ~p",
+                [ZoneName, Error]),
+            {error, Error}
+    end.
+
+%%%===================================================================
+%%% Metrics functions
+%%%===================================================================
+
+-spec(init_metrics() -> ok).
+init_metrics() ->
+    prometheus_gauge:new([
+        {registry, dns},
+        {name, zone_records},
+        {labels, [zone]},
+        {help, "The number of records in DNS Zone."}]),
+    prometheus_summary:new([
+        {registry, dns},
+        {name, zone_push_duration_seconds},
+        {labels, [zone]},
+        {duration_unit, seconds},
+        {help, "The time spent pushing DNS Zone to the zone cache."}]).
