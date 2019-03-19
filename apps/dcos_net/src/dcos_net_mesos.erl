@@ -23,7 +23,14 @@ request(URIPath, Headers) ->
     ],
     Headers0 = maybe_add_token(Headers),
     Headers1 = add_useragent(Headers0),
-    httpc:request(get, {mesos_uri(URIPath), Headers1}, Options, [{body_format, binary}]).
+    Request = {mesos_uri(URIPath), Headers1},
+    case httpc:request(get, Request, Options, [{body_format, binary}]) of
+        {ok, Response} ->
+            {ok, Response};
+        {error, Error} ->
+            maybe_fatal_error(Error),
+            {error, Error}
+    end.
 
 %%%===================================================================
 %%% Internal functions
@@ -82,3 +89,16 @@ mesos_http_options() ->
             {client, Opts} = lists:keyfind(client, 1, DistOpts),
             [{ssl, Opts}]
     end.
+
+-spec(maybe_fatal_error(term()) -> ok | no_return()).
+maybe_fatal_error({failed_connect, Info}) ->
+    case lists:keyfind(inet, 1, Info) of
+        {inet, _App, {options, {_Opt, Filename, {error, enoent}}}} ->
+            % NOTE: Systemd will restart dcos-net immediately
+            % and bootstrap script will re-initialize all the certificates.
+            halt("TLS is broken, " ++ Filename ++ " doesn't exist.");
+        _Other ->
+            ok
+    end;
+maybe_fatal_error(_Error) ->
+    ok.
