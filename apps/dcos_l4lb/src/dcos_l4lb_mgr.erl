@@ -33,7 +33,7 @@
     % data
     tree = #{} :: lashup_gm_route:tree(),
     nodes = #{} :: #{inet:ip4_address() => node()},
-    netns = [host] :: [host | netns()],
+    namespaces = [host] :: [namespace()],
     % vips
     vips = [] :: [{key(), [backend()]}],
     prev_ipvs = [] :: [{key(), [ipport()]}],
@@ -44,6 +44,7 @@
 -type key() :: dcos_l4lb_mesos_poller:key().
 -type backend() :: dcos_l4lb_mesos_poller:backend().
 -type ipport() :: {inet:ip_address(), inet:port_number()}.
+-type namespace() :: term().
 
 -define(GM_EVENTS(R, T), {lashup_gm_route_events, #{ref := R, tree := T}}).
 -define(KV_EVENTS(R, V), {lashup_kv_events, #{ref := R, value := V}}).
@@ -159,11 +160,6 @@ handle_netns_event({Pid, EventType, EventContent},
 handle_netns_event(_Event, State) ->
     State.
 
--spec(handle_vips([{key(), [backend()]}], state()) -> state()).
-handle_vips(VIPs, State) ->
-    VIPs0 = ?SKIP({'$gen_cast', {vips, V}}, V, VIPs),
-    handle_vips_imp(VIPs0, State).
-
 -spec(handle_reconcile(state()) -> state()).
 handle_reconcile(#state{vips=VIPs, recon_ref=Ref}=State) ->
     erlang:cancel_timer(Ref),
@@ -182,31 +178,31 @@ start_reconcile_timer() ->
 
 -spec(handle_reconcile([{key(), [backend()]}], state()) -> state()).
 handle_reconcile(VIPs, #state{route_mgr=RouteMgr, ipvs_mgr=IPVSMgr,
-        tree=Tree, nodes=Nodes, netns=Namespaces}=State) ->
+        tree=Tree, nodes=Nodes, namespaces=Namespaces}=State) ->
     % If everything is ok this function is silent and changes nothing.
     VIPs0 = vips_port_mappings(VIPs),
     VIPs1 = healthy_vips(VIPs0, Nodes, Tree),
     VIPsP = prepare_vips(VIPs1),
     Routes = get_vip_routes(VIPs1),
-    lists:foreach(fun (NetNs) ->
-        NetNsBin = netns2bin(NetNs),
-        LogPrefix = <<"netns: ", NetNsBin/binary, "; ">>,
+    lists:foreach(fun (Namespace) ->
+        NamespaceBin = namespace2bin(Namespace),
+        LogPrefix = <<"netns: ", NamespaceBin/binary, "; ">>,
 
-        PrevRoutes = get_routes(RouteMgr, NetNs),
+        PrevRoutes = get_routes(RouteMgr, Namespace),
         DiffRoutes = dcos_net_utils:complement(Routes, PrevRoutes),
-        ok = apply_routes_diff(RouteMgr, NetNs, DiffRoutes),
+        ok = apply_routes_diff(RouteMgr, Namespace, DiffRoutes),
         ok = log_routes_diff(LogPrefix, DiffRoutes),
 
-        PrevVIPsP = get_vips(IPVSMgr, NetNs),
+        PrevVIPsP = get_vips(IPVSMgr, Namespace),
         DiffVIPs = diff(PrevVIPsP, VIPsP),
-        ok = apply_vips_diff(IPVSMgr, NetNs, DiffVIPs),
+        ok = apply_vips_diff(IPVSMgr, Namespace, DiffVIPs),
         ok = log_vips_diff(LogPrefix, DiffVIPs)
     end, Namespaces),
     State#state{prev_ipvs=VIPs1, prev_routes=Routes}.
 
--spec(handle_vips_imp([{key(), [backend()]}], state()) -> state()).
-handle_vips_imp(VIPs, #state{route_mgr=RouteMgr, ipvs_mgr=IPVSMgr,
-        tree=Tree, nodes=Nodes, netns=Namespaces,
+-spec(handle_vips([{key(), [backend()]}], state()) -> state()).
+handle_vips(VIPs, #state{route_mgr=RouteMgr, ipvs_mgr=IPVSMgr,
+        tree=Tree, nodes=Nodes, namespaces=Namespaces,
         prev_ipvs=PrevVIPs, prev_routes=PrevRoutes}=State) ->
     VIPs0 = vips_port_mappings(VIPs),
     VIPs1 = healthy_vips(VIPs0, Nodes, Tree),
@@ -215,9 +211,9 @@ handle_vips_imp(VIPs, #state{route_mgr=RouteMgr, ipvs_mgr=IPVSMgr,
     Routes = get_vip_routes(VIPs1),
     DiffRoutes = dcos_net_utils:complement(Routes, PrevRoutes),
 
-    lists:foreach(fun (NetNs) ->
-        ok = apply_routes_diff(RouteMgr, NetNs, DiffRoutes),
-        ok = apply_vips_diff(IPVSMgr, NetNs, DiffVIPs)
+    lists:foreach(fun (Namespace) ->
+        ok = apply_routes_diff(RouteMgr, Namespace, DiffRoutes),
+        ok = apply_vips_diff(IPVSMgr, Namespace, DiffVIPs)
     end, Namespaces),
     ok = log_vips_diff(DiffVIPs),
     ok = log_routes_diff(DiffRoutes),
@@ -229,15 +225,14 @@ handle_vips_imp(VIPs, #state{route_mgr=RouteMgr, ipvs_mgr=IPVSMgr,
 
 -type diff_routes() :: {[inet:ip_address()], [inet:ip_address()]}.
 
--spec(apply_routes_diff(pid(), NetNs, diff_routes()) -> ok
-    when NetNs :: netns() | host).
-apply_routes_diff(RouteMgr, NetNs, {ToAdd, ToDel}) ->
-    dcos_l4lb_route_mgr:add_routes(RouteMgr, ToAdd, NetNs),
-    dcos_l4lb_route_mgr:remove_routes(RouteMgr, ToDel, NetNs).
+-spec(apply_routes_diff(pid(), namespace(), diff_routes()) -> ok).
+apply_routes_diff(RouteMgr, Namespace, {ToAdd, ToDel}) ->
+    dcos_l4lb_route_mgr:add_routes(RouteMgr, ToAdd, Namespace),
+    dcos_l4lb_route_mgr:remove_routes(RouteMgr, ToDel, Namespace).
 
--spec(get_routes(pid(), netns() | host) -> [inet:ip_address()]).
-get_routes(RouteMgr, NetNs) ->
-    dcos_l4lb_route_mgr:get_routes(RouteMgr, NetNs).
+-spec(get_routes(pid(), namespace()) -> [inet:ip_address()]).
+get_routes(RouteMgr, Namespace) ->
+    dcos_l4lb_route_mgr:get_routes(RouteMgr, Namespace).
 
 -spec(get_vip_routes(VIPs :: [{key(), [backend()]}]) -> [inet:ip_address()]).
 get_vip_routes(VIPs) ->
@@ -253,23 +248,23 @@ prepare_vips(VIPs) ->
         {VIP, [BE || {_AgentIP, BE} <- BEs]}
     end, VIPs).
 
--spec(get_vips(pid(), netns() | host) -> [{key(), [ipport()]}]).
-get_vips(IPVSMgr, NetNs) ->
-    Services = get_vip_services(IPVSMgr, NetNs),
-    lists:map(fun (S) -> get_vip(IPVSMgr, NetNs, S) end, Services).
+-spec(get_vips(pid(), namespace()) -> [{key(), [ipport()]}]).
+get_vips(IPVSMgr, Namespace) ->
+    Services = get_vip_services(IPVSMgr, Namespace),
+    lists:map(fun (S) -> get_vip(IPVSMgr, Namespace, S) end, Services).
 
--spec(get_vip_services(pid(), netns() | host) -> [Service]
+-spec(get_vip_services(pid(), namespace()) -> [Service]
     when Service :: dcos_l4lb_ipvs_mgr:service()).
-get_vip_services(IPVSMgr, NetNs) ->
-    Services = dcos_l4lb_ipvs_mgr:get_services(IPVSMgr, NetNs),
+get_vip_services(IPVSMgr, Namespace) ->
+    Services = dcos_l4lb_ipvs_mgr:get_services(IPVSMgr, Namespace),
     FVIPs = lists:map(fun dcos_l4lb_ipvs_mgr:service_address/1, Services),
     maps:values(maps:from_list(lists:zip(FVIPs, Services))).
 
--spec(get_vip(pid(), netns() | host, Service) -> {key(), [ipport()]}
+-spec(get_vip(pid(), namespace(), Service) -> {key(), [ipport()]}
     when Service :: dcos_l4lb_ipvs_mgr:service()).
-get_vip(IPVSMgr, NetNs, Service) ->
+get_vip(IPVSMgr, Namespace, Service) ->
     {Family, VIP} = dcos_l4lb_ipvs_mgr:service_address(Service),
-    Dests = dcos_l4lb_ipvs_mgr:get_dests(IPVSMgr, Service, NetNs),
+    Dests = dcos_l4lb_ipvs_mgr:get_dests(IPVSMgr, Service, Namespace),
     Backends =
         lists:map(fun (Dest) ->
             dcos_l4lb_ipvs_mgr:destination_address(Family, Dest)
@@ -284,45 +279,45 @@ get_vip(IPVSMgr, NetNs, Service) ->
                       ToDel :: [{key(), [ipport()]}],
                       ToMod :: [{key(), [ipport()], [ipport()]}]}.
 
--spec(apply_vips_diff(pid(), netns() | host, diff_vips()) -> ok).
-apply_vips_diff(IPVSMgr, NetNs, {ToAdd, ToDel, ToMod}) ->
+-spec(apply_vips_diff(pid(), namespace(), diff_vips()) -> ok).
+apply_vips_diff(IPVSMgr, Namespace, {ToAdd, ToDel, ToMod}) ->
     lists:foreach(fun (VIP) ->
-        vip_del(IPVSMgr, NetNs, VIP)
+        vip_del(IPVSMgr, Namespace, VIP)
     end, ToDel),
     lists:foreach(fun (VIP) ->
-        vip_add(IPVSMgr, NetNs, VIP)
+        vip_add(IPVSMgr, Namespace, VIP)
     end, ToAdd),
     lists:foreach(fun (VIP) ->
-        vip_mod(IPVSMgr, NetNs, VIP)
+        vip_mod(IPVSMgr, Namespace, VIP)
     end, ToMod).
 
--spec(vip_add(pid(), netns() | host, {key(), [ipport()]}) -> ok).
-vip_add(IPVSMgr, NetNs, {{Protocol, IP, Port}, BEs}) ->
-    dcos_l4lb_ipvs_mgr:add_service(IPVSMgr, IP, Port, Protocol, NetNs),
+-spec(vip_add(pid(), namespace(), {key(), [ipport()]}) -> ok).
+vip_add(IPVSMgr, Namespace, {{Protocol, IP, Port}, BEs}) ->
+    dcos_l4lb_ipvs_mgr:add_service(IPVSMgr, IP, Port, Protocol, Namespace),
     lists:foreach(fun ({BEIP, BEPort}) ->
         dcos_l4lb_ipvs_mgr:add_dest(
             IPVSMgr, IP, Port,
             BEIP, BEPort,
-            Protocol, NetNs)
+            Protocol, Namespace)
     end, BEs).
 
--spec(vip_del(pid(), netns() | host, {key(), [ipport()]}) -> ok).
-vip_del(IPVSMgr, NetNs, {{Protocol, IP, Port}, _BEs}) ->
-    dcos_l4lb_ipvs_mgr:remove_service(IPVSMgr, IP, Port, Protocol, NetNs).
+-spec(vip_del(pid(), namespace(), {key(), [ipport()]}) -> ok).
+vip_del(IPVSMgr, Namespace, {{Protocol, IP, Port}, _BEs}) ->
+    dcos_l4lb_ipvs_mgr:remove_service(IPVSMgr, IP, Port, Protocol, Namespace).
 
--spec(vip_mod(pid(), netns() | host, {key(), [ipport()], [ipport()]}) -> ok).
-vip_mod(IPVSMgr, NetNs, {{Protocol, IP, Port}, ToAdd, ToDel}) ->
+-spec(vip_mod(pid(), namespace(), {key(), [ipport()], [ipport()]}) -> ok).
+vip_mod(IPVSMgr, Namespace, {{Protocol, IP, Port}, ToAdd, ToDel}) ->
     lists:foreach(fun ({BEIP, BEPort}) ->
         dcos_l4lb_ipvs_mgr:add_dest(
             IPVSMgr, IP, Port,
             BEIP, BEPort,
-            Protocol, NetNs)
+            Protocol, Namespace)
     end, ToAdd),
     lists:foreach(fun ({BEIP, BEPort}) ->
         dcos_l4lb_ipvs_mgr:remove_dest(
             IPVSMgr, IP, Port,
             BEIP, BEPort,
-            Protocol, NetNs)
+            Protocol, Namespace)
     end, ToDel).
 
 %%%===================================================================
@@ -415,13 +410,17 @@ is_reachable(AgentIP, Nodes, Tree) ->
 %%% Logging functions
 %%%===================================================================
 
--spec(netns2bin(host | netns()) -> binary()).
-netns2bin(host) ->
+-spec(namespace2bin(term()) -> binary()).
+namespace2bin(host) ->
     <<"host">>;
-netns2bin(#netns{ns=Ns}) when is_binary(Ns) ->
-    Ns;
-netns2bin(_NetNs) ->
-    <<"undef">>.
+namespace2bin(Namespace) ->
+    String =
+        try
+            io_lib:format("~s", [Namespace])
+        catch error:badarg ->
+            io_lib:format("~p", [Namespace])
+        end,
+    iolist_to_binary(String).
 
 -spec(log_vips_diff(diff_vips()) -> ok).
 log_vips_diff(Diff) ->
@@ -459,14 +458,14 @@ log_routes_diff(Prefix, {ToAdd, ToDel}) ->
         [Prefix, length(ToDel), ToDel]) || ToDel =/= [] ],
     ok.
 
--spec(log_netns_diff([NetNs], [NetNs]) -> ok
-    when NetNs :: host | netns()).
+-spec(log_netns_diff(Namespaces, Namespaces) -> ok
+    when Namespaces :: term()).
 log_netns_diff(Namespaces, Namespaces) ->
     ok;
 log_netns_diff(Namespaces, _PrevNamespaces) ->
     <<", ", Str/binary>> =
-        << <<", ", (netns2bin(NetNs))/binary>>
-        || NetNs <- Namespaces>>,
+        << <<", ", (namespace2bin(Namespace))/binary>>
+        || Namespace <- Namespaces>>,
     lager:notice("L4LB network namespaces: ~s", [Str]).
 
 %%%===================================================================
@@ -476,19 +475,19 @@ log_netns_diff(Namespaces, _PrevNamespaces) ->
 -spec(handle_netns_event(EventType, [netns()], state()) -> state()
     when EventType :: add_netns | remove_netns | reconcile_netns).
 handle_netns_event(remove_netns, ToDel,
-        #state{ipvs_mgr=IPVSMgr, route_mgr=RouteMgr, netns=Prev}=State) ->
+        #state{ipvs_mgr=IPVSMgr, route_mgr=RouteMgr, namespaces=Prev}=State) ->
     Namespaces = dcos_l4lb_route_mgr:remove_netns(RouteMgr, ToDel),
-    Namespaces = dcos_l4lb_route_mgr:remove_netns(IPVSMgr, ToDel),
+    Namespaces = dcos_l4lb_ipvs_mgr:remove_netns(IPVSMgr, ToDel),
     Result = ordsets:subtract(Prev, ordsets:from_list(Namespaces)),
     log_netns_diff(Result, Prev),
-    State#state{netns=Result};
+    State#state{namespaces=Result};
 handle_netns_event(add_netns, ToAdd,
-        #state{ipvs_mgr=IPVSMgr, route_mgr=RouteMgr, netns=Prev}=State) ->
+        #state{ipvs_mgr=IPVSMgr, route_mgr=RouteMgr, namespaces=Prev}=State) ->
     Namespaces = dcos_l4lb_route_mgr:add_netns(RouteMgr, ToAdd),
     Namespaces = dcos_l4lb_ipvs_mgr:add_netns(IPVSMgr, ToAdd),
     Result = ordsets:union(ordsets:from_list(Namespaces), Prev),
     log_netns_diff(Result, Prev),
-    State#state{netns=Result};
+    State#state{namespaces=Result};
 handle_netns_event(reconcile_netns, Namespaces, State) ->
     handle_netns_event(add_netns, Namespaces, State).
 
