@@ -5,7 +5,6 @@
     call/1,
     call/3,
     request/2,
-    request/4,
     http_options/0
 ]).
 
@@ -29,7 +28,7 @@ call(Request, HTTPOptions, Opts) ->
     ContentType = "application/json",
     HTTPRequest = {"/api/v1", [], ContentType, jiffy:encode(Request)},
     Opts0 = [{sync, false}|Opts],
-    {ok, Ref} = dcos_net_mesos:request(post, HTTPRequest, HTTPOptions, Opts0),
+    {ok, Ref} = request(post, HTTPRequest, HTTPOptions, Opts0),
     Timeout = application:get_env(dcos_net, mesos_timeout, 30000),
     receive
         {http, {Ref, stream_start, _Headers, Pid}} ->
@@ -39,6 +38,7 @@ call(Request, HTTPOptions, Opts) ->
         {http, {Ref, {StatusLine, _Headers, Data}}} ->
             {error, {http_status, StatusLine, Data}};
         {http, {Ref, {error, Error}}} ->
+            maybe_fatal_error(Error),
             {error, Error}
     after Timeout ->
         ok = httpc:cancel_request(Ref),
@@ -52,6 +52,7 @@ request(URIPath, Headers) ->
     Timeout = application:get_env(dcos_net, mesos_timeout, 30000),
     receive
         {http, {Ref, {error, Error}}} ->
+            maybe_fatal_error(Error),
             {error, Error};
         {http, {Ref, Response}} ->
             {ok, Response}
@@ -59,6 +60,10 @@ request(URIPath, Headers) ->
         ok = httpc:cancel_request(Ref),
         {error, timeout}
     end.
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
 
 -spec(request(
     httpc:method(), httpc:request(),
@@ -73,10 +78,6 @@ request(Method, Request, HTTPOptions, Opts) ->
     Request0 = setelement(1, Request, URI),
     Request1 = setelement(2, Request0, Headers1),
     httpc:request(Method, Request1, mesos_http_options(HTTPOptions), Opts).
-
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
 
 -spec(handle_response({ok, response()} | {error, Reason :: term()}) ->
     {ok, jiffy:json_term()} | {error, Reason :: term()}).
@@ -144,3 +145,16 @@ mesos_http_options() ->
             {client, Opts} = lists:keyfind(client, 1, DistOpts),
             [{ssl, Opts}]
     end.
+
+-spec(maybe_fatal_error(term()) -> ok | no_return()).
+maybe_fatal_error({failed_connect, Info}) ->
+    case lists:keyfind(inet, 1, Info) of
+        {inet, _App, {options, {_Opt, Filename, {error, enoent}}}} ->
+            % NOTE: Systemd will restart dcos-net immediately
+            % and bootstrap script will re-initialize all the certificates.
+            halt("TLS is broken, " ++ Filename ++ " doesn't exist.");
+        _Other ->
+            ok
+    end;
+maybe_fatal_error(_Error) ->
+    ok.
