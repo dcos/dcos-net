@@ -60,17 +60,44 @@ jobs:
               sudo apt-get install -y --no-install-recommends \
                   iproute2 dnsutils ipvsadm
       - run:
+          name: Installing codecov
+          command: pip install codecov
+      - run:
           name: Starting EPMD
           command: epmd -daemon
       - run:
           name: Checking eunit tests
           command: ./rebar3 eunit -v
       - run:
+          name: Sending eunit cover reports
+          command: |
+              set -xe
+              ./rebar3 as test cover
+              ./rebar3 as test covertool generate
+              ./rebar3 as test cover --reset
+              codecov -X gcov -F eunit -f _build/test/covertool/*.covertool.xml
+      - run:
           name: Checking common tests
           command: ./rebar3 ct -v
       - run:
+          name: Sending ct cover reports
+          command: |
+              set -xe
+              ./rebar3 as test cover
+              ./rebar3 as test covertool generate
+              ./rebar3 as test cover --reset
+              codecov -X gcov -F ct -f _build/test/covertool/*.covertool.xml
+      - run:
           name: Checking common tests as root
           command: sudo $(which escript) ./rebar3 ct -v
+      - run:
+          name: Sending ct2 cover reports
+          command: |
+              set -xe
+              ./rebar3 as test cover
+              ./rebar3 as test covertool generate
+              ./rebar3 as test cover --reset
+              codecov -X gcov -F ct2 -f _build/test/covertool/*.covertool.xml
       - run:
           name: Running cross reference analysis
           command: ./rebar3 xref
@@ -80,22 +107,5 @@ jobs:
       - run:
           name: Checking code style
           command: ./rebar3 as lint lint
-      - run:
-          name: Performing coverage analysis
-          command: ./rebar3 as test cover
-      - run:
-          name: Generating cover report
-          command: ./rebar3 as test covertool generate
-      - run:
-          name: Installing codecov
-          command: pip install codecov
-      - run:
-          name: Sending cover report
-          command: |
-              codecov -X gcov -f _build/test/covertool/dcos_net.covertool.xml
-              codecov -X gcov -f _build/test/covertool/dcos_dns.covertool.xml
-              codecov -X gcov -f _build/test/covertool/dcos_l4lb.covertool.xml
-              codecov -X gcov -f _build/test/covertool/dcos_overlay.covertool.xml
-              codecov -X gcov -f _build/test/covertool/dcos_rest.covertool.xml
       - store_artifacts:
           path: ~/dcos-net/_build/test/logs
