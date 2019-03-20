@@ -54,7 +54,11 @@
     when Key :: dcos_l4lb_mesos_poller:key(),
          Backend :: dcos_l4lb_mesos_poller:backend()).
 push_vips(VIPs) ->
-    gen_server:cast(?MODULE, {vips, VIPs}).
+    try
+        gen_server:call(?MODULE, {vips, VIPs})
+    catch exit:{noproc, _MFA} ->
+        ok
+    end.
 
 -spec(push_netns(EventType, [netns()]) -> ok
     when EventType :: add_netns | remove_netns | reconcile_netns).
@@ -75,11 +79,11 @@ init([]) ->
     self() ! init,
     {ok, []}.
 
+handle_call({vips, VIPs}, _From, State) ->
+    {reply, ok, handle_vips(VIPs, State)};
 handle_call(_Request, _From, State) ->
     {noreply, State}.
 
-handle_cast({vips, VIPs}, State) ->
-    {noreply, handle_vips(VIPs, State)};
 handle_cast({netns, Event}, State) ->
     {noreply, handle_netns_event(Event, State)};
 handle_cast(_Request, State) ->
@@ -189,14 +193,20 @@ handle_reconcile(VIPs, #state{route_mgr=RouteMgr, ipvs_mgr=IPVSMgr,
         LogPrefix = <<"netns: ", NamespaceBin/binary, "; ">>,
 
         PrevRoutes = get_routes(RouteMgr, Namespace),
-        DiffRoutes = dcos_net_utils:complement(Routes, PrevRoutes),
-        ok = apply_routes_diff(RouteMgr, Namespace, DiffRoutes),
-        ok = log_routes_diff(LogPrefix, DiffRoutes),
+        {RoutesToAdd, RoutesToDel} =
+            dcos_net_utils:complement(Routes, PrevRoutes),
 
         PrevVIPsP = get_vips(IPVSMgr, Namespace),
         DiffVIPs = diff(PrevVIPsP, VIPsP),
+
+        ok = remove_routes(RouteMgr, RoutesToDel, Namespace),
+        ok = log_routes_diff(LogPrefix, {[], RoutesToDel}),
+
         ok = apply_vips_diff(IPVSMgr, Namespace, DiffVIPs),
-        ok = log_vips_diff(LogPrefix, DiffVIPs)
+        ok = log_vips_diff(LogPrefix, DiffVIPs),
+
+        ok = add_routes(RouteMgr, RoutesToAdd, Namespace),
+        ok = log_routes_diff(LogPrefix, {RoutesToAdd, []})
     end, Namespaces),
     State#state{prev_ipvs=VIPs1, prev_routes=Routes}.
 
@@ -209,14 +219,24 @@ handle_vips(VIPs, #state{route_mgr=RouteMgr, ipvs_mgr=IPVSMgr,
     DiffVIPs = diff(prepare_vips(PrevVIPs), prepare_vips(VIPs1)),
 
     Routes = get_vip_routes(VIPs1),
-    DiffRoutes = dcos_net_utils:complement(Routes, PrevRoutes),
+    {RoutesToAdd, RoutesToDel} =
+        dcos_net_utils:complement(Routes, PrevRoutes),
 
     lists:foreach(fun (Namespace) ->
-        ok = apply_routes_diff(RouteMgr, Namespace, DiffRoutes),
+        ok = remove_routes(RouteMgr, RoutesToDel, Namespace)
+    end, Namespaces),
+    ok = log_routes_diff({[], RoutesToDel}),
+
+    lists:foreach(fun (Namespace) ->
         ok = apply_vips_diff(IPVSMgr, Namespace, DiffVIPs)
     end, Namespaces),
     ok = log_vips_diff(DiffVIPs),
-    ok = log_routes_diff(DiffRoutes),
+
+    lists:foreach(fun (Namespace) ->
+        ok = add_routes(RouteMgr, RoutesToAdd, Namespace)
+    end, Namespaces),
+    ok = log_routes_diff({RoutesToAdd, []}),
+
     State#state{vips=VIPs, prev_ipvs=VIPs1, prev_routes=Routes}.
 
 %%%===================================================================
@@ -225,11 +245,6 @@ handle_vips(VIPs, #state{route_mgr=RouteMgr, ipvs_mgr=IPVSMgr,
 
 -type diff_routes() :: {[inet:ip_address()], [inet:ip_address()]}.
 
--spec(apply_routes_diff(pid(), namespace(), diff_routes()) -> ok).
-apply_routes_diff(RouteMgr, Namespace, {ToAdd, ToDel}) ->
-    dcos_l4lb_route_mgr:add_routes(RouteMgr, ToAdd, Namespace),
-    dcos_l4lb_route_mgr:remove_routes(RouteMgr, ToDel, Namespace).
-
 -spec(get_routes(pid(), namespace()) -> [inet:ip_address()]).
 get_routes(RouteMgr, Namespace) ->
     dcos_l4lb_route_mgr:get_routes(RouteMgr, Namespace).
@@ -237,6 +252,14 @@ get_routes(RouteMgr, Namespace) ->
 -spec(get_vip_routes(VIPs :: [{key(), [backend()]}]) -> [inet:ip_address()]).
 get_vip_routes(VIPs) ->
     lists:usort([IP || {{_Proto, IP, _Port}, _Backends} <- VIPs]).
+
+-spec(add_routes(pid(), [inet:ip_address()], namespace()) -> ok).
+add_routes(RouteMgr, Routes, Namespace) ->
+    dcos_l4lb_route_mgr:add_routes(RouteMgr, Routes, Namespace).
+
+-spec(remove_routes(pid(), [inet:ip_address()], namespace()) -> ok).
+remove_routes(RouteMgr, Routes, Namespace) ->
+    dcos_l4lb_route_mgr:remove_routes(RouteMgr, Routes, Namespace).
 
 %%%===================================================================
 %%% IPVS functions

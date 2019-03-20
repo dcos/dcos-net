@@ -95,8 +95,8 @@ skip_kv_event(Event, Ref) ->
 handle_event(#{value := RawVIPs}) ->
     VIPs = process_vips(RawVIPs),
     ok = cleanup_mappings(VIPs),
-    ok = push_dns_records(),
-    dcos_l4lb_mgr:push_vips(VIPs).
+    ok = dcos_l4lb_mgr:push_vips(VIPs),
+    ok = push_dns_records().
 
 -spec(process_vips([{lkey(), [backend()]}]) -> [{key(), [backend()]}]).
 process_vips(VIPs) ->
