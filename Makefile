@@ -118,6 +118,11 @@ console: dev-shell
 
 dev: dev-install dev-stop
 	@ export ENABLE_CHECK_TIME=false && \
+	  export $(shell \
+	        systemctl cat dcos-net \
+	      | sed -ne 's/EnvironmentFile=-*//p' \
+	      | while read f; do [ -f $$f ] && echo $$f; done \
+	      | xargs grep -h '[^=]*=') && \
 	  systemctl cat dcos-net | sed -ne 's/ExecStartPre=//p' | tr '\n' '\0' | \
 	    xargs -0 -n 1 /opt/mesosphere/bin/dcos-shell bash -c
 	@ DCOS_NET_ENV_CMD="make" \
