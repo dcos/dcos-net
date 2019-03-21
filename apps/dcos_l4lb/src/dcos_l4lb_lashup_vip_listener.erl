@@ -131,8 +131,8 @@ handle_event(_Event = #{value := VIPs}, State) ->
 handle_value(VIPs0, State0) ->
     VIPs1 = process_vips(VIPs0, State0),
     State1 = State0#state{vips = VIPs1},
-    ok = push_state_to_dcos_dns(State1),
     dcos_l4lb_mgr:push_vips(VIPs1),
+    ok = push_state_to_dcos_dns(State1),
     State1.
 
 process_vips(VIPs0, State) ->
