@@ -7,7 +7,8 @@
     is_leader/0,
     next/1,
     poll/0,
-    from_state/1
+    from_state/1,
+    init_metrics/0
 ]).
 
 %% gen_server callbacks
@@ -133,8 +134,10 @@ handle_info({'DOWN', _MonRef, process, Pid, _Info}, State) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
+terminate(normal, _State) ->
+    ok;
 terminate(_Reason, _State) ->
-    ok.
+    prometheus_counter:inc(mesos_listener, failures_total, [], 1).
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -852,22 +855,29 @@ handle_unsubscribe(Pid, #state{subs=Subs}=State) ->
 notify(_TaskId, _Task, #state{subs=undefined}=State) ->
     State;
 notify(TaskId, Task, #state{subs=Subs, timeout=Timeout}=State) ->
-    maps:fold(fun (Pid, Ref, ok) ->
-        Pid ! {task_updated, Ref, TaskId, Task},
-        ok
-    end, ok, Subs),
+    Begin = erlang:monotonic_time(),
+    try
+        maps:fold(fun (Pid, Ref, ok) ->
+            Pid ! {task_updated, Ref, TaskId, Task},
+            ok
+        end, ok, Subs),
 
-    maps:fold(fun (Pid, Ref, St) ->
-        receive
-            {next, Ref} ->
-                St;
-            {'DOWN', _MonRef, process, Pid, _Info} ->
-                handle_unsubscribe(Pid, St)
-        after Timeout div 3 ->
-            exit(Pid, {?MODULE, timeout}),
-            St
-        end
-    end, State, Subs).
+        maps:fold(fun (Pid, Ref, St) ->
+            receive
+                {next, Ref} ->
+                    St;
+                {'DOWN', _MonRef, process, Pid, _Info} ->
+                    handle_unsubscribe(Pid, St)
+            after Timeout div 3 ->
+                exit(Pid, {?MODULE, timeout}),
+                St
+            end
+        end, State, Subs)
+    after
+        prometheus_summary:observe(
+            mesos_listener, pubsub_duration_seconds,
+            [], erlang:monotonic_time() - Begin)
+    end.
 
 %%%===================================================================
 %%% Maps Functions
@@ -932,16 +942,19 @@ handle_init(State0) ->
             State0;
         {error, Error} ->
             lager:error("Couldn't connect to mesos: ~p", [Error]),
+            prometheus_counter:inc(mesos_listener, failures_total, [], 1),
             erlang:send_after(Timeout, self(), init),
             State0
     end.
 
 -spec(start_stream() -> {ok, state()} | {error, term()}).
 start_stream() ->
+    prometheus_boolean:set(mesos_listener, is_leader, [], false),
     Opts = [{stream, {self, once}}],
     Request = #{type => <<"SUBSCRIBE">>},
     case dcos_net_mesos:call(Request, [{timeout, infinity}], Opts) of
         {ok, Ref, Pid} ->
+            prometheus_boolean:set(mesos_listener, is_leader, [], true),
             httpc:stream_next(Pid),
             erlang:monitor(process, Pid),
             State = #state{pid=Pid, ref=Ref},
@@ -955,11 +968,14 @@ start_stream() ->
 -spec(handle_stream(binary(), state()) ->
     {noreply, state()} | {stop, term(), state()}).
 handle_stream(Data, State) ->
+    Size = byte_size(Data),
+    prometheus_counter:inc(mesos_listener, bytes_total, [], Size),
     case stream(Data, State) of
         {next, State0} ->
             {noreply, State0};
         {next, Obj, State0} ->
             State1 = handle(Obj, State0),
+            handle_metrics(State1),
             handle_stream(<<>>, State1);
         {error, Error} ->
             lager:error("Mesos protocol error: ~p", [Error]),
@@ -986,14 +1002,90 @@ stream(Data, #state{pid=Pid, size=Size, buf=Buf}=State) ->
     Buf0 = <<Buf/binary, Data/binary>>,
     case byte_size(Buf0) of
         BufSize when BufSize >= Size ->
-            <<Head:Size/binary, Tail/binary>> = Buf0,
-            State0 = State#state{size=undefined, buf=Tail},
-            try jiffy:decode(Head, [return_maps]) of Obj ->
-                {next, Obj, State0}
-            catch error:Error ->
-                {error, Error}
-            end;
+            stream_decode(Buf0, Size, State);
         _BufSize ->
             httpc:stream_next(Pid),
             {next, State#state{buf=Buf0}}
     end.
+
+-spec(stream_decode(binary(), integer(), State) -> {error, term()} |
+     {next, State} | {next, jiffy:object(), State}
+         when State :: state()).
+stream_decode(Buf, Size, State) ->
+    <<Head:Size/binary, Tail/binary>> = Buf,
+    State0 = State#state{size=undefined, buf=Tail},
+    prometheus_counter:inc(mesos_listener, messages_total, [], 1),
+    try jiffy:decode(Head, [return_maps]) of Obj ->
+        {next, Obj, State0}
+    catch error:Error ->
+        {error, Error}
+    end.
+
+%%%===================================================================
+%%% Metrics functions
+%%%===================================================================
+
+-spec(init_metrics() -> ok).
+init_metrics() ->
+    init_metrics_pubsub(),
+    init_metrics_mesos_state(),
+    init_metrics_received().
+
+init_metrics_pubsub() ->
+    prometheus_summary:new([
+        {registry, mesos_listener},
+        {name, pubsub_duration_seconds},
+        {help, "The time spent notifying all subscribers of mesos_listener."}]).
+
+init_metrics_received() ->
+    prometheus_counter:new([
+        {registry, mesos_listener},
+        {name, bytes_total},
+        {help, "Total number of bytes received form the Mesos stream."}]),
+    prometheus_counter:new([
+        {registry, mesos_listener},
+        {name, failures_total},
+        {help, "Total number of failures listening to the Mesos stream."}]),
+    prometheus_boolean:new([
+        {registry, mesos_listener},
+        {name, is_leader},
+        {help, "True if listening from the leader node."}]),
+    prometheus_counter:new([
+        {registry, mesos_listener},
+        {name, messages_total},
+        {help, "Total number of messages received from the Mesos stream."}]).
+
+init_metrics_mesos_state() ->
+    prometheus_gauge:new([
+        {registry, mesos_listener},
+        {name, agents_total},
+        {help, "Total number of agents seem on the Mesos stream."}]),
+    prometheus_gauge:new([
+        {registry, mesos_listener},
+        {name, frameworks_total},
+        {help, "Total number of frameworks seen on the Mesos stream."}]),
+    prometheus_gauge:new([
+        {registry, mesos_listener},
+        {name, tasks_total},
+        {help, "Total number of tasks seen on the Mesos stream."}]),
+    prometheus_gauge:new([
+        {registry, mesos_listener},
+        {name, waiting_tasks_total},
+        {help, "Total number of tasks with no agent/framework information."}]).
+
+-spec(handle_metrics(state()) -> state()).
+handle_metrics(#state{agents=A, frameworks=F,
+        tasks=T, waiting_tasks=WT}=State) ->
+    prometheus_gauge:set(
+        mesos_listener, tasks_total, [],
+        maps:size(T)),
+    prometheus_gauge:set(
+        mesos_listener, waiting_tasks_total, [],
+        maps:size(WT)),
+    prometheus_gauge:set(
+        mesos_listener, frameworks_total, [],
+        maps:size(F)),
+    prometheus_gauge:set(
+        mesos_listener, agents_total, [],
+        maps:size(A)),
+    State.

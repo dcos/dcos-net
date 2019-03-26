@@ -553,6 +553,9 @@ setup(FileName) ->
             Pid ! stream_next
         end),
 
+    ok = application:start(prometheus),
+    dcos_net_mesos_listener:init_metrics(),
+
     {ok, _Pid} = dcos_net_mesos_listener:start_link(),
     stream_wait(),
 
@@ -568,6 +571,8 @@ cleanup(_Tasks) ->
 
     exit(Pid, kill),
     exit(StreamPid, kill),
+
+    ok = application:stop(prometheus),
 
     meck:unload(httpc).
 
