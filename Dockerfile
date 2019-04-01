@@ -1,4 +1,4 @@
-FROM erlang:21.1
+FROM erlang:21.3
 
 RUN apt-get update && apt-get install -y \
         dnsutils ipvsadm \
