@@ -3,7 +3,6 @@ jobs:
   build:
     machine:
       enabled: true
-      image: ubuntu-1604:20190301-01
     working_directory: '~/dcos-net'
     environment:
       - OTP_VERSION: "21.3"
@@ -70,6 +69,7 @@ jobs:
                        iproute2 dnsutils ipvsadm &&
                   exit 0
 
+                  ps xua | grep apt
                   echo "Retry apt-get"
                   retries=$[$retries-1]
                   sleep $sleep_time
