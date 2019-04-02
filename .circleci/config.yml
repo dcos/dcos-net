@@ -3,7 +3,7 @@ jobs:
   build:
     machine:
       enabled: true
-      image: circleci/classic:201710-01
+      image: ubuntu-1604:20190301-01
     working_directory: '~/dcos-net'
     environment:
       - OTP_VERSION: "21.3"
