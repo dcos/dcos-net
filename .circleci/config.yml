@@ -68,12 +68,13 @@ jobs:
                   sudo apt-get update &&
                   sudo apt-get install -y --no-install-recommend \
                        iproute2 dnsutils ipvsadm &&
-                  break
+                  exit 0
 
                   echo "Retry apt-get"
                   retries=$[$retries-1]
                   sleep $sleep_time
               done
+              exit 1
       - run:
           name: Installing codecov
           command: pip install codecov
