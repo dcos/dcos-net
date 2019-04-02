@@ -58,9 +58,22 @@ jobs:
           name: Installing test dependencies
           command: |
               set -xe
-              sudo apt-get update
-              sudo apt-get install -y --no-install-recommends \
-                  iproute2 dnsutils ipvsadm
+
+              # https://discuss.circleci.com/t/machine-executor-still-running-apt-when-commands-execute/29200/9
+              retries=10
+              sleep_time=2
+              until [ $retries -eq 0 ]
+              do
+
+                  sudo apt-get update &&
+                  sudo apt-get install -y --no-install-recommend \
+                       iproute2 dnsutils ipvsadm &&
+                  break
+
+                  echo "Retry apt-get"
+                  retries=$[$retries-1]
+                  sleep $sleep_time
+              done
       - run:
           name: Installing codecov
           command: pip install codecov
