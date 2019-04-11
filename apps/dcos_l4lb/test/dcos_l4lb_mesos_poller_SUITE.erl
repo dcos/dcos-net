@@ -29,7 +29,7 @@ end_per_suite(Config) ->
     Config.
 
 init_per_testcase(_, Config) ->
-    meck:new(dcos_net_mesos_listener, [no_link]),
+    meck:new(dcos_net_mesos_listener, [no_link, passthrough]),
     meck:expect(dcos_net_mesos_listener, poll, fun meck_mesos_poll/0),
 
     meck:new(dcos_l4lb_mgr, [no_link]),
