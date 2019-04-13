@@ -18,6 +18,7 @@ init_per_suite(Config) ->
 
 end_per_suite(Config) ->
     os:cmd("ip link del minuteman"),
+    dcos_l4lb_ipset_mgr:cleanup(),
     Config.
 
 test_restart(Config) ->
