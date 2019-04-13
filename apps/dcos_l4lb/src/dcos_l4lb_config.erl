@@ -17,8 +17,10 @@
   agent_polling_enabled/0,
   min_named_ip/0,
   max_named_ip/0,
+  ipv6_enabled/0,
   min_named_ip6/0,
   max_named_ip6/0,
+  ipset_enabled/0,
   dcos_l4lb_iface/0,
   metrics_interval_seconds/0,
   metrics_splay_seconds/0,
@@ -59,8 +61,14 @@ max_named_ip() ->
   application:get_env(dcos_l4lb, max_named_ip, {11, 0, 0, 254}).
 -endif.
 
+ipv6_enabled() ->
+  application:get_env(dcos_l4lb, enable_ipv6, true).
+
 min_named_ip6() ->
   application:get_env(dcos_l4lb, min_named_ip6, {16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#0}).
 
 max_named_ip6() ->
   application:get_env(dcos_l4lb, max_named_ip6, {16#fd01, 16#c, 16#0, 16#0, 16#ffff, 16#ffff, 16#ffff, 16#ffff}).
+
+ipset_enabled() ->
+  application:get_env(dcos_l4lb, ipset_enabled, true).

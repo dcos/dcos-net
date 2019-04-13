@@ -181,7 +181,7 @@ key(Task, PortObj, VIPLabel) ->
 
 -spec(backends(key(), task(), task_port()) -> [backend()]).
 backends(Key, Task, PortObj) ->
-    IsIPv6Enabled = application:get_env(dcos_l4lb, enable_ipv6, true),
+    IsIPv6Enabled = dcos_l4lb_config:ipv6_enabled(),
     AgentIP = maps:get(agent_ip, Task),
     case maps:find(host_port, PortObj) of
         error ->
