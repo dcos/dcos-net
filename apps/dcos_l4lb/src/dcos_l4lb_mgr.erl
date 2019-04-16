@@ -13,7 +13,8 @@
 -export([
     push_vips/1,
     push_netns/2,
-    local_port_mappings/1
+    local_port_mappings/1,
+    init_metrics/0
 ]).
 
 -export([start_link/0]).
@@ -54,10 +55,15 @@
     when Key :: dcos_l4lb_mesos_poller:key(),
          Backend :: dcos_l4lb_mesos_poller:backend()).
 push_vips(VIPs) ->
+    Begin = erlang:monotonic_time(),
     try
         gen_server:call(?MODULE, {vips, VIPs})
     catch exit:{noproc, _MFA} ->
         ok
+    after
+        prometheus_summary:observe(
+            l4lb, update_vips_seconds,
+            [], erlang:monotonic_time() - Begin)
     end.
 
 -spec(push_netns(EventType, [netns()]) -> ok
@@ -239,7 +245,6 @@ handle_reconcile_apply(
         ok = add_routes(RouteMgr, RoutesToAdd, Namespace),
         ok = log_routes_diff(LogPrefix, {RoutesToAdd, []})
     end, Diffs),
-
     State.
 
 -spec(handle_vips([{key(), [backend()]}], state()) -> state()).
@@ -348,7 +353,6 @@ prepare_vips(VIPs) ->
 get_vips(IPVSMgr, Namespace) ->
     Services = get_vip_services(IPVSMgr, Namespace),
     lists:map(fun (S) -> get_vip(IPVSMgr, Namespace, S) end, Services).
-
 -spec(get_vip_services(pid(), namespace()) -> [Service]
     when Service :: dcos_l4lb_ipvs_mgr:service()).
 get_vip_services(IPVSMgr, Namespace) ->
@@ -457,12 +461,31 @@ diff(ListA, [], Acc, Bcc, Mcc) ->
 healthy_vips(VIPs, Nodes, Tree)
         when map_size(Tree) =:= 0;
              map_size(Nodes) =:= 0 ->
+    % what to say about backends here?
+    prometheus_gauge:set(l4lb, backends, [], 0),
+    prometheus_gauge:set(l4lb, unreachable_backends, [], 0),
+    prometheus_gauge:set(l4lb, unreachable_vips,
+        [], 0),
     VIPs;
 healthy_vips(VIPs, Nodes, Tree) ->
     Agents = agents(VIPs, Nodes, Tree),
-    lists:map(fun ({VIP, BEs}) ->
-        {VIP, healthy_backends(BEs, Agents)}
-    end, VIPs).
+    HealthyVIPs = lists:map(fun ({VIP, BEs}) ->
+        HealthyBEs = healthy_backends(BEs, Agents),
+        BEsCount = length(BEs),
+        {VIP, HealthyBEs, BEsCount, BEsCount - length(HealthyBEs)}
+    end, VIPs),
+    {BEsCount, UnreachableBEsCount} =
+        lists:foldl(fun({_,_,BEs, HealthyBEs}, {AccBEs, AccHealthyBEs}) ->
+            {BEs + AccBEs, HealthyBEs + AccHealthyBEs}
+        end, {0, 0}, HealthyVIPs),
+
+    prometheus_gauge:set(l4lb, backends, [], BEsCount),
+    prometheus_gauge:set(l4lb, unreachable_backends, [], UnreachableBEsCount),
+    prometheus_gauge:set(
+        l4lb, unreachable_vips,
+        [], length(VIPs) - length(HealthyVIPs)),
+    HealthyVIPs.
+
 
 -spec(agents(VIPs, Nodes, Tree) -> #{inet:ip4_address() => boolean()}
     when VIPs :: [{key(), [backend()]}],
@@ -476,6 +499,7 @@ agents(VIPs, Nodes, Tree) ->
     AgentIPs0 = lists:usort(AgentIPs),
     Result = [{IP, is_reachable(IP, Nodes, Tree)} || IP <- AgentIPs0],
     Unreachable = [IP || {IP, false} <- Result],
+    prometheus_gauge:set(l4lb, unreachable_nodes, [], length(Unreachable)),
     [ lager:warning(
         "L4LB unreachable agent nodes, size: ~p, ~p",
         [length(Unreachable), Unreachable])
@@ -585,6 +609,7 @@ handle_netns_event(remove_netns, ToDel,
         #state{ipvs_mgr=IPVSMgr, route_mgr=RouteMgr, namespaces=Prev}=State) ->
     Namespaces = dcos_l4lb_route_mgr:remove_netns(RouteMgr, ToDel),
     Namespaces = dcos_l4lb_ipvs_mgr:remove_netns(IPVSMgr, ToDel),
+    prometheus_gauge:set(l4lb, netns, [], length(Namespaces)),
     Result = ordsets:subtract(Prev, ordsets:from_list(Namespaces)),
     log_netns_diff(Result, Prev),
     State#state{namespaces=Result};
@@ -666,6 +691,42 @@ local_port_mappings() ->
     catch error:badarg ->
         #{}
     end.
+
+%%%===================================================================
+%%% Metrics functions
+%%%===================================================================
+
+-spec(init_metrics() -> ok).
+init_metrics() ->
+    % vip metric
+    prometheus_gauge:new([
+       {registry, l4lb},
+       {name, backends},
+       {help, "Current number of Backends."}]),
+    prometheus_gauge:new([
+       {registry, l4lb},
+       {name, unreachable_backends},
+       {help, "Current number of Unreachable Backends."}]),
+    prometheus_gauge:new([
+       {registry, l4lb},
+       {name, unreachable_vips},
+       {help, "Current number of Unreachable VIPs."}]),
+    prometheus_gauge:new([
+       {registry, l4lb},
+       {name, unreachable_nodes},
+       {help, "Current number of Unreachable Nodes."}]),
+    prometheus_summary:new([
+       {registry, l4lb},
+       {name, update_vips_seconds},
+       {help, "Time spent updating VIPs information."}]),
+    prometheus_gauge:new([
+       {registry, l4lb},
+       {name, netns},
+       {help, "Current number of of network namespaces."}]).
+
+%%%===================================================================
+%%% Test functions
+%%%===================================================================
 
 -ifdef(TEST).
 

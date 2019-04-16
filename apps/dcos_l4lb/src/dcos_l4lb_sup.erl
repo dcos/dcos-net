@@ -32,5 +32,7 @@ get_children(true) ->
     ].
 
 init([Enabled]) ->
+    dcos_l4lb_mesos_poller:init_metrics(),
+    dcos_l4lb_mgr:init_metrics(),
     {ok, {#{intensity => 10000, period => 1}, get_children(Enabled)}}.
 
