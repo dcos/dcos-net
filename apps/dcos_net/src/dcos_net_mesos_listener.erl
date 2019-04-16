@@ -1027,9 +1027,43 @@ stream_decode(Buf, Size, State) ->
 
 -spec(init_metrics() -> ok).
 init_metrics() ->
-    init_metrics_pubsub(),
     init_metrics_mesos_state(),
+    init_metrics_mesos_polled_state(),
+    init_metrics_pubsub(),
     init_metrics_received().
+
+init_metrics_mesos_state() ->
+    prometheus_gauge:new([
+        {registry, mesos_listener},
+        {name, agents_total},
+        {help, "Total number of agents seem on the Mesos stream."}]),
+    prometheus_gauge:new([
+        {registry, mesos_listener},
+        {name, frameworks_total},
+        {help, "Total number of frameworks seen on the Mesos stream."}]),
+    prometheus_gauge:new([
+        {registry, mesos_listener},
+        {name, tasks_total},
+        {help, "Total number of tasks seen on the Mesos stream."}]),
+    prometheus_gauge:new([
+        {registry, mesos_listener},
+        {name, waiting_tasks_total},
+        {help, "Total number of tasks with no agent/framework information."}]).
+
+% transform those on polled metrics
+init_metrics_mesos_polled_state() ->
+    prometheus_counter:new([
+       {registry, l4lb},
+       {name, poll_failures_total},
+       {help, "Total number of poll errors."}]),
+    prometheus_summary:new([
+       {registry, l4lb},
+       {name, poll_process_duration_seconds},
+       {help, "Time to process state from mesos."}]),
+    prometheus_summary:new([
+       {registry, l4lb},
+       {name, poll_request_duration_seconds},
+       {help, "Time to request state from mesos."}]).
 
 init_metrics_pubsub() ->
     prometheus_summary:new([
@@ -1054,24 +1088,6 @@ init_metrics_received() ->
         {registry, mesos_listener},
         {name, messages_total},
         {help, "Total number of messages received from the Mesos stream."}]).
-
-init_metrics_mesos_state() ->
-    prometheus_gauge:new([
-        {registry, mesos_listener},
-        {name, agents_total},
-        {help, "Total number of agents seem on the Mesos stream."}]),
-    prometheus_gauge:new([
-        {registry, mesos_listener},
-        {name, frameworks_total},
-        {help, "Total number of frameworks seen on the Mesos stream."}]),
-    prometheus_gauge:new([
-        {registry, mesos_listener},
-        {name, tasks_total},
-        {help, "Total number of tasks seen on the Mesos stream."}]),
-    prometheus_gauge:new([
-        {registry, mesos_listener},
-        {name, waiting_tasks_total},
-        {help, "Total number of tasks with no agent/framework information."}]).
 
 -spec(handle_metrics(state()) -> state()).
 handle_metrics(#state{agents=A, frameworks=F,

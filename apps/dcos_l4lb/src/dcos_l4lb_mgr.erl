@@ -63,7 +63,8 @@ push_vips(VIPs) ->
     after
         prometheus_summary:observe(
             l4lb, update_vips_seconds,
-            [], erlang:monotonic_time() - Begin)
+            [], erlang:monotonic_time() - Begin),
+        prometheus_gauge:set(l4lb, vips, [], length(VIPs))
     end.
 
 -spec(push_netns(EventType, [netns()]) -> ok
@@ -246,6 +247,10 @@ handle_reconcile_apply(
         ok = log_routes_diff(LogPrefix, {RoutesToAdd, []})
     end, Diffs),
     State.
+    % not quite
+    %% prometheus_counter:inc(
+        %% l4lb, reconciliation_changes_total,
+        %% [], length(VIPs1) - length(VIPsP)),
 
 -spec(handle_vips([{key(), [backend()]}], state()) -> state()).
 handle_vips(VIPs, #state{tree=Tree, nodes=Nodes, prev_vips=PrevVIPs}=State) ->
@@ -484,7 +489,7 @@ healthy_vips(VIPs, Nodes, Tree) ->
     prometheus_gauge:set(
         l4lb, unreachable_vips,
         [], length(VIPs) - length(HealthyVIPs)),
-    HealthyVIPs.
+    lists:map(fun({VIP, HealthyBEs, _, _}) -> {VIP, HealthyBEs} end, HealthyVIPs).
 
 
 -spec(agents(VIPs, Nodes, Tree) -> #{inet:ip4_address() => boolean()}
@@ -698,19 +703,22 @@ local_port_mappings() ->
 
 -spec(init_metrics() -> ok).
 init_metrics() ->
-    % vip metric
+    prometheus_gauge:new([
+       {registry, l4lb},
+       {name, vips},
+       {help, "The number of vips."}]),
     prometheus_gauge:new([
        {registry, l4lb},
        {name, backends},
-       {help, "Current number of Backends."}]),
+       {help, "The number of Backends."}]),
     prometheus_gauge:new([
        {registry, l4lb},
        {name, unreachable_backends},
-       {help, "Current number of Unreachable Backends."}]),
+       {help, "Thu number of unreachable backends."}]),
     prometheus_gauge:new([
        {registry, l4lb},
        {name, unreachable_vips},
-       {help, "Current number of Unreachable VIPs."}]),
+       {help, "The number of unreachable vips."}]),
     prometheus_gauge:new([
        {registry, l4lb},
        {name, unreachable_nodes},

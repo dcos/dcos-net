@@ -112,9 +112,9 @@ handle_poll(true) ->
 handle_poll_state(Tasks) ->
     Begin = erlang:monotonic_time(),
     HealthyTasks = maps:filter(fun is_healthy/2, Tasks),
-    prometheus_gauge:set(l4lb, local_tasks_total, [], maps:size(Tasks)),
+    prometheus_gauge:set(l4lb, local_tasks, [], maps:size(Tasks)),
     prometheus_gauge:set(
-        l4lb, local_healthy_tasks_total,
+        l4lb, local_healthy_tasks,
         [], maps:size(HealthyTasks)),
 
     PortMappings = collect_port_mappings(HealthyTasks),
@@ -211,7 +211,7 @@ backends(Key, Task, PortObj) ->
         {ok, HostPort} ->
             [{AgentIP, {AgentIP, HostPort}}]
     end,
-    prometheus_gauge:set(l4lb, local_backends_total, [], Backends),
+    prometheus_gauge:set(l4lb, local_backends, [], length(Backends)),
     Backends.
 
 -spec(validate_backend_ip(boolean(), key(), inet:ip_address()) -> boolean()).
@@ -241,8 +241,7 @@ push_vips(LocalVIPs) ->
     VIPs = lashup_kv:value(?VIPS_KEY2),
     Ops = generate_ops(LocalVIPs, VIPs),
     push_ops(?VIPS_KEY2, Ops),
-    prometheus_gauge:set(l4lb, local_vips_total, [], maps:size(LocalVIPs)),
-    prometheus_counter:inc(l4lb, events_updates_total, [], 1),
+    prometheus_gauge:set(l4lb, local_vips, [], maps:size(LocalVIPs)),
     log_ops(Ops).
 
 -spec(generate_ops(#{key() => [backend()]}, [{lkey(), [backend()]}]) ->
@@ -318,7 +317,7 @@ init_metrics() ->
     prometheus_gauge:new([
         {registry, l4lb},
         {name, local_vips},
-        {help, "The number of local vips."}]),
+        {help, "The number of local VIPs."}]),
     prometheus_gauge:new([
        {registry, l4lb},
        {name, local_tasks},
