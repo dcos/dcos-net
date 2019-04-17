@@ -68,6 +68,7 @@ init([]) ->
     {ok, {}, {continue, dcos_l4lb_config:ipset_enabled()}}.
 
 handle_continue(false, {}) ->
+    cleanup(),
     {noreply, disabled};
 handle_continue(true, {}) ->
     {ok, Pid} = gen_netlink_client:start_link(?NETLINK_NETFILTER),
