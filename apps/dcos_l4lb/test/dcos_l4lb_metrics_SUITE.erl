@@ -48,6 +48,7 @@ end_per_testcase(_, _Config) ->
     end || {App, _, _} <- application:which_applications(),
     not lists:member(App, [stdlib, kernel]) ],
     os:cmd("rm -rf Mnesia.*"),
+    dcos_l4lb_ipset_mgr:cleanup(),
     ok.
 
 test_init(_Config) -> ok.
