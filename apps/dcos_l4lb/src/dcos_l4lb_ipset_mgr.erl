@@ -174,7 +174,7 @@ create_ipset(Pid, Family, Name, Type) ->
         {revision, min(?IPSET_REVISION_WITH_COUNTERS, Rev)},
         {family, Family},
         {data,
-            case Rev > ?IPSET_REVISION_WITH_COUNTERS of
+            case Rev >= ?IPSET_REVISION_WITH_COUNTERS of
                 true -> [{cadt_flags, ?IPSET_FLAG_WITH_COUNTERS}];
                 false -> []
             end}
