@@ -123,20 +123,44 @@ terminate(_Reason, _State) ->
 get_protocol_version(Pid) ->
     case request(Pid, protocol, [request], [{protocol, ?IPSET_PROTOCOL}]) of
         {ok, Response} ->
-            case lists:keyfind(protocol, 1, Response) of
-                {protocol, ?IPSET_PROTOCOL} ->
+            case get_protocol_versions(Response) of
+                {ok, ?IPSET_PROTOCOL} ->
                     {ok, ?IPSET_PROTOCOL};
-                {protocol, Ver} ->
+                {ok, Ver} ->
                     lager:alert(
                         "ipset protocol (ver. ~p) is not supported: ~p",
                         [?IPSET_PROTOCOL, Ver]),
                     {error, Ver};
-                false ->
+                {ok, Ver, VerMin}
+                    when Ver >= ?IPSET_PROTOCOL,
+                         VerMin =< ?IPSET_PROTOCOL ->
+                    {ok, ?IPSET_PROTOCOL};
+                {ok, Ver, VerMin} ->
+                    lager:alert(
+                        "ipset protocol (ver. ~p) is not supported: ~p, ~p",
+                        [?IPSET_PROTOCOL, Ver, VerMin]),
+                    {error, Ver};
+                error ->
                     lager:alert("Failed to initialize ipset"),
-                    {error, failed}
+                    {error, no_version}
             end;
         {error, Error, _Response} ->
             {error, Error}
+    end.
+
+-spec(get_protocol_versions(term()) -> {ok, Ver} | {ok, Ver, Ver} | error
+    when Ver :: non_neg_integer()).
+get_protocol_versions(Response) ->
+    case lists:keyfind(protocol, 1, Response) of
+        {protocol, Ver} ->
+            case lists:keyfind(protocol_min, 1, Response) of
+                {protocol_min, VerMin} ->
+                    {ok, Ver, VerMin};
+                false ->
+                    {ok, Ver}
+            end;
+        false ->
+            error
     end.
 
 -spec(get_supported_revision(pid(), string(), family()) ->
