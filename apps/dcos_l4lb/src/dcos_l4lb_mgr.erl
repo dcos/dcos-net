@@ -26,6 +26,7 @@
     % pids and refs
     ipvs_mgr :: pid(),
     route_mgr :: pid(),
+    ipset_mgr :: pid(),
     netns_mgr :: pid(),
     route_ref :: reference(),
     nodes_ref :: reference(),
@@ -36,8 +37,7 @@
     namespaces = [host] :: [namespace()],
     % vips
     vips = [] :: [{key(), [backend()]}],
-    prev_ipvs = [] :: [{key(), [ipport()]}],
-    prev_routes = [] :: [inet:ip_address()]
+    prev_vips = [] :: [{key(), [ipport()]}]
 }).
 -type state() :: #state{}.
 
@@ -125,6 +125,7 @@ end)(Init)).
 handle_init() ->
     {ok, IPVSMgr} = dcos_l4lb_ipvs_mgr:start_link(),
     {ok, RouteMgr} = dcos_l4lb_route_mgr:start_link(),
+    {ok, IPSetMgr} = dcos_l4lb_ipset_mgr:start_link(),
     {ok, NetNSMgr} = dcos_l4lb_netns_watcher:start_link(),
 
     MatchSpec = ets:fun2ms(fun ({?NODEMETADATA_KEY}) -> true end),
@@ -132,8 +133,10 @@ handle_init() ->
     {ok, RouteRef} = lashup_gm_route_events:subscribe(),
     ReconRef = start_reconcile_timer(),
 
-    #state{ipvs_mgr=IPVSMgr, route_mgr=RouteMgr, netns_mgr=NetNSMgr,
-           route_ref=RouteRef, nodes_ref=NodesRef, recon_ref=ReconRef}.
+    #state{ipvs_mgr=IPVSMgr, route_mgr=RouteMgr,
+           ipset_mgr=IPSetMgr, netns_mgr=NetNSMgr,
+           route_ref=RouteRef, nodes_ref=NodesRef,
+           recon_ref=ReconRef}.
 
 -spec(handle_gm_event(?GM_EVENTS(Ref, Tree), state()) -> state()
     when Ref :: reference(), Tree :: lashup_gm_route:tree()).
@@ -181,63 +184,111 @@ start_reconcile_timer() ->
 %%%===================================================================
 
 -spec(handle_reconcile([{key(), [backend()]}], state()) -> state()).
-handle_reconcile(VIPs, #state{route_mgr=RouteMgr, ipvs_mgr=IPVSMgr,
-        tree=Tree, nodes=Nodes, namespaces=Namespaces}=State) ->
+handle_reconcile(VIPs, #state{tree=Tree, nodes=Nodes, namespaces=Namespaces,
+        route_mgr=RouteMgr, ipvs_mgr=IPVSMgr, ipset_mgr=IPSetMgr}=State) ->
     % If everything is ok this function is silent and changes nothing.
     VIPs0 = vips_port_mappings(VIPs),
     VIPs1 = healthy_vips(VIPs0, Nodes, Tree),
     VIPsP = prepare_vips(VIPs1),
-    Routes = get_vip_routes(VIPs1),
-    lists:foreach(fun (Namespace) ->
-        NamespaceBin = namespace2bin(Namespace),
-        LogPrefix = <<"netns: ", NamespaceBin/binary, "; ">>,
+    Routes = get_vip_routes(VIPs),
+    Diffs =
+        lists:map(fun (Namespace) ->
+            NamespaceBin = namespace2bin(Namespace),
+            LogPrefix = <<"netns: ", NamespaceBin/binary, "; ">>,
 
-        PrevRoutes = get_routes(RouteMgr, Namespace),
-        {RoutesToAdd, RoutesToDel} =
-            dcos_net_utils:complement(Routes, PrevRoutes),
+            PrevRoutes = get_routes(RouteMgr, Namespace),
+            DiffRoutes = dcos_net_utils:complement(Routes, PrevRoutes),
 
-        PrevVIPsP = get_vips(IPVSMgr, Namespace),
-        DiffVIPs = diff(PrevVIPsP, VIPsP),
+            PrevVIPsP = get_vips(IPVSMgr, Namespace),
+            DiffVIPs = diff(PrevVIPsP, VIPsP),
 
+            {Namespace, LogPrefix, DiffRoutes, DiffVIPs}
+        end, Namespaces),
+
+    Keys = get_vip_keys(VIPs1),
+    PrevKeys = get_ipset_entries(IPSetMgr),
+    DiffKeys = dcos_net_utils:complement(Keys, PrevKeys),
+
+    State0 = handle_reconcile_apply(Diffs, DiffKeys, State),
+
+    State0#state{prev_vips=VIPs1}.
+
+-spec(handle_reconcile_apply([Diff], diff_keys(), state()) -> state()
+    when Diff :: {namespace(), binary(), diff_vips(), diff_routes()}).
+handle_reconcile_apply(
+        Diffs, {KeysToAdd, KeysToDel},
+        #state{route_mgr=RouteMgr, ipvs_mgr=IPVSMgr,
+               ipset_mgr=IPSetMgr}=State) ->
+    lists:foreach(fun ({Namespace, LogPrefix, {_, RoutesToDel}, _DiffVIPs}) ->
         ok = remove_routes(RouteMgr, RoutesToDel, Namespace),
-        ok = log_routes_diff(LogPrefix, {[], RoutesToDel}),
+        ok = log_routes_diff(LogPrefix, {[], RoutesToDel})
+    end, Diffs),
 
+    add_ipset_entries(IPSetMgr, KeysToAdd),
+    log_ipset_diff({KeysToAdd, []}),
+
+    lists:foreach(fun ({Namespace, LogPrefix, _DiffRoutes, DiffVIPs}) ->
         ok = apply_vips_diff(IPVSMgr, Namespace, DiffVIPs),
-        ok = log_vips_diff(LogPrefix, DiffVIPs),
+        ok = log_vips_diff(LogPrefix, DiffVIPs)
+    end, Diffs),
 
+    remove_ipset_entries(IPSetMgr, KeysToDel),
+    log_ipset_diff({[], KeysToDel}),
+
+    lists:foreach(fun ({Namespace, LogPrefix, {RoutesToAdd, _}, _DiffVIPs}) ->
         ok = add_routes(RouteMgr, RoutesToAdd, Namespace),
         ok = log_routes_diff(LogPrefix, {RoutesToAdd, []})
-    end, Namespaces),
-    State#state{prev_ipvs=VIPs1, prev_routes=Routes}.
+    end, Diffs),
+
+    State.
 
 -spec(handle_vips([{key(), [backend()]}], state()) -> state()).
-handle_vips(VIPs, #state{route_mgr=RouteMgr, ipvs_mgr=IPVSMgr,
-        tree=Tree, nodes=Nodes, namespaces=Namespaces,
-        prev_ipvs=PrevVIPs, prev_routes=PrevRoutes}=State) ->
+handle_vips(VIPs, #state{tree=Tree, nodes=Nodes, prev_vips=PrevVIPs}=State) ->
     VIPs0 = vips_port_mappings(VIPs),
     VIPs1 = healthy_vips(VIPs0, Nodes, Tree),
     DiffVIPs = diff(prepare_vips(PrevVIPs), prepare_vips(VIPs1)),
 
     Routes = get_vip_routes(VIPs1),
-    {RoutesToAdd, RoutesToDel} =
-        dcos_net_utils:complement(Routes, PrevRoutes),
+    PrevRoutes = get_vip_routes(PrevVIPs),
+    DiffRoutes = dcos_net_utils:complement(Routes, PrevRoutes),
 
+    Keys = get_vip_keys(VIPs1),
+    PrevKeys = get_vip_keys(PrevVIPs),
+    DiffKeys = dcos_net_utils:complement(Keys, PrevKeys),
+
+    State0 = handle_vips_apply(DiffVIPs, DiffRoutes, DiffKeys, State),
+
+    State0#state{vips=VIPs, prev_vips=VIPs1}.
+
+-spec(handle_vips_apply(DiffVIPs, DiffRoutes, DiffKeys, State) -> State
+    when DiffVIPs :: diff_vips(), DiffRoutes :: diff_routes(),
+         DiffKeys :: diff_keys(), State :: state()).
+handle_vips_apply(
+        DiffVIPs, {RoutesToAdd, RoutesToDel}, {KeysToAdd, KeysToDel},
+        #state{namespaces=Namespaces, route_mgr=RouteMgr,
+               ipvs_mgr=IPVSMgr, ipset_mgr=IPSetMgr}=State) ->
     lists:foreach(fun (Namespace) ->
         ok = remove_routes(RouteMgr, RoutesToDel, Namespace)
     end, Namespaces),
     ok = log_routes_diff({[], RoutesToDel}),
+
+    add_ipset_entries(IPSetMgr, KeysToAdd),
+    log_ipset_diff({KeysToAdd, []}),
 
     lists:foreach(fun (Namespace) ->
         ok = apply_vips_diff(IPVSMgr, Namespace, DiffVIPs)
     end, Namespaces),
     ok = log_vips_diff(DiffVIPs),
 
+    remove_ipset_entries(IPSetMgr, KeysToDel),
+    log_ipset_diff({[], KeysToDel}),
+
     lists:foreach(fun (Namespace) ->
         ok = add_routes(RouteMgr, RoutesToAdd, Namespace)
     end, Namespaces),
     ok = log_routes_diff({RoutesToAdd, []}),
 
-    State#state{vips=VIPs, prev_ipvs=VIPs1, prev_routes=Routes}.
+    State.
 
 %%%===================================================================
 %%% Routes functions
@@ -260,6 +311,28 @@ add_routes(RouteMgr, Routes, Namespace) ->
 -spec(remove_routes(pid(), [inet:ip_address()], namespace()) -> ok).
 remove_routes(RouteMgr, Routes, Namespace) ->
     dcos_l4lb_route_mgr:remove_routes(RouteMgr, Routes, Namespace).
+
+%%%===================================================================
+%%% IPSet functions
+%%%===================================================================
+
+-type diff_keys() :: {[key()], [key()]}.
+
+-spec(get_vip_keys(VIPs :: [{key(), [backend()]}]) -> [key()]).
+get_vip_keys(VIPs) ->
+    [ VIPKey || {VIPKey, _Backends} <- VIPs].
+
+-spec(get_ipset_entries(pid()) -> [key()]).
+get_ipset_entries(IPSetMgr) ->
+    dcos_l4lb_ipset_mgr:get_entries(IPSetMgr).
+
+-spec(add_ipset_entries(pid(), [key()]) -> ok).
+add_ipset_entries(IPSetMgr, KeysToAdd) ->
+    dcos_l4lb_ipset_mgr:add_entries(IPSetMgr, KeysToAdd).
+
+-spec(remove_ipset_entries(pid(), [key()]) -> ok).
+remove_ipset_entries(IPSetMgr, KeysToDel) ->
+    dcos_l4lb_ipset_mgr:remove_entries(IPSetMgr, KeysToDel).
 
 %%%===================================================================
 %%% IPVS functions
@@ -479,6 +552,17 @@ log_routes_diff(Prefix, {ToAdd, ToDel}) ->
     [ lager:notice(
         "~sVIP routes were removed, routes: ~p, IPs: ~p",
         [Prefix, length(ToDel), ToDel]) || ToDel =/= [] ],
+    ok.
+
+-spec(log_ipset_diff(diff_keys()) -> ok).
+log_ipset_diff({ToAdd, ToDel}) ->
+    IPSetEnabled = dcos_l4lb_config:ipset_enabled(),
+    [ lager:notice(
+        "VIPs were added to ipset: ~p",
+        [ToAdd]) || ToAdd =/= [], IPSetEnabled ],
+    [ lager:notice(
+        "VIPs were removed from ipset: ~p",
+        [ToDel]) || ToDel =/= [], IPSetEnabled ],
     ok.
 
 -spec(log_netns_diff(Namespaces, Namespaces) -> ok

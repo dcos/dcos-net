@@ -50,6 +50,7 @@ end_per_testcase(_, _Config) ->
     os:cmd("rm -rf Mnesia.*"),
     meck:unload(dcos_net_mesos_listener),
     meck:unload(dcos_l4lb_mgr),
+    dcos_l4lb_ipset_mgr:cleanup(),
     ok.
 
 meck_mesos_poll() ->

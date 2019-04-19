@@ -4,6 +4,10 @@
 -behaviour(gen_server).
 -include("dcos_l4lb.hrl").
 
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
+
 %% API
 -export([
     start_link/0
@@ -151,7 +155,7 @@ collect_vips(TaskId, Task, VIPs) ->
 collect_vips(TaskId, Task, Port, VIPLabel, VIPs) ->
     try
         Key = key(Task, Port, VIPLabel),
-        Value = backends(Task, Port),
+        Value = backends(Key, Task, Port),
         mappend(Key, Value, VIPs)
     catch Class:Error ->
         lager:error("Unexpected error with ~s [~p]: ~p",
@@ -175,20 +179,29 @@ key(Task, PortObj, VIPLabel) ->
             {Protocol, NamedVIP, Port}
     end.
 
--spec(backends(task(), task_port()) -> [backend()]).
-backends(Task, PortObj) ->
-    IsIPv6Enabled = application:get_env(dcos_l4lb, enable_ipv6, true),
+-spec(backends(key(), task(), task_port()) -> [backend()]).
+backends(Key, Task, PortObj) ->
+    IsIPv6Enabled = dcos_l4lb_config:ipv6_enabled(),
     AgentIP = maps:get(agent_ip, Task),
     case maps:find(host_port, PortObj) of
         error ->
             Port = maps:get(port, PortObj),
-            [{AgentIP, {TaskIP, Port}}
+            [ {AgentIP, {TaskIP, Port}}
             || TaskIP <- maps:get(task_ip, Task),
-            dcos_l4lb_app:family(TaskIP) =:= inet orelse
-            IsIPv6Enabled];
+               validate_backend_ip(IsIPv6Enabled, Key, TaskIP) ];
         {ok, HostPort} ->
             [{AgentIP, {AgentIP, HostPort}}]
     end.
+
+-spec(validate_backend_ip(boolean(), key(), inet:ip_address()) -> boolean()).
+validate_backend_ip(true, {_Protocol, {name, _Name}, _VIPPort}, _TaskIP) ->
+    true;
+validate_backend_ip(false, {_Protocol, {name, _Name}, _VIPPort}, TaskIP) ->
+    dcos_l4lb_app:family(TaskIP) =:= inet;
+validate_backend_ip(true, {_Protocol, VIP, _VIPPort}, TaskIP) ->
+    dcos_l4lb_app:family(VIP) =:= dcos_l4lb_app:family(TaskIP);
+validate_backend_ip(false, {_Protocol, VIP, _VIPPort}, TaskIP) ->
+    {dcos_l4lb_app:family(VIP), dcos_l4lb_app:family(TaskIP)} =:= {inet, inet}.
 
 -spec(mappend(Key, Value, Map) -> Map
     when Key :: term(), Value :: term(),
@@ -271,3 +284,34 @@ log_ops(Key, {remove_all, Backends}) ->
     lists:foreach(fun ({_AgentIP, Backend}) ->
         lager:notice("VIP updated: ~p, removed: ~p", [Key, Backend])
     end, Backends).
+
+%%%===================================================================
+%%% Test functions
+%%%===================================================================
+
+-ifdef(TEST).
+
+validate_backend_ip_test() ->
+    NamedVIP = {tcp, {name, {<<"foo">>, <<"bar">>}}, 80},
+    IPv4VIP = {tcp, {11, 2, 3, 4}, 80},
+    IPv6VIP = {tcp, {16#fd01, 16#c, 16#0, 16#0, 16#0, 16#0, 16#0, 16#1}, 80},
+    {ok, IPv4} = inet:parse_address("10.3.2.1"),
+    {ok, IPv6} = inet:parse_address("fe80::1"),
+
+    % IPv4
+    ?assert(validate_backend_ip(false, NamedVIP, IPv4)),
+    ?assert(validate_backend_ip(false, IPv4VIP, IPv4)),
+    ?assertNot(validate_backend_ip(false, IPv6VIP, IPv4)),
+    ?assert(validate_backend_ip(true, NamedVIP, IPv4)),
+    ?assert(validate_backend_ip(true, IPv4VIP, IPv4)),
+    ?assertNot(validate_backend_ip(true, IPv6VIP, IPv4)),
+
+    % IPv6
+    ?assertNot(validate_backend_ip(false, NamedVIP, IPv6)),
+    ?assertNot(validate_backend_ip(false, IPv4VIP, IPv6)),
+    ?assertNot(validate_backend_ip(false, IPv6VIP, IPv6)),
+    ?assert(validate_backend_ip(true, NamedVIP, IPv6)),
+    ?assertNot(validate_backend_ip(true, IPv4VIP, IPv6)),
+    ?assert(validate_backend_ip(true, IPv6VIP, IPv6)).
+
+-endif.
