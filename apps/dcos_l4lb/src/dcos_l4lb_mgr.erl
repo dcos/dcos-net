@@ -28,6 +28,7 @@
     last_received_vips = [],
     route_mgr,
     ipvs_mgr,
+    ipset_mgr,
     route_events_ref,
     kv_ref,
     netns_event_ref,
@@ -118,9 +119,10 @@ init(timeout, init, []) ->
     {ok, Ref} = lashup_gm_route_events:subscribe(),
     {ok, IPVSMgr} = dcos_l4lb_ipvs_mgr:start_link(),
     {ok, RouteMgr} = dcos_l4lb_route_mgr:start_link(),
+    {ok, IPSetMgr} = dcos_l4lb_ipset_mgr:start_link(),
     {ok, NetnsRef} = dcos_l4lb_netns_watcher:start_link(),
-    State = #state{route_mgr = RouteMgr, ipvs_mgr = IPVSMgr, route_events_ref = Ref,
-                   kv_ref = KVRef, netns_event_ref = NetnsRef},
+    State = #state{route_mgr = RouteMgr, ipvs_mgr = IPVSMgr, ipset_mgr = IPSetMgr,
+                   route_events_ref = Ref, kv_ref = KVRef, netns_event_ref = NetnsRef},
     {next_state, notree, State}.
 
 %% States go notree -> reconcile -> maintain
@@ -204,18 +206,34 @@ push_routes(Namespace, #state{routes = Routes, route_mgr = RouteMgr}) ->
 push_services(Namespace, State = #state{last_configured_vips = VIPs}) ->
     lists:foreach(fun({VIP, BEs}) -> add_service(VIP, BEs, Namespace, State) end, VIPs).
 
-do_reconcile(VIPs, State0 = #state{route_mgr = RouteMgr, ns = Namespaces}) ->
+do_reconcile(VIPs, State0 = #state{route_mgr = RouteMgr, ipset_mgr = IPSetMgr, ns = Namespaces}) ->
     VIPs0 = vips_port_mappings(VIPs),
     VIPs1 = process_reachability(VIPs0, State0),
     Routes = ordsets:from_list([VIP || {{_Proto, VIP, _Port}, _Backends} <- VIPs1]),
     State1 = State0#state{last_received_vips = VIPs0, last_configured_vips = VIPs1, routes = Routes},
+
+    Keys = ordsets:from_list([Key || {Key, _Backends} <- VIPs1]),
+    InstalledKeys = dcos_l4lb_ipset_mgr:get_entries(),
+    KeysToAdd = ordsets:subtract(Keys, InstalledKeys),
+    KeysToDel = ordsets:subtract(InstalledKeys, Keys),
+
+    lists:foreach(fun (Ns) ->
+        InstalledRoutes = dcos_l4lb_route_mgr:get_routes(RouteMgr, Ns),
+        RoutesToDel = ordsets:subtract(InstalledRoutes, Routes),
+        dcos_l4lb_route_mgr:remove_routes(RouteMgr, RoutesToDel, Ns)
+    end, Namespaces),
+
+    dcos_l4lb_ipset_mgr:remove_entries(IPSetMgr, KeysToDel),
+
+    lists:foreach(fun (Ns) ->
+        do_reconcile_services(Ns, State1)
+    end, Namespaces),
+
+    dcos_l4lb_ipset_mgr:add_entries(IPSetMgr, KeysToAdd),
+
     lists:foreach(fun (Ns) ->
         InstalledRoutes = dcos_l4lb_route_mgr:get_routes(RouteMgr, Ns),
         RoutesToAdd = ordsets:subtract(Routes, InstalledRoutes),
-        RoutesToDel = ordsets:subtract(InstalledRoutes, Routes),
-
-        dcos_l4lb_route_mgr:remove_routes(RouteMgr, RoutesToDel, Ns),
-        do_reconcile_services(Ns, State1),
         dcos_l4lb_route_mgr:add_routes(RouteMgr, RoutesToAdd, Ns)
     end, Namespaces),
     State1.
@@ -284,20 +302,37 @@ add_service({Protocol, IP, Port}, BEs, Namespace, #state{ipvs_mgr = IPVSMgr}) ->
 process_reachability(VIPs0, State) ->
     lists:map(fun({VIP, BEs0}) -> {VIP, reachable_backends(BEs0, State)} end, VIPs0).
 
-maintain(VIPs, State = #state{ns = Namespaces, route_mgr = RouteMgr,
+maintain(VIPs, State = #state{ns = Namespaces, route_mgr = RouteMgr, ipset_mgr = IPSetMgr,
         routes = Routes, last_configured_vips = LastConfigured}) ->
     VIPs0 = vips_port_mappings(VIPs),
     VIPs1 = process_reachability(VIPs0, State),
     Diff = generate_diff(LastConfigured, VIPs1),
     NewRoutes = ordsets:from_list([VIP || {{_Proto, VIP, _Port}, _Backends} <- VIPs1]),
     lager:debug("Last Configured: ~p, VIPs: ~p, NewRoutes ~p, Diff ~p", [LastConfigured, VIPs1, NewRoutes, Diff]),
-    lists:foreach(fun (Namespace) ->
-        RoutesToAdd = ordsets:subtract(NewRoutes, Routes),
-        RoutesToDel = ordsets:subtract(Routes, NewRoutes),
-        dcos_l4lb_route_mgr:remove_routes(RouteMgr, RoutesToDel, Namespace),
-        apply_diff(Diff, Namespace, State),
-        dcos_l4lb_route_mgr:add_routes(RouteMgr, RoutesToAdd, Namespace)
+    RoutesToAdd = ordsets:subtract(NewRoutes, Routes),
+    RoutesToDel = ordsets:subtract(Routes, NewRoutes),
+
+    OldKeys = ordsets:from_list([Key || {Key, _Backends} <- LastConfigured]),
+    NewKeys = ordsets:from_list([Key || {Key, _Backends} <- VIPs1]),
+    KeysToAdd = ordsets:subtract(NewKeys, OldKeys),
+    KeysToDel = ordsets:subtract(OldKeys, NewKeys),
+
+    lists:foreach(fun (Ns) ->
+        dcos_l4lb_route_mgr:remove_routes(RouteMgr, RoutesToDel, Ns)
     end, Namespaces),
+
+    dcos_l4lb_ipset_mgr:remove_entries(IPSetMgr, KeysToDel),
+
+    lists:foreach(fun (Ns) ->
+        apply_diff(Diff, Ns, State)
+    end, Namespaces),
+
+    dcos_l4lb_ipset_mgr:add_entries(IPSetMgr, KeysToAdd),
+
+    lists:foreach(fun (Ns) ->
+        dcos_l4lb_route_mgr:add_routes(RouteMgr, RoutesToAdd, Ns)
+    end, Namespaces),
+
     State#state{last_configured_vips = VIPs1, last_received_vips = VIPs0, routes = NewRoutes}.
 
 %% Returns {VIPsToRemove, VIPsToAdd, [VIP, BackendsToRemove, BackendsToAdd]}
