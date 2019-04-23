@@ -23,7 +23,8 @@
          service_address/1,
          destination_address/2,
          add_netns/2,
-         remove_netns/2]).
+         remove_netns/2,
+         init_metrics/0]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -133,29 +134,35 @@ init([]) ->
     {ok, #state{netns = #{host => Pid}, family = Family}}.
 
 handle_call({get_services, Namespace}, _From, State) ->
-    Reply = handle_get_services(Namespace, State),
+    Reply = handle_call_track_time(fun handle_get_services/2, [Namespace, State]),
     {reply, Reply, State};
 handle_call({add_service, IP, Port, Protocol, Namespace}, _From, State) ->
-    Reply = handle_add_service(IP, Port, Protocol, Namespace, State),
+    Reply = handle_call_track_time(fun handle_add_service/5, [IP, Port, Protocol, Namespace, State]),
     {reply, Reply, State};
 handle_call({remove_service, IP, Port, Protocol, Namespace}, _From, State) ->
-    Reply = handle_remove_service(IP, Port, Protocol, Namespace, State),
+    Reply = handle_call_track_time(fun handle_remove_service/5, [IP, Port, Protocol, Namespace, State]),
     {reply, Reply, State};
 handle_call({get_dests, Service, Namespace}, _From, State) ->
-    Reply = handle_get_dests(Service, Namespace, State),
+    Reply = handle_call_track_time(fun handle_get_dests/3, [Service, Namespace, State]),
     {reply, Reply, State};
 handle_call({add_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace}, _From, State) ->
-    Reply = handle_add_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace, State),
+    Reply = handle_call_track_time(fun handle_add_dest/7, [ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace, State]),
     {reply, Reply, State};
 handle_call({remove_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace}, _From, State) ->
-    Reply = handle_remove_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace, State),
+    Reply = handle_call_track_time(fun handle_remove_dest/7, [ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace, State]),
     {reply, Reply, State};
 handle_call({add_netns, UpdateValue}, _From, State0) ->
-    {Reply, State1} = handle_add_netns(UpdateValue, State0),
+    {Reply, State1} = handle_call_track_time(fun handle_add_netns/2, [UpdateValue, State0]),
     {reply, Reply, State1};
 handle_call({remove_netns, UpdateValue}, _From, State0) ->
-    {Reply, State1} = handle_remove_netns(UpdateValue, State0),
+    {Reply, State1} = handle_call_track_time(fun handle_remove_netns/2, [UpdateValue, State0]),
     {reply, Reply, State1}.
+
+handle_call_track_time(Fun, Args) ->
+    Begin = erlang:monotonic_time(),
+    Return = erlang:apply(Fun, Args),
+    prometheus_summary:observe(l4lb, routes_updates_total, [], erlang:monotonic_time() - Begin),
+    Return.
 
 handle_cast(_Request, State) ->
     {noreply, State}.
@@ -361,6 +368,17 @@ maybe_remove_netns(true, #netns{id = Id}, NetnsMap) ->
     maps:remove(Id, NetnsMap);
 maybe_remove_netns(false, _, NetnsMap) ->
     NetnsMap.
+
+%%%===================================================================
+%%% Metrics functions
+%%%===================================================================
+
+-spec(init_metrics() -> ok).
+init_metrics() ->
+    prometheus_summary:new([
+       {registry, l4lb},
+       {name, routes_updates_total},
+       {help, "The time spent updating ipset configuration"}]).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
