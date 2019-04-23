@@ -4,7 +4,8 @@
 -export([
     start_link/0,
     ip2name/1,
-    to_name/1
+    to_name/1,
+    init_metrics/0
 ]).
 
 %% gen_server callbacks
@@ -93,6 +94,7 @@ skip_kv_event(Event, Ref) ->
 
 -spec(handle_event(Event :: map()) -> ok).
 handle_event(#{value := RawVIPs}) ->
+    %% prometheus_counter:inc(l4lb, dcos_l4lb_lashup_vip_listener, [], 1),
     VIPs = process_vips(RawVIPs),
     ok = cleanup_mappings(VIPs),
     ok = dcos_l4lb_mgr:push_vips(VIPs),
@@ -293,3 +295,15 @@ to_name(Binaries) ->
     Bins = lists:map(fun mesos_state:domain_frag/1, Binaries),
     <<$., Name/binary>> = << <<$., Bin/binary>> || Bin <- Bins >>,
     Name.
+
+
+%%%===================================================================
+%%% Metrics functions
+%%%===================================================================
+
+-spec(init_metrics() -> ok).
+init_metrics() ->
+    prometheus_counter:new([
+       {registry, l4lb},
+       {name, vips2_updates_total},
+       {help, "Total number of times vips were updated."}]).

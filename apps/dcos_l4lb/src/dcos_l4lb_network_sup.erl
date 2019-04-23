@@ -26,25 +26,25 @@
 %% ===================================================================
 
 start_link() ->
-  supervisor:start_link({local, ?MODULE}, ?MODULE, []).
-
+    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 maybe_ipvs_child() ->
-  case dcos_l4lb_config:networking() of
-    true ->
-       [?CHILD(dcos_l4lb_mgr, worker)];
-    false ->
-      []
-  end.
+    case dcos_l4lb_config:networking() of
+        true ->
+            [?CHILD(dcos_l4lb_mgr, worker)];
+        false ->
+            []
+    end.
 
 init([]) ->
-  Children = maybe_ipvs_child () ++ [
-    ?CHILD(dcos_l4lb_lashup_vip_listener, worker)
-  ],
-  {ok,
-    {
-      {rest_for_one, 5, 10},
-      Children
-    }
-  }.
+    lager:notice("Reinit"),
+    Children = maybe_ipvs_child () ++ [
+        ?CHILD(dcos_l4lb_lashup_vip_listener, worker)
+        ],
+    {ok,
+        {
+            {rest_for_one, 5, 10},
+            Children
+        }
+    }.
 
