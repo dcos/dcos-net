@@ -94,7 +94,12 @@ skip_kv_event(Event, Ref) ->
 
 -spec(handle_event(Event :: map()) -> ok).
 handle_event(#{value := RawVIPs}) ->
-    %% prometheus_counter:inc(l4lb, dcos_l4lb_lashup_vip_listener, [], 1),
+    try
+        prometheus_counter:inc(l4lb, vips_updates_total, [], 1)
+    catch _Error ->
+        lager:notice("Metrics crash"),
+        ok
+    end,
     VIPs = process_vips(RawVIPs),
     ok = cleanup_mappings(VIPs),
     ok = dcos_l4lb_mgr:push_vips(VIPs),
@@ -296,14 +301,13 @@ to_name(Binaries) ->
     <<$., Name/binary>> = << <<$., Bin/binary>> || Bin <- Bins >>,
     Name.
 
-
 %%%===================================================================
 %%% Metrics functions
 %%%===================================================================
 
 -spec(init_metrics() -> ok).
 init_metrics() ->
-    prometheus_counter:new([
+    prometheus_counter:declare([
        {registry, l4lb},
-       {name, vips2_updates_total},
+       {name, vips_updates_total},
        {help, "Total number of times vips were updated."}]).

@@ -37,7 +37,7 @@ maybe_ipvs_child() ->
     end.
 
 init([]) ->
-    lager:notice("Reinit"),
+    dcos_l4lb_lashup_vip_listener:init_metrics(),
     Children = maybe_ipvs_child () ++ [
         ?CHILD(dcos_l4lb_lashup_vip_listener, worker)
         ],
