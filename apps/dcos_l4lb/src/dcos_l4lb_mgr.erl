@@ -226,9 +226,11 @@ handle_reconcile_apply(
         Diffs, {KeysToAdd, KeysToDel},
         #state{route_mgr=RouteMgr, ipvs_mgr=IPVSMgr,
                ipset_mgr=IPSetMgr}=State) ->
+    lager:notice("Diff size ~p", [length(Diffs)]),
     lists:foreach(fun ({Namespace, LogPrefix, {_, RoutesToDel}, _DiffVIPs}) ->
         ok = remove_routes(RouteMgr, RoutesToDel, Namespace),
-        ok = log_routes_diff(LogPrefix, {[], RoutesToDel})
+        ok = log_routes_diff(LogPrefix, {[], RoutesToDel}),
+        prometheus_counter:inc(l4lb, reestablished_routes_total, [], 1)
     end, Diffs),
 
     add_ipset_entries(IPSetMgr, KeysToAdd),
@@ -236,7 +238,8 @@ handle_reconcile_apply(
 
     lists:foreach(fun ({Namespace, LogPrefix, _DiffRoutes, DiffVIPs}) ->
         ok = apply_vips_diff(IPVSMgr, Namespace, DiffVIPs),
-        ok = log_vips_diff(LogPrefix, DiffVIPs)
+        ok = log_vips_diff(LogPrefix, DiffVIPs),
+        prometheus_counter:inc(l4lb, reestablished_ipvs_rules_total, [], 1)
     end, Diffs),
 
     remove_ipset_entries(IPSetMgr, KeysToDel),
@@ -244,13 +247,10 @@ handle_reconcile_apply(
 
     lists:foreach(fun ({Namespace, LogPrefix, {RoutesToAdd, _}, _DiffVIPs}) ->
         ok = add_routes(RouteMgr, RoutesToAdd, Namespace),
-        ok = log_routes_diff(LogPrefix, {RoutesToAdd, []})
+        ok = log_routes_diff(LogPrefix, {RoutesToAdd, []}),
+        prometheus_counter:inc(l4lb, reestablished_ipset_entries_total, [], 1)
     end, Diffs),
     State.
-    % not quite
-    %% prometheus_counter:inc(
-        %% l4lb, reconciliation_changes_total,
-        %% [], length(VIPs1) - length(VIPsP)),
 
 -spec(handle_vips([{key(), [backend()]}], state()) -> state()).
 handle_vips(VIPs, #state{tree=Tree, nodes=Nodes, prev_vips=PrevVIPs}=State) ->
@@ -730,7 +730,19 @@ init_metrics() ->
     prometheus_gauge:new([
        {registry, l4lb},
        {name, netns},
-       {help, "Current number of of network namespaces."}]).
+       {help, "Current number of of network namespaces."}]),
+    prometheus_counter:new([
+       {registry, l4lb},
+       {name, reestablished_routes_total},
+       {help, "Total number of reestablished routes"}]),
+    prometheus_counter:new([
+       {registry, l4lb},
+       {name, reestablished_ipvs_rules_total},
+       {help, "Total number of reestablished ipvs rules"}]),
+    prometheus_counter:new([
+       {registry, l4lb},
+       {name, reestablished_ipset_entries_total},
+       {help, "Total number of reestablished ipset rules"}]).
 
 %%%===================================================================
 %%% Test functions
