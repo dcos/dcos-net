@@ -17,7 +17,8 @@
          add_routes/3,
          remove_routes/3,
          add_netns/2,
-         remove_netns/2]).
+         remove_netns/2,
+         init_metrics/0]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -146,11 +147,15 @@ route_msg_dst(Msg) -> proplists:get_value(dst, element(10, Msg)).
 route_msg_table(Msg) -> proplists:get_value(table, element(10, Msg)).
 
 update_routes(Routes, Action, Namespace, #state{netns = NetnsMap}) ->
+    Begin = erlang:monotonic_time(),
     lager:info("~p ~p ~p", [Action, Namespace, Routes]),
     Params = maps:get(Namespace, NetnsMap),
     lists:foreach(fun(Route) ->
                     perform_action(Route, Action, Namespace, Params)
-                  end, Routes).
+                  end, Routes),
+    prometheus_summary:observe(
+        l4lb, routes_updates_seconds, [],
+        erlang:monotonic_time() - Begin).
 
 perform_action(Dst, Action, Namespace, Params = #params{pid = Pid}) ->
     Flags = rt_flags(Action),
@@ -239,3 +244,14 @@ rt_type(_, _) -> unicast.
 
 rt_flags(newroute) -> [create, replace];
 rt_flags(delroute) -> [].
+
+%%%===================================================================
+%%% Metrics functions
+%%%===================================================================
+
+-spec(init_metrics() -> ok).
+init_metrics() ->
+    prometheus_summary:new([
+       {registry, l4lb},
+       {name, routes_updates_seconds},
+       {help, "The time spent updating routes configuration"}]).

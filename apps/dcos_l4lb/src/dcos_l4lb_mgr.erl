@@ -704,6 +704,8 @@ local_port_mappings() ->
 -spec(init_metrics() -> ok).
 init_metrics() ->
     dcos_l4lb_ipvs_mgr:init_metrics(),
+    dcos_l4lb_route_mgr:init_metrics(),
+    dcos_l4lb_ipset_mgr:init_metrics(),
     prometheus_gauge:new([
        {registry, l4lb},
        {name, vips},

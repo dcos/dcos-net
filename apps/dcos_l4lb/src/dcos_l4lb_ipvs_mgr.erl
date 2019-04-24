@@ -161,7 +161,7 @@ handle_call({remove_netns, UpdateValue}, _From, State0) ->
 handle_call_track_time(Fun, Args) ->
     Begin = erlang:monotonic_time(),
     Return = erlang:apply(Fun, Args),
-    prometheus_summary:observe(l4lb, routes_updates_total, [], erlang:monotonic_time() - Begin),
+    prometheus_summary:observe(l4lb, ipvs_updates_seconds, [], erlang:monotonic_time() - Begin),
     Return.
 
 handle_cast(_Request, State) ->
@@ -377,7 +377,7 @@ maybe_remove_netns(false, _, NetnsMap) ->
 init_metrics() ->
     prometheus_summary:new([
        {registry, l4lb},
-       {name, routes_updates_total},
+       {name, ipvs_updates_seconds},
        {help, "The time spent updating ipset configuration"}]).
 
 -ifdef(TEST).
