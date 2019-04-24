@@ -18,10 +18,12 @@
          http_hosts_test/1,
          http_services_test/1,
          http_records_test/1,
+         cname_test/1,
          dns_cache_test/1
         ]).
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("erldns/include/erldns.hrl").
 
 %% ===================================================================
 %% common_test callbacks
@@ -65,6 +67,7 @@ all() ->
      http_services_test,
      http_records_test,
      overload_test,
+     cname_test,
      dns_cache_test
     ].
 
@@ -86,6 +89,12 @@ generate_thisdcos_directory_zone() ->
             dcos_dns:dns_record(
                 <<"commontest.thisdcos.directory">>,
                 {127, 0, 0, 1}),
+            dcos_dns:cname_record(
+                <<"t.thisdcos.directory">>,
+                <<"test.thisdcos.directory">>),
+            dcos_dns:cname_record(
+                <<"test.thisdcos.directory">>,
+                <<"commontest.thisdcos.directory">>),
             dcos_dns:srv_record(
                 <<"_service._tcp.commontest.thisdcos.directory">>,
                 {<<"commontest.thisdcos.directory">>, 1024}),
@@ -213,6 +222,29 @@ http_records_test(_Config) ->
                                 <<"_service._tcp.commontest.thisdcos.directory">>])
         end, Records),
     ?assertMatch(7, length(Records0)).
+
+
+cname_test(_Config) ->
+    Name = "t.thisdcos.directory",
+    {ok, DnsMsg} = inet_res:resolve(Name, in, a, resolver_options()),
+    % NOTE: CNAME records must appear before A/AAAA records,
+    % the order of CNAME records does also matter.
+    Records = inet_dns:msg(DnsMsg, anlist),
+    ?assertMatch([
+        #{
+            type := cname,
+            domain := "t.thisdcos.directory",
+            data := "test.thisdcos.directory"
+        }, #{
+            type := cname,
+            domain := "test.thisdcos.directory",
+            data := "commontest.thisdcos.directory"
+        }, #{
+            type := a,
+            domain := "commontest.thisdcos.directory",
+            data := {127, 0, 0, 1}
+        }
+    ], [maps:from_list(inet_dns:rr(R)) || R <- Records]).
 
 %% @doc Assert if we can read newly added record
 dns_cache_test(_Config) ->
