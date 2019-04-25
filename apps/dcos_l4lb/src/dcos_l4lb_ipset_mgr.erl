@@ -316,6 +316,10 @@ request(Pid, Command, Flags, Msg) ->
             {ok, Response};
         {ok, Response} ->
             {ok, Response};
+        {error, eexist, _Response} ->
+            % NOTE: some kernel versions ignore a missing `match` flag for
+            % ipset protocol and return an `eexist` error.
+            {ok, []};
         {error, Code, Response} ->
             Error = get_error(Code),
             {error, Error, Response}
