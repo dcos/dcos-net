@@ -737,15 +737,15 @@ init_metrics() ->
     prometheus_counter:new([
        {registry, l4lb},
        {name, reestablished_routes_total},
-       {help, "Total number of reestablished routes"}]),
+       {help, "Total number of reestablished routes."}]),
     prometheus_counter:new([
        {registry, l4lb},
        {name, reestablished_ipvs_rules_total},
-       {help, "Total number of reestablished ipvs rules"}]),
+       {help, "Total number of reestablished ipvs rules."}]),
     prometheus_counter:new([
        {registry, l4lb},
        {name, reestablished_ipset_entries_total},
-       {help, "Total number of reestablished ipset rules"}]).
+       {help, "Total number of reestablished ipset rules."}]).
 
 %%%===================================================================
 %%% Test functions

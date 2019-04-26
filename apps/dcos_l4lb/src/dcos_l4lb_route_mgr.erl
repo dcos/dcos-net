@@ -254,4 +254,4 @@ init_metrics() ->
     prometheus_summary:new([
        {registry, l4lb},
        {name, routes_updates_seconds},
-       {help, "The time spent updating routes configuration"}]).
+       {help, "The time spent updating routes configuration."}]).
