@@ -32,7 +32,7 @@ init_per_testcase(_, Config) ->
     meck:new(dcos_net_mesos_listener, [no_link, passthrough]),
     meck:expect(dcos_net_mesos_listener, poll, fun meck_mesos_poll/0),
 
-    meck:new(dcos_l4lb_mgr, [no_link]),
+    meck:new(dcos_l4lb_mgr, [no_link, passthrough]),
     meck:expect(dcos_l4lb_mgr, local_port_mappings, fun (_) -> ok end),
 
     {ok, _} = application:ensure_all_started(dcos_l4lb),

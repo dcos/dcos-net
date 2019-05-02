@@ -8,6 +8,8 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
+    % check if this is still happening here, I bet not
+    dcos_net_mesos:init_metrics(),
     dcos_net_mesos_listener:init_metrics(),
     dcos_net_logger_h:add_handler(),
     IsMaster = dcos_net_app:is_master(),

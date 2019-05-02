@@ -5,6 +5,7 @@
     call/1,
     call/3,
     request/2,
+    init_metrics/0,
     http_options/0
 ]).
 
@@ -18,33 +19,46 @@ poll(URIPath) ->
     handle_response(Response).
 
 -spec(call(jiffy:json_term()) ->
-    {ok, jiffy:json_term()} | {error, Reason :: term()}).
+    {ok, {jiffy:json_term(), integer()}} | {ok, reference(), pid()} | {error, term()}).
 call(Request) ->
     call(Request, [], []).
 
-% fix line columns
--spec(call(jiffy:json_term(), httpc:http_options(), httpc:options()) ->
-    {ok, jiffy:json_term(), integer()} | {ok, reference(), pid()} | {error, term()}).
+-spec(call(jiffy:json_term(), httpc:http_options(), httpc:options()) -> Response
+    when OKPayload :: {ok, jiffy:json_term()},
+         OKReference :: {ok, reference(), pid()},
+         Error :: {error, term()},
+         Response :: OKPayload | OKReference | Error).
 call(Request, HTTPOptions, Opts) ->
+    Begin = erlang:monotonic_time(),
     ContentType = "application/json",
     HTTPRequest = {"/api/v1", [], ContentType, jiffy:encode(Request)},
     Opts0 = [{sync, false}|Opts],
     {ok, Ref} = request(post, HTTPRequest, HTTPOptions, Opts0),
     Timeout = application:get_env(dcos_net, mesos_timeout, 30000),
-    receive
+    Response = receive
         {http, {Ref, stream_start, _Headers, Pid}} ->
             {ok, Ref, Pid};
         {http, {Ref, {{_Version, 200, _Reason}, _Headers, Data}}} ->
-            {ok, jiffy:decode(Data, [return_maps]), byte_size(Data)};
+            prometheus_counter:inc(
+                mesos_listener, call_received_bytes_total, [], byte_size(Data)),
+            {ok, jiffy:decode(Data, [return_maps])};
         {http, {Ref, {StatusLine, _Headers, Data}}} ->
+            prometheus_counter:inc(mesos_listener, call_failures_total, [], 1),
             {error, {http_status, StatusLine, Data}};
         {http, {Ref, {error, Error}}} ->
+            prometheus_counter:inc(mesos_listener, call_failures_total, [], 1),
             maybe_fatal_error(Error),
             {error, Error}
     after Timeout ->
+        prometheus_counter:inc(mesos_listener, call_failures_total, [], 1),
         ok = httpc:cancel_request(Ref),
         {error, timeout}
-    end.
+    end,
+
+    prometheus_summary:observe(
+        mesos_listener, call_duration_seconds, [],
+        erlang:monotonic_time() - Begin),
+    Response.
 
 -spec(request(string(), httpc:headers()) ->
     {ok, response()} | {error, Reason :: term()}).
@@ -159,3 +173,22 @@ maybe_fatal_error({failed_connect, Info}) ->
     end;
 maybe_fatal_error(_Error) ->
     ok.
+
+%%%===================================================================
+%%% Metrics functions
+%%%===================================================================
+
+-spec(init_metrics() -> ok).
+init_metrics() ->
+    prometheus_summary:new([
+        {registry, mesos_listener},
+        {name, call_duration_seconds},
+        {help, "The time spent with calls to the Mesos operator API."}]),
+    prometheus_counter:new([
+        {registry, mesos_listener},
+        {name, call_received_bytes_total},
+        {help, "Total number of bytes received from Mesos operator API."}]),
+    prometheus_counter:new([
+        {registry, mesos_listener},
+        {name, call_failures_total},
+        {help, "Total number of failures calling Mesos operator API."}]).

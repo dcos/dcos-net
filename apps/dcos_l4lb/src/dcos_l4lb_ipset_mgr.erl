@@ -50,11 +50,19 @@ get_entries(Pid) ->
 
 -spec(add_entries(pid(), [entry()]) -> ok).
 add_entries(Pid, Entries) ->
-    gen_server:call(Pid, {add_entries, Entries}).
+    Begin = erlang:monotonic_time(),
+    gen_server:call(Pid, {add_entries, Entries}),
+    prometheus_summary:observe(
+        l4lb, ipset_updates_seconds, [],
+        erlang:monotonic_time() - Begin).
 
 -spec(remove_entries(pid(), [entry()]) -> ok).
 remove_entries(Pid, Entries) ->
-    gen_server:call(Pid, {remove_entries, Entries}).
+    Begin = erlang:monotonic_time(),
+    gen_server:call(Pid, {remove_entries, Entries}),
+    prometheus_summary:observe(
+        l4lb, ipset_updates_seconds, [],
+        erlang:monotonic_time() - Begin).
 
 -spec(start_link() ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
@@ -89,22 +97,14 @@ handle_call(get_entries, _From, #state{netlink=Pid}=State) ->
     {ok, EntriesIPv6} = get_entries(Pid, ?IPSET_NAME_IPV6),
     {reply, EntriesIPv4 ++ EntriesIPv6, State};
 handle_call({add_entries, Entries}, _From, #state{netlink=Pid}=State) ->
-    Begin = erlang:monotonic_time(),
     lists:foreach(fun ({Protocol, IP, Port}) ->
         {ok, []} = add_entry(Pid, Protocol, IP, Port)
     end, Entries),
-    prometheus_summary:observe(
-        l4lb, ipset_updates_seconds, [],
-        erlang:monotonic_time() - Begin),
     {reply, ok, State};
 handle_call({remove_entries, Entries}, _From, #state{netlink=Pid}=State) ->
-    Begin = erlang:monotonic_time(),
     lists:foreach(fun ({Protocol, IP, Port}) ->
         {ok, []} = del_entry(Pid, Protocol, IP, Port)
     end, Entries),
-    prometheus_summary:observe(
-        l4lb, ipset_updates_seconds, [],
-        erlang:monotonic_time() - Begin),
     {reply, ok, State};
 handle_call(_Request, _From, State) ->
     {noreply, State}.
@@ -396,7 +396,8 @@ cleanup() ->
 
 -spec(init_metrics() -> ok).
 init_metrics() ->
-    prometheus_summary:new([
-       {registry, l4lb},
-       {name, ipset_updates_seconds},
-       {help, "The time spent updating ipset configuration."}]).
+    prometheus_summary:declare([
+        {registry, l4lb},
+        {name, ipset_updates_seconds},
+        {help, "The time spent updating ipset configuration."}]),
+    ok.

@@ -89,20 +89,10 @@ handle_poll() ->
 handle_poll(false) ->
     ok;
 handle_poll(true) ->
-    Begin = erlang:monotonic_time(),
     try dcos_net_mesos_listener:poll() of
         {error, Error} ->
-            prometheus_summary:observe(
-              l4lb, poll_request_duration_seconds,
-              [], erlang:monotonic_time() - Begin),
-            prometheus_counter:inc(
-              l4lb, poll_failures_total,
-              [], 1),
             lager:warning("Unable to poll mesos agent: ~p", [Error]);
         {ok, Tasks} ->
-            prometheus_summary:observe(
-                l4lb, poll_request_duration_seconds,
-                [], erlang:monotonic_time() - Begin),
             handle_poll_state(Tasks)
     catch error:bad_agent_id ->
         lager:warning("Mesos agent is not ready")
@@ -110,7 +100,6 @@ handle_poll(true) ->
 
 -spec(handle_poll_state(#{task_id() => task()}) -> ok).
 handle_poll_state(Tasks) ->
-    Begin = erlang:monotonic_time(),
     HealthyTasks = maps:filter(fun is_healthy/2, Tasks),
     prometheus_gauge:set(l4lb, local_tasks, [], maps:size(Tasks)),
     prometheus_gauge:set(
@@ -122,9 +111,9 @@ handle_poll_state(Tasks) ->
 
     VIPs = collect_vips(HealthyTasks),
     ok = push_vips(VIPs),
-    prometheus_summary:observe(
-      l4lb, poll_process_duration_seconds,
-      [], erlang:monotonic_time() - Begin).
+    prometheus_gauge:set(
+        l4lb, local_backends, [],
+        lists:sum([length(BEs) || BEs <- maps:values(VIPs)])).
 
 -spec(is_healthy(task_id(), task()) -> boolean()).
 is_healthy(_TaskId, Task) ->
@@ -140,8 +129,7 @@ is_healthy(_Task) ->
 
 %%%===================================================================
 %%% Collect functions
-%%%===================================================================
-
+%%%==================================================================
 -spec(collect_port_mappings(#{task_id() => task()}) -> #{Host => Container}
     when Host :: {protocol(), inet:port_number()},
          Container :: {inet:ip_address(), inet:port_number()}).
@@ -202,7 +190,7 @@ key(Task, PortObj, VIPLabel) ->
 backends(Key, Task, PortObj) ->
     IsIPv6Enabled = dcos_l4lb_config:ipv6_enabled(),
     AgentIP = maps:get(agent_ip, Task),
-    Backends = case maps:find(host_port, PortObj) of
+    case maps:find(host_port, PortObj) of
         error ->
             Port = maps:get(port, PortObj),
             [ {AgentIP, {TaskIP, Port}}
@@ -210,9 +198,7 @@ backends(Key, Task, PortObj) ->
                validate_backend_ip(IsIPv6Enabled, Key, TaskIP) ];
         {ok, HostPort} ->
             [{AgentIP, {AgentIP, HostPort}}]
-    end,
-    prometheus_gauge:set(l4lb, local_backends, [], length(Backends)),
-    Backends.
+    end.
 
 -spec(validate_backend_ip(boolean(), key(), inet:ip_address()) -> boolean()).
 validate_backend_ip(true, {_Protocol, {name, _Name}, _VIPPort}, _TaskIP) ->
@@ -314,22 +300,23 @@ log_ops(Key, {remove_all, Backends}) ->
 
 -spec(init_metrics() -> ok).
 init_metrics() ->
-    prometheus_gauge:new([
+    prometheus_gauge:declare([
         {registry, l4lb},
         {name, local_vips},
         {help, "The number of local VIPs."}]),
-    prometheus_gauge:new([
-       {registry, l4lb},
-       {name, local_tasks},
-       {help, "The number of local tasks."}]),
-    prometheus_gauge:new([
-       {registry, l4lb},
-       {name, local_healthy_tasks},
-       {help, "The number of local healthy tasks."}]),
-    prometheus_gauge:new([
+    prometheus_gauge:declare([
+        {registry, l4lb},
+        {name, local_tasks},
+        {help, "The number of local tasks."}]),
+    prometheus_gauge:declare([
+        {registry, l4lb},
+        {name, local_healthy_tasks},
+        {help, "The number of local healthy tasks."}]),
+    prometheus_gauge:declare([
         {registry, l4lb},
         {name, local_backends},
-        {help, "The number of local backends."}]).
+        {help, "The number of local backends."}]),
+   ok.
 
 %%%===================================================================
 %%% Test functions

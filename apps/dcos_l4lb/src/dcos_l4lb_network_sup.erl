@@ -40,11 +40,6 @@ init([]) ->
     dcos_l4lb_lashup_vip_listener:init_metrics(),
     Children = maybe_ipvs_child () ++ [
         ?CHILD(dcos_l4lb_lashup_vip_listener, worker)
-        ],
-    {ok,
-        {
-            {rest_for_one, 5, 10},
-            Children
-        }
-    }.
+    ],
+    {ok, {#{strategy => rest_for_one, intensity => 5, period => 10}, Children}}.
 

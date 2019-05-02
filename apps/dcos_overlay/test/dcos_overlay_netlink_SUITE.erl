@@ -38,6 +38,9 @@ all() -> [
 ].
 
 init_per_testcase(TestCase, Config) ->
+    prometheus:start(),
+    dcos_l4lb_ipvs_mgr:init_metrics(),
+    dcos_l4lb_route_mgr:init_metrics(),
     Uid = list_to_integer(string:strip(os:cmd("id -u"), right, $\n)),
     init_per_testcase(Uid, TestCase, Config).
 

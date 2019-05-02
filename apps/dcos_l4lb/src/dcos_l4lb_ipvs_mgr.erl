@@ -87,13 +87,22 @@ get_services(Pid, Namespace) ->
 -spec(add_service(Pid :: pid(), IP :: inet:ip_address(), Port :: inet:port_number(),
                   Protocol :: protocol(), Namespace :: term()) -> ok | error).
 add_service(Pid, IP, Port, Protocol, Namespace) ->
-    gen_server:call(Pid, {add_service, IP, Port, Protocol, Namespace}).
+    Begin = erlang:monotonic_time(),
+    gen_server:call(Pid, {add_service, IP, Port, Protocol, Namespace}),
+    prometheus_summary:observe(
+        l4lb, ipvs_updates_seconds, [],
+        erlang:monotonic_time() - Begin).
+
 
 -spec(remove_service(Pid :: pid(), IP :: inet:ip_address(),
                      Port :: inet:port_number(),
                      Protocol :: protocol(), Namespace :: term()) -> ok | error).
 remove_service(Pid, IP, Port, Protocol, Namespace) ->
-    gen_server:call(Pid, {remove_service, IP, Port, Protocol, Namespace}).
+    Begin = erlang:monotonic_time(),
+    gen_server:call(Pid, {remove_service, IP, Port, Protocol, Namespace}),
+    prometheus_summary:observe(
+        l4lb, ipvs_updates_seconds, [],
+        erlang:monotonic_time() - Begin).
 
 -spec(get_dests(Pid :: pid(), Service :: service(), Namespace :: term()) -> [dest()]).
 get_dests(Pid, Service, Namespace) ->
@@ -104,19 +113,38 @@ get_dests(Pid, Service, Namespace) ->
                   DestIP :: inet:ip_address(), DestPort :: inet:port_number(),
                   Protocol :: protocol(), Namespace :: term()) -> ok | error).
 remove_dest(Pid, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace) ->
-    gen_server:call(Pid, {remove_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace}).
+    Begin = erlang:monotonic_time(),
+    gen_server:call(Pid, {remove_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace}),
+    prometheus_summary:observe(
+        l4lb, ipvs_updates_seconds, [],
+        erlang:monotonic_time() - Begin).
 
 -spec(add_dest(Pid :: pid(), ServiceIP :: inet:ip_address(), ServicePort :: inet:port_number(),
                DestIP :: inet:ip_address(), DestPort :: inet:port_number(),
                Protocol :: protocol(), Namespace :: term()) -> ok | error).
 add_dest(Pid, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace) ->
-    gen_server:call(Pid, {add_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace}).
+    Begin = erlang:monotonic_time(),
+    gen_server:call(Pid, {add_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace}),
+    prometheus_summary:observe(
+        l4lb, ipvs_updates_seconds, [],
+        erlang:monotonic_time() - Begin).
+
 
 add_netns(Pid, UpdateValue) ->
-    gen_server:call(Pid, {add_netns, UpdateValue}).
+    Begin = erlang:monotonic_time(),
+    gen_server:call(Pid, {add_netns, UpdateValue}),
+    prometheus_summary:observe(
+        l4lb, ipvs_updates_seconds, [],
+        erlang:monotonic_time() - Begin).
+
 
 remove_netns(Pid, UpdateValue) ->
-    gen_server:call(Pid, {remove_netns, UpdateValue}).
+    Begin = erlang:monotonic_time(),
+    gen_server:call(Pid, {remove_netns, UpdateValue}),
+    prometheus_summary:observe(
+        l4lb, ipvs_updates_seconds, [],
+        erlang:monotonic_time() - Begin).
+
 
 %% @doc Starts the server
 -spec(start_link() ->
@@ -134,35 +162,29 @@ init([]) ->
     {ok, #state{netns = #{host => Pid}, family = Family}}.
 
 handle_call({get_services, Namespace}, _From, State) ->
-    Reply = handle_call_track_time(fun handle_get_services/2, [Namespace, State]),
+    Reply = handle_get_services(Namespace, State),
     {reply, Reply, State};
 handle_call({add_service, IP, Port, Protocol, Namespace}, _From, State) ->
-    Reply = handle_call_track_time(fun handle_add_service/5, [IP, Port, Protocol, Namespace, State]),
+    Reply = handle_add_service(IP, Port, Protocol, Namespace, State),
     {reply, Reply, State};
 handle_call({remove_service, IP, Port, Protocol, Namespace}, _From, State) ->
-    Reply = handle_call_track_time(fun handle_remove_service/5, [IP, Port, Protocol, Namespace, State]),
+    Reply = handle_remove_service(IP, Port, Protocol, Namespace, State),
     {reply, Reply, State};
 handle_call({get_dests, Service, Namespace}, _From, State) ->
-    Reply = handle_call_track_time(fun handle_get_dests/3, [Service, Namespace, State]),
+    Reply = handle_get_dests(Service, Namespace, State),
     {reply, Reply, State};
 handle_call({add_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace}, _From, State) ->
-    Reply = handle_call_track_time(fun handle_add_dest/7, [ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace, State]),
+    Reply = handle_add_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace, State),
     {reply, Reply, State};
 handle_call({remove_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace}, _From, State) ->
-    Reply = handle_call_track_time(fun handle_remove_dest/7, [ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace, State]),
+    Reply = handle_remove_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace, State),
     {reply, Reply, State};
 handle_call({add_netns, UpdateValue}, _From, State0) ->
-    {Reply, State1} = handle_call_track_time(fun handle_add_netns/2, [UpdateValue, State0]),
+    {Reply, State1} = handle_add_netns(UpdateValue, State0),
     {reply, Reply, State1};
 handle_call({remove_netns, UpdateValue}, _From, State0) ->
-    {Reply, State1} = handle_call_track_time(fun handle_remove_netns/2, [UpdateValue, State0]),
+    {Reply, State1} = handle_remove_netns(UpdateValue, State0),
     {reply, Reply, State1}.
-
-handle_call_track_time(Fun, Args) ->
-    Begin = erlang:monotonic_time(),
-    Return = erlang:apply(Fun, Args),
-    prometheus_summary:observe(l4lb, ipvs_updates_seconds, [], erlang:monotonic_time() - Begin),
-    Return.
 
 handle_cast(_Request, State) ->
     {noreply, State}.
@@ -375,10 +397,11 @@ maybe_remove_netns(false, _, NetnsMap) ->
 
 -spec(init_metrics() -> ok).
 init_metrics() ->
-    prometheus_summary:new([
-       {registry, l4lb},
-       {name, ipvs_updates_seconds},
-       {help, "The time spent updating ipset configuration"}]).
+    prometheus_summary:declare([
+        {registry, l4lb},
+        {name, ipvs_updates_seconds},
+        {help, "The time spent updating ipvs configuration."}]),
+    ok.
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").

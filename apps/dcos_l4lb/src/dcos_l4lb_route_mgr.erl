@@ -151,11 +151,15 @@ update_routes(Routes, Action, Namespace, #state{netns = NetnsMap}) ->
     lager:info("~p ~p ~p", [Action, Namespace, Routes]),
     Params = maps:get(Namespace, NetnsMap),
     lists:foreach(fun(Route) ->
-                    perform_action(Route, Action, Namespace, Params)
-                  end, Routes),
-    prometheus_summary:observe(
-        l4lb, routes_updates_seconds, [],
-        erlang:monotonic_time() - Begin).
+        perform_action(Route, Action, Namespace, Params)
+    end, Routes),
+    try
+        prometheus_summary:observe(
+            l4lb, routes_updates_seconds, [],
+            erlang:monotonic_time() - Begin)
+    catch error:_Error ->
+        ok
+    end.
 
 perform_action(Dst, Action, Namespace, Params = #params{pid = Pid}) ->
     Flags = rt_flags(Action),
@@ -251,7 +255,8 @@ rt_flags(delroute) -> [].
 
 -spec(init_metrics() -> ok).
 init_metrics() ->
-    prometheus_summary:new([
-       {registry, l4lb},
-       {name, routes_updates_seconds},
-       {help, "The time spent updating routes configuration."}]).
+    prometheus_summary:declare([
+        {registry, l4lb},
+        {name, routes_updates_seconds},
+        {help, "The time spent updating routes configuration."}]),
+   ok.
