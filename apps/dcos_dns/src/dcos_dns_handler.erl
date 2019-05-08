@@ -109,7 +109,8 @@ report_status(Metric) ->
 -spec(internal_resolve(protocol(), dns:message()) -> binary()).
 internal_resolve(Protocol, DNSMessage) ->
     Response = erldns_handler:do_handle(DNSMessage, ?LOCALHOST),
-    encode_message(Protocol, Response).
+    Response0 = randomize(Response),
+    encode_message(Protocol, Response0).
 
 -spec(resolve(protocol(), [upstream()], binary(), reply_fun()) -> ok).
 resolve(Protocol, Upstreams, Request, Fun) ->
@@ -337,3 +338,30 @@ max_payload_size(
     PayloadSize;
 max_payload_size(_DNSMessage) ->
     ?MAX_PACKET_SIZE.
+
+-spec(randomize(dns:message()) -> dns:message()).
+randomize(#dns_message{answers=Answers}=DNSMessage) ->
+    % NOTE: The order of CNAME records does matter.
+    {CNameRRs, RRs} =
+        lists:splitwith(
+            fun (#dns_rr{type = Type}) ->
+                Type =:= ?DNS_TYPE_CNAME
+            end, Answers),
+    Policy = dcos_dns_config:loadbalance(),
+    RRs0 = randomize(Policy, DNSMessage, RRs),
+    DNSMessage#dns_message{answers=CNameRRs ++ RRs0}.
+
+-spec(randomize(atom(), dns:message(), [dns:rr()]) -> [dns:rr()]).
+randomize(_Policy, _DNSMessage, []) ->
+    [];
+randomize(_Policy, _DNSMessage, [RR]) ->
+    [RR];
+randomize(round_robin, #dns_message{id=MsgId}, RRs) ->
+    RotBy = MsgId rem length(RRs),
+    {Head, Tail} = lists:split(RotBy, RRs),
+    Tail ++ Head;
+randomize(random, _DNSMessage, RRs) ->
+    List = [ {RR, rand:uniform()} || RR <- RRs ],
+    [RR || {RR, _R} <- lists:keysort(2, List)];
+randomize(_Policy, _DNSMessage, RRs) ->
+    RRs.

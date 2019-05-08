@@ -19,7 +19,8 @@
     bind_interface/0, bind_ips/0,
     forward_zones/0,
     handler_limit/0,
-    mesos_resolvers/0, mesos_resolvers/1
+    mesos_resolvers/0, mesos_resolvers/1,
+    loadbalance/0
 ]).
 
 exhibitor_timeout() ->
@@ -100,3 +101,7 @@ mesos_resolvers() ->
 -spec(mesos_resolvers([upstream()]) -> ok).
 mesos_resolvers(Upstreams) ->
     application:set_env(?APP, mesos_resolvers, Upstreams).
+
+-spec(loadbalance() -> atom()).
+loadbalance() ->
+    application:get_env(?APP, loadbalance, round_robin).
