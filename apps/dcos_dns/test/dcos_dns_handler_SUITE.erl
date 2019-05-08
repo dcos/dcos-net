@@ -29,7 +29,12 @@
     overload/1,
 
     registry/1,
-    cnames/1
+    cnames/1,
+
+    rr_loadbalance/1,
+    random_loadbalance/1,
+    none_loadbalance/1,
+    cnames_loadbalance/1
 ]).
 
 init_per_suite(Config) ->
@@ -48,7 +53,8 @@ all() ->
         {group, upstream},
         {group, thisnode},
         {group, dcos},
-        {group, component}
+        {group, component},
+        {group, loadbalance}
     ].
 
 groups() ->
@@ -60,7 +66,11 @@ groups() ->
         ]},
         {thisnode, [], [add_thisnode]},
         {dcos, [], [tcp_fallback, overload]},
-        {component, [], [registry, cnames]}
+        {component, [], [registry, cnames]},
+        {loadbalance, [], [
+            rr_loadbalance, random_loadbalance,
+            none_loadbalance, cnames_loadbalance
+        ]}
     ].
 
 %%%===================================================================
@@ -254,7 +264,7 @@ registry(_Config) ->
         domain := "registry.component.thisdcos.directory",
         data := "master.mesos.thisdcos.directory"
     }, maps:from_list(inet_dns:rr(CNameRR))),
-    ?assertEqual(IPs, [inet_dns:rr(RR, data) || RR <- RRs]).
+    ?assertEqual(IPs, lists:sort([inet_dns:rr(RR, data) || RR <- RRs])).
 
 cnames(_Config) ->
     cnames_init_test_zone(),
@@ -294,6 +304,45 @@ cnames_init_test_zone() ->
             <<"qux.test.thisdcos.directory">>,
             [{127, 0, 0, X} || X <- lists:seq(1, 5)])
     ]).
+
+%%%===================================================================
+%%% Load Balance functions
+%%%===================================================================
+
+rr_loadbalance(Config) ->
+    ok = application:set_env(dcos_dns, loadbalance, round_robin),
+    Results = loadbalance(Config),
+    ?assert(length(lists:usort(Results)) > length(hd(Results)) / 2),
+    ?assertMatch([_], lists:usort([lists:sort(R) || R <- Results])).
+
+random_loadbalance(Config) ->
+    ok = application:set_env(dcos_dns, loadbalance, random),
+    Results = loadbalance(Config),
+    ?assert(length(lists:usort(Results)) > length(Results) / 2),
+    ?assertMatch([_], lists:usort([lists:sort(R) || R <- Results])).
+
+none_loadbalance(Config) ->
+    ok = application:set_env(dcos_dns, loadbalance, disabled),
+    Results = loadbalance(Config),
+    ?assertMatch([_], lists:usort(Results)).
+
+loadbalance(_Config) ->
+    ZoneName = <<"mesos.thisdcos.directory">>,
+    AppName = <<"app.autoip.", ZoneName/binary>>,
+    IPs = [{127, 0, 0, X} || X <- lists:seq(1, 16)],
+    ok = dcos_dns:push_zone(ZoneName, dcos_dns:dns_records(AppName, IPs)),
+    lists:map(fun (_) ->
+        {ok, Msg} = resolve(AppName, in, a, []),
+        [ inet_dns:rr(RR, data) || RR <- inet_dns:msg(Msg, anlist) ]
+    end, lists:seq(1, 128)).
+
+cnames_loadbalance(Config) ->
+    ok = application:set_env(dcos_dns, loadbalance, round_robin),
+    cnames(Config),
+    ok = application:set_env(dcos_dns, loadbalance, random),
+    cnames(Config),
+    ok = application:set_env(dcos_dns, loadbalance, disabled),
+    cnames(Config).
 
 %%%===================================================================
 %%% Internal functions
