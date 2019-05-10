@@ -61,13 +61,13 @@ jobs:
                   iproute2 dnsutils ipvsadm
       - run:
           name: Checking eunit tests
-          command: ./rebar3 eunit -v
+          command: ./rebar3 eunit --verbose
       - run:
           name: Checking common tests
-          command: ./rebar3 ct -v
+          command: ./rebar3 ct --verbose --readable true
       - run:
           name: Checking common tests as root
-          command: sudo $(which escript) ./rebar3 ct -v
+          command: sudo $(which escript) ./rebar3 ct --verbose --readable true
       - run:
           name: Running cross reference analysis
           command: ./rebar3 xref

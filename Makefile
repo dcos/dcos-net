@@ -36,10 +36,10 @@ dialyzer:
 	${REBAR} dialyzer
 
 eunit:
-	${REBAR} as test eunit
+	${REBAR} as test eunit --verbose
 
 ct:
-	${REBAR} as test ct -v
+	${REBAR} as test ct --verbose --readable true
 
 cover:
 	${REBAR} as test cover
