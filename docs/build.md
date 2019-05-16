@@ -12,7 +12,7 @@ NODE_2_IP=192.168.0.2
 ## Compiling Erlang
 
 Firstly, the dependencies should be installed. Most of them can be installed
-using the package manager of your Linux distribution. In case Erlang 21.x is not
+using the package manager of your Linux distribution. In case Erlang 22.x is not
 available through it, please build one using [kerl](https://github.com/kerl/kerl):
 
 ```sh
@@ -23,8 +23,8 @@ KERL_CONFIGURE_OPTIONS+="--with-ssl"
 KERL_CONFIGURE_OPTIONS+="--without-javac "
 export KERL_CONFIGURE_OPTIONS
 
-kerl build 21.3 21.3
-kerl install 21.3 $HOME/erl
+kerl build 22.0 22.0
+kerl install 22.0 $HOME/erl
 ```
 
 Once it is done, you may execute the following command to activate it:

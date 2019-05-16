@@ -30,7 +30,7 @@ For more information please see DC/OS [documentation](https://dcos.io/docs/lates
 
 ## Dependencies
 
-* Erlang/OTP 21.x
+* Erlang/OTP 22.x
 * C compiler
 * GNU make
 * [libsodium](https://libsodium.org/) 1.0.12+
@@ -95,7 +95,7 @@ to the [instructions](docs/build.md) on how to build, configure, and run
 [coverage badge]: https://img.shields.io/codecov/c/github/dcos/dcos-net/master.svg?style=flat-square
 [jira badge]: https://img.shields.io/badge/issues-jira-yellow.svg?style=flat-square
 [license badge]: https://img.shields.io/github/license/dcos/dcos-net.svg?style=flat-square
-[erlang version badge]: https://img.shields.io/badge/erlang-21.x-blue.svg?style=flat-square
+[erlang version badge]: https://img.shields.io/badge/erlang-22.x-blue.svg?style=flat-square
 
 <!-- Links -->
 [circleci]: https://circleci.com/gh/dcos/dcos-net
