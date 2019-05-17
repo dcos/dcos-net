@@ -33,7 +33,7 @@ For more information please see DC/OS [documentation](https://dcos.io/docs/lates
 * Erlang/OTP 22.x
 * C compiler
 * GNU make
-* [libsodium](https://libsodium.org/) 1.0.12+
+* [libsodium](https://libsodium.org/) 1.0.16+
 
 To run common tests you can run `make test` on any Linux-based system with the
 following list of additional dependencies:

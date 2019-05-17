@@ -71,7 +71,7 @@ mkdir build && cd build
              --with-protobuf=$HOME/.mesos/current/lib/mesos/3rdparty
 ```
 
-If `libsodium` 1.0.12+ is not available in your Linux distro, fetch a tarball
+If `libsodium` 1.0.16+ is not available in your Linux distro, fetch a tarball
 from its official website, unpack it, and build it as follows:
 
 ```sh
