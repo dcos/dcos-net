@@ -3,10 +3,10 @@ FROM erlang:22.0
 RUN apt-get update && apt-get install -y \
         dnsutils ipvsadm \
  && rm -rf /var/lib/apt/lists/* \
- && curl -LO https://launchpad.net/ubuntu/+archive/primary/+files/libsodium18_1.0.13-1_amd64.deb \
- && curl -LO https://launchpad.net/ubuntu/+archive/primary/+files/libsodium-dev_1.0.13-1_amd64.deb \
- && dpkg -i libsodium18_1.0.13-1_amd64.deb \
- && dpkg -i libsodium-dev_1.0.13-1_amd64.deb \
- && rm libsodium18_1.0.13-1_amd64.deb libsodium-dev_1.0.13-1_amd64.deb
+ && git clone --branch stable https://github.com/jedisct1/libsodium.git \
+ && git -C libsodium checkout b732443c442239c2e0184820e9b23cca0de0828c \
+ && ( cd libsodium && ./autogen.sh && ./configure ) \
+ && make -C libsodium -j$(getconf _NPROCESSORS_ONLN) install \
+ && rm -r libsodium
 
 CMD ["bash"]
