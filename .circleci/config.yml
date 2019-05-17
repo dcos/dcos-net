@@ -3,43 +3,44 @@ jobs:
   build:
     machine: true
     working_directory: '~/dcos-net'
-    environment:
-      - OTP_VERSION: "21.3"
     steps:
       - checkout
       - restore_cache:
-          key: otp-build-21.3
+          key: otp-{{ arch }}-{{ checksum ".circleci/config.yml" }}
       - run:
           name: Building OTP
           command: |
-              if [ -d ~/src/otp ]; then
-                  echo "Use pre-build OTP version"
-                  exit 0
-              fi
-
               set -xe
-              ( mkdir -p ~/src && cd ~/src \
-                && git clone --branch maint-21 https://github.com/erlang/otp.git )
-              ( cd ~/src/otp \
-                && git checkout 620ac3e68c5bc8b36143965fcf2892a07dc005c4 \
-                && ./otp_build autoconf \
-                && ./configure \
-                && make -j$(getconf _NPROCESSORS_ONLN) )
+              if [ -d otp ]; then exit 0; fi # restored
+              git clone --branch maint-22 https://github.com/erlang/otp.git otp
+              git -C otp checkout 6618ce7b6a621e92db72ea4f01f7d38553c8818c # 22.0
+              ( cd otp && ./otp_build autoconf && ./configure )
+              make -C otp -j$(getconf _NPROCESSORS_ONLN)
       - save_cache:
-          key: otp-build-21.3
+          key: otp-{{ arch }}-{{ checksum ".circleci/config.yml" }}
           paths:
-            - ~/src/otp
+            - otp
       - run:
           name: Installing OTP
-          command: (cd ~/src/otp && sudo make install)
+          command: sudo make -C otp install
+      - restore_cache:
+          key: libsodium-{{ arch }}-{{ checksum ".circleci/config.yml" }}
       - run:
-          name: Installing libsodium
+          name: Building libsodium
           command: |
               set -xe
-              curl -LO https://launchpad.net/ubuntu/+archive/primary/+files/libsodium18_1.0.13-1_amd64.deb
-              curl -LO https://launchpad.net/ubuntu/+archive/primary/+files/libsodium-dev_1.0.13-1_amd64.deb
-              sudo dpkg -i libsodium18_1.0.13-1_amd64.deb
-              sudo dpkg -i libsodium-dev_1.0.13-1_amd64.deb
+              if [ -d libsodium ]; then exit 0; fi # restored
+              git clone --branch stable https://github.com/jedisct1/libsodium.git
+              git -C libsodium checkout b732443c442239c2e0184820e9b23cca0de0828c # 1.0.17
+              ( cd libsodium && ./autogen.sh && ./configure )
+              make -C libsodium -j$(getconf _NPROCESSORS_ONLN)
+      - save_cache:
+          key: libsodium-{{ arch }}-{{ checksum ".circleci/config.yml" }}
+          paths:
+            - libsodium
+      - run:
+          name: Installing libsodium
+          command: sudo make -C libsodium install
       - run:
           name: Updating rebar3
           command: ./rebar3 update
