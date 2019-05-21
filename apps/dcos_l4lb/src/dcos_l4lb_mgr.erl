@@ -196,7 +196,6 @@ handle_reconcile(VIPs, #state{tree=Tree, nodes=Nodes, namespaces=Namespaces,
     % If everything is ok this function is silent and changes nothing.
     VIPs0 = vips_port_mappings(VIPs),
     VIPs1 = healthy_vips(VIPs0, Nodes, Tree),
-    prometheus_gauge:set(l4lb, unreachable_vips, [], length(VIPs0) - length(VIPs1)),
     VIPsP = prepare_vips(VIPs1),
     Routes = get_vip_routes(VIPs),
     Diffs =
@@ -206,9 +205,12 @@ handle_reconcile(VIPs, #state{tree=Tree, nodes=Nodes, namespaces=Namespaces,
 
             PrevRoutes = get_routes(RouteMgr, Namespace),
             DiffRoutes = dcos_net_utils:complement(Routes, PrevRoutes),
+            prometheus_counter:inc(
+                l4lb, reestablished_routes_total, [], dcos_net_utils:complement_size(DiffRoutes)),
 
             PrevVIPsP = get_vips(IPVSMgr, Namespace),
             DiffVIPs = diff(PrevVIPsP, VIPsP),
+            prometheus_counter:inc(l4lb, reestablished_ipset_entries_total, [], diff_size(DiffVIPs)),
 
             {Namespace, LogPrefix, DiffRoutes, DiffVIPs}
         end, Namespaces),
@@ -216,6 +218,9 @@ handle_reconcile(VIPs, #state{tree=Tree, nodes=Nodes, namespaces=Namespaces,
     Keys = get_vip_keys(VIPs1),
     PrevKeys = get_ipset_entries(IPSetMgr),
     DiffKeys = dcos_net_utils:complement(Keys, PrevKeys),
+    prometheus_counter:inc(
+        l4lb, reestablished_ipvs_rules_total,
+        [], dcos_net_utils:complement_size(DiffKeys)),
 
     State0 = handle_reconcile_apply(Diffs, DiffKeys, State),
 
@@ -229,8 +234,7 @@ handle_reconcile_apply(
                ipset_mgr=IPSetMgr}=State) ->
     lists:foreach(fun ({Namespace, LogPrefix, {_, RoutesToDel}, _DiffVIPs}) ->
         ok = remove_routes(RouteMgr, RoutesToDel, Namespace),
-        ok = log_routes_diff(LogPrefix, {[], RoutesToDel}),
-        prometheus_counter:inc(l4lb, reestablished_routes_total, [], 1)
+        ok = log_routes_diff(LogPrefix, {[], RoutesToDel})
     end, Diffs),
 
     add_ipset_entries(IPSetMgr, KeysToAdd),
@@ -238,8 +242,7 @@ handle_reconcile_apply(
 
     lists:foreach(fun ({Namespace, LogPrefix, _DiffRoutes, DiffVIPs}) ->
         ok = apply_vips_diff(IPVSMgr, Namespace, DiffVIPs),
-        ok = log_vips_diff(LogPrefix, DiffVIPs),
-        prometheus_counter:inc(l4lb, reestablished_ipvs_rules_total, [], 1)
+        ok = log_vips_diff(LogPrefix, DiffVIPs)
     end, Diffs),
 
     remove_ipset_entries(IPSetMgr, KeysToDel),
@@ -247,8 +250,7 @@ handle_reconcile_apply(
 
     lists:foreach(fun ({Namespace, LogPrefix, {RoutesToAdd, _}, _DiffVIPs}) ->
         ok = add_routes(RouteMgr, RoutesToAdd, Namespace),
-        ok = log_routes_diff(LogPrefix, {RoutesToAdd, []}),
-        prometheus_counter:inc(l4lb, reestablished_ipset_entries_total, [], 1)
+        ok = log_routes_diff(LogPrefix, {RoutesToAdd, []})
     end, Diffs),
     State.
 
@@ -256,7 +258,6 @@ handle_reconcile_apply(
 handle_vips(VIPs, #state{tree=Tree, nodes=Nodes, prev_vips=PrevVIPs}=State) ->
     VIPs0 = vips_port_mappings(VIPs),
     VIPs1 = healthy_vips(VIPs0, Nodes, Tree),
-    prometheus_gauge:set(l4lb, unreachable_vips, [], length(VIPs0) - length(VIPs1)),
     DiffVIPs = diff(prepare_vips(PrevVIPs), prepare_vips(VIPs1)),
 
     Routes = get_vip_routes(VIPs1),
@@ -359,6 +360,7 @@ prepare_vips(VIPs) ->
 get_vips(IPVSMgr, Namespace) ->
     Services = get_vip_services(IPVSMgr, Namespace),
     lists:map(fun (S) -> get_vip(IPVSMgr, Namespace, S) end, Services).
+
 -spec(get_vip_services(pid(), namespace()) -> [Service]
     when Service :: dcos_l4lb_ipvs_mgr:service()).
 get_vip_services(IPVSMgr, Namespace) ->
@@ -456,6 +458,12 @@ diff([], ListB, Acc, Bcc, Mcc) ->
 diff(ListA, [], Acc, Bcc, Mcc) ->
     {Acc, ListA ++ Bcc, Mcc}.
 
+%% @doc Given the diff {A, B, _} Return size(A) + size(B)
+-spec(diff_size({A, B, _}) -> integer()
+    when A :: term(), B :: term()).
+diff_size({ListA, ListB, _}) ->
+    length(ListA) + length(ListB).
+
 %%%===================================================================
 %%% Reachability functions
 %%%===================================================================
@@ -470,21 +478,25 @@ healthy_vips(VIPs, Nodes, Tree)
     VIPs;
 healthy_vips(VIPs, Nodes, Tree) ->
     Agents = agents(VIPs, Nodes, Tree),
-    VIPs1 = lists:map(fun ({VIP, BEs}) ->
-        HealthyBEs = healthy_backends(BEs, Agents),
-        BEsCount = length(BEs),
-        {VIP, HealthyBEs, BEsCount, BEsCount - length(HealthyBEs)}
+
+    HealthyVIPs = lists:map(fun ({VIP, BEs}) ->
+        {VIP, healthy_backends(BEs, Agents)}
     end, VIPs),
 
-    {BEsCount, UnreachableBEsCount} =
-        lists:foldl(fun({_, _, BEs, UnreachableBEs}, {AccBEs, AccHealthyBEs}) ->
-            {BEs + AccBEs, UnreachableBEs + AccHealthyBEs}
-        end, {0, 0}, VIPs1),
-    prometheus_gauge:set(l4lb, backends, [], BEsCount),
-    prometheus_gauge:set(l4lb, unreachable_backends, [], UnreachableBEsCount),
+    AllBackends =
+        lists:sum([length(BEs) || {_VIP, BEs} <- VIPs]),
+    prometheus_gauge:set(l4lb, backends, [], AllBackends),
 
-    lists:map(fun({VIP, HealthyBEs, _, _}) -> {VIP, HealthyBEs} end, VIPs1).
+    HealthyBackends =
+        lists:sum([length(BEs) || {_VIP, BEs} <- HealthyVIPs]),
+    prometheus_gauge:set(
+        l4lb, unreachable_backends, [],
+        AllBackends - HealthyBackends),
 
+    UnrecheableVIPs = [VIP || {VIP, BEs} <- HealthyVIPs, length(BEs) =:= 0],
+    prometheus_gauge:set(l4lb, unreachable_vips, [], length(UnrecheableVIPs)),
+
+    HealthyVIPs.
 
 -spec(agents(VIPs, Nodes, Tree) -> #{inet:ip4_address() => boolean()}
     when VIPs :: [{key(), [backend()]}],
@@ -718,7 +730,7 @@ init_metrics() ->
     prometheus_gauge:declare([
         {registry, l4lb},
         {name, netns},
-        {help, "Current number of of network namespaces."}]),
+        {help, "The number of network namespaces."}]),
     ok.
 
 init_reestablished_metrics() ->

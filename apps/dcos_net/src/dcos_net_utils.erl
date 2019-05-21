@@ -2,6 +2,7 @@
 
 -export([
     complement/2,
+    complement_size/1,
     system/1,
     system/2,
     join/2
@@ -34,6 +35,12 @@ complement([A|_]=ListA, [B|ListB], Acc, Bcc) when A > B ->
     complement(ListA, ListB, Acc, [B|Bcc]);
 complement([A|ListA], [B|_]=ListB, Acc, Bcc) when A < B ->
     complement(ListA, ListB, [A|Acc], Bcc).
+
+%% @doc Given {A, B} as a complement, Return size(A) + size(B)
+-spec(complement_size({[A], [B]}) -> integer()
+    when A :: term(), B :: term()).
+complement_size({ListA, ListB}) ->
+    length(ListA) + length(ListB).
 
 %%%===================================================================
 %%% System functions

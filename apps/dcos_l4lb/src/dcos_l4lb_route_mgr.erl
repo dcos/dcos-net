@@ -47,6 +47,7 @@
     lo_iface :: non_neg_integer() | undefined
 }).
 
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -54,10 +55,29 @@ get_routes(Pid, Namespace) ->
     gen_server:call(Pid, {get_routes, Namespace}).
 
 add_routes(Pid, Routes, Namespace) ->
-    gen_server:call(Pid, {add_routes, Routes, Namespace}).
+    Begin = erlang:monotonic_time(),
+    Response = gen_server:call(Pid, {add_routes, Routes, Namespace}),
+    try
+        prometheus_summary:observe(
+            l4lb, routes_updates_seconds, [],
+            erlang:monotonic_time() - Begin)
+    catch error:_Error ->
+        ok
+    end,
+    Response.
 
 remove_routes(Pid, Routes, Namespace) ->
-    gen_server:call(Pid, {remove_routes, Routes, Namespace}).
+    Begin = erlang:monotonic_time(),
+    Response = gen_server:call(Pid, {remove_routes, Routes, Namespace}),
+    try
+        prometheus_summary:observe(
+            l4lb, routes_updates_seconds, [],
+            erlang:monotonic_time() - Begin)
+    catch error:_Error ->
+        ok
+    end,
+
+    Response.
 
 add_netns(Pid, UpdateValue) ->
     gen_server:call(Pid, {add_netns, UpdateValue}).
@@ -147,19 +167,11 @@ route_msg_dst(Msg) -> proplists:get_value(dst, element(10, Msg)).
 route_msg_table(Msg) -> proplists:get_value(table, element(10, Msg)).
 
 update_routes(Routes, Action, Namespace, #state{netns = NetnsMap}) ->
-    Begin = erlang:monotonic_time(),
     lager:info("~p ~p ~p", [Action, Namespace, Routes]),
     Params = maps:get(Namespace, NetnsMap),
     lists:foreach(fun(Route) ->
         perform_action(Route, Action, Namespace, Params)
-    end, Routes),
-    try
-        prometheus_summary:observe(
-            l4lb, routes_updates_seconds, [],
-            erlang:monotonic_time() - Begin)
-    catch error:_Error ->
-        ok
-    end.
+    end, Routes).
 
 perform_action(Dst, Action, Namespace, Params = #params{pid = Pid}) ->
     Flags = rt_flags(Action),

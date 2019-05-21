@@ -18,8 +18,11 @@ poll(URIPath) ->
     Response = request(URIPath, [{"Accept", "application/json"}]),
     handle_response(Response).
 
--spec(call(jiffy:json_term()) ->
-    {ok, {jiffy:json_term(), integer()}} | {ok, reference(), pid()} | {error, term()}).
+-spec(call(jiffy:json_term()) -> Response
+    when OKPayload :: {ok, jiffy:json_term()},
+         OKReference :: {ok, reference(), pid()},
+         Error :: {error, term()},
+         Response :: OKPayload | OKReference | Error).
 call(Request) ->
     call(Request, [], []).
 

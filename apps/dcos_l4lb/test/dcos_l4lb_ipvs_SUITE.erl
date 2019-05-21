@@ -47,6 +47,7 @@ init_per_testcase(_, Config) ->
             application:set_env(dcos_l4lb, enable_networking, true),
             {ok, _} = application:ensure_all_started(inets),
             {ok, _} = application:ensure_all_started(dcos_l4lb),
+            dcos_l4lb_ipvs_mgr:init_metrics(),
             [{agentip, AgentIP} | Config];
         Result ->
             {skip, Result}

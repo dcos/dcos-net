@@ -96,7 +96,7 @@ skip_kv_event(Event, Ref) ->
 handle_event(#{value := RawVIPs}) ->
     try
         prometheus_counter:inc(l4lb, vips_updates_total, [], 1)
-    catch _Error ->
+    catch error:_Error ->
         ok
     end,
     VIPs = process_vips(RawVIPs),

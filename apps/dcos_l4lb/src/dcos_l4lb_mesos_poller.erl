@@ -110,10 +110,11 @@ handle_poll_state(Tasks) ->
     dcos_l4lb_mgr:local_port_mappings(PortMappings),
 
     VIPs = collect_vips(HealthyTasks),
-    ok = push_vips(VIPs),
+    prometheus_gauge:set(l4lb, local_vips, [], maps:size(VIPs)),
     prometheus_gauge:set(
         l4lb, local_backends, [],
-        lists:sum([length(BEs) || BEs <- maps:values(VIPs)])).
+        lists:sum([length(BEs) || BEs <- maps:values(VIPs)])),
+    ok = push_vips(VIPs).
 
 -spec(is_healthy(task_id(), task()) -> boolean()).
 is_healthy(_TaskId, Task) ->
@@ -227,7 +228,6 @@ push_vips(LocalVIPs) ->
     VIPs = lashup_kv:value(?VIPS_KEY2),
     Ops = generate_ops(LocalVIPs, VIPs),
     push_ops(?VIPS_KEY2, Ops),
-    prometheus_gauge:set(l4lb, local_vips, [], maps:size(LocalVIPs)),
     log_ops(Ops).
 
 -spec(generate_ops(#{key() => [backend()]}, [{lkey(), [backend()]}]) ->
