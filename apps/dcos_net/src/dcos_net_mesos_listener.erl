@@ -82,7 +82,6 @@ is_leader() ->
         false
     end.
 
-% maybe revert changes on this method
 -spec(poll() -> {ok, #{task_id() => task()}} | {error, term()}).
 poll() ->
     case poll_imp() of
@@ -760,7 +759,7 @@ poll_imp() ->
             end;
         {error, Error} ->
             {error, Error}
-   end.
+    end.
 
 -spec(from_state_imp(jiffy:object()) -> #{task_id() => task()}).
 from_state_imp(Data) ->

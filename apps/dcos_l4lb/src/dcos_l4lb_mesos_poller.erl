@@ -130,7 +130,8 @@ is_healthy(_Task) ->
 
 %%%===================================================================
 %%% Collect functions
-%%%==================================================================
+%%%===================================================================
+
 -spec(collect_port_mappings(#{task_id() => task()}) -> #{Host => Container}
     when Host :: {protocol(), inet:port_number()},
          Container :: {inet:ip_address(), inet:port_number()}).
