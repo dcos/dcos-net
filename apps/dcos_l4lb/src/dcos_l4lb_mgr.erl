@@ -722,7 +722,7 @@ init_metrics() ->
     prometheus_gauge:declare([
         {registry, l4lb},
         {name, backends},
-        {help, "The number of backends."}]),
+        {help, "The number of VIP backends."}]),
     prometheus_summary:declare([
         {registry, l4lb},
         {name, update_vips_seconds},
