@@ -741,17 +741,17 @@ init_reestablished_metrics() ->
     prometheus_counter:declare([
         {registry, l4lb},
         {name, reestablished_ipvs_rules_total},
-        {help, "Total number of reestablished ipvs rules."}]),
+        {help, "Total number of reestablished IPVS rules."}]),
     prometheus_counter:declare([
         {registry, l4lb},
         {name, reestablished_ipset_entries_total},
-        {help, "Total number of reestablished ipset rules."}]).
+        {help, "Total number of reestablished IPSet rules."}]).
 
 init_unreachable_metrics() ->
     prometheus_gauge:declare([
         {registry, l4lb},
         {name, unreachable_backends},
-        {help, "Thu number of unreachable backends."}]),
+        {help, "The number of unreachable VIP backends."}]),
     prometheus_gauge:declare([
         {registry, l4lb},
         {name, unreachable_vips},
@@ -759,7 +759,7 @@ init_unreachable_metrics() ->
     prometheus_gauge:declare([
         {registry, l4lb},
         {name, unreachable_nodes},
-        {help, "Current number of unreachable nodes."}]),
+        {help, "The number of unreachable nodes."}]),
     ok.
 
 %%%===================================================================
