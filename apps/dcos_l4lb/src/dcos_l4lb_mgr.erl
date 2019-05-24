@@ -755,7 +755,7 @@ init_unreachable_metrics() ->
     prometheus_gauge:declare([
         {registry, l4lb},
         {name, unreachable_vips},
-        {help, "The number of unreachable vips."}]),
+        {help, "The number of unreachable VIPs."}]),
     prometheus_gauge:declare([
         {registry, l4lb},
         {name, unreachable_nodes},
