@@ -401,5 +401,5 @@ init_metrics() ->
     prometheus_summary:declare([
         {registry, l4lb},
         {name, ipset_updates_seconds},
-        {help, "The time spent updating ipset configuration."}]),
+        {help, "The time spent updating IPSet configuration."}]),
     ok.
