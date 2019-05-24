@@ -316,7 +316,7 @@ init_metrics() ->
     prometheus_gauge:declare([
         {registry, l4lb},
         {name, local_backends},
-        {help, "The number of local backends."}]),
+        {help, "The number of local VIP backends."}]),
    ok.
 
 %%%===================================================================
