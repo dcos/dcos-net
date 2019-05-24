@@ -87,19 +87,17 @@ get_services(Pid, Namespace) ->
 -spec(add_service(Pid :: pid(), IP :: inet:ip_address(), Port :: inet:port_number(),
                   Protocol :: protocol(), Namespace :: term()) -> ok | error).
 add_service(Pid, IP, Port, Protocol, Namespace) ->
-    Begin = erlang:monotonic_time(),
-    Reply = gen_server:call(Pid, {add_service, IP, Port, Protocol, Namespace}),
-    ipvs_updates_seconds_safe_observe(Begin),
-    Reply.
+    prometheus_summary:observe_duration(
+        l4lb, ipvs_updates_seconds, [],
+        fun () -> gen_server:call(Pid, {add_service, IP, Port, Protocol, Namespace}) end).
 
 -spec(remove_service(Pid :: pid(), IP :: inet:ip_address(),
                      Port :: inet:port_number(),
                      Protocol :: protocol(), Namespace :: term()) -> ok | error).
 remove_service(Pid, IP, Port, Protocol, Namespace) ->
-    Begin = erlang:monotonic_time(),
-    Reply = gen_server:call(Pid, {remove_service, IP, Port, Protocol, Namespace}),
-    ipvs_updates_seconds_safe_observe(Begin),
-    Reply.
+    prometheus_summary:observe_duration(
+        l4lb, ipvs_updates_seconds, [],
+        fun () -> gen_server:call(Pid, {remove_service, IP, Port, Protocol, Namespace}) end).
 
 -spec(get_dests(Pid :: pid(), Service :: service(), Namespace :: term()) -> [dest()]).
 get_dests(Pid, Service, Namespace) ->
@@ -110,32 +108,31 @@ get_dests(Pid, Service, Namespace) ->
                   DestIP :: inet:ip_address(), DestPort :: inet:port_number(),
                   Protocol :: protocol(), Namespace :: term()) -> ok | error).
 remove_dest(Pid, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace) ->
-    Begin = erlang:monotonic_time(),
-    Reply = gen_server:call(Pid, {remove_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace}),
-    ipvs_updates_seconds_safe_observe(Begin),
-    Reply.
+    prometheus_summary:observe_duration(
+        l4lb, ipvs_updates_seconds, [],
+        fun () ->
+            gen_server:call(Pid, {remove_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace})
+        end).
 
 -spec(add_dest(Pid :: pid(), ServiceIP :: inet:ip_address(), ServicePort :: inet:port_number(),
                DestIP :: inet:ip_address(), DestPort :: inet:port_number(),
                Protocol :: protocol(), Namespace :: term()) -> ok | error).
 add_dest(Pid, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace) ->
-    Begin = erlang:monotonic_time(),
-    Reply = gen_server:call(Pid, {add_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace}),
-    ipvs_updates_seconds_safe_observe(Begin),
-    Reply.
-
+    prometheus_summary:observe_duration(
+        l4lb, ipvs_updates_seconds, [],
+        fun () ->
+            gen_server:call(Pid, {add_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace})
+        end).
 
 add_netns(Pid, UpdateValue) ->
-    Begin = erlang:monotonic_time(),
-    Reply = gen_server:call(Pid, {add_netns, UpdateValue}),
-    ipvs_updates_seconds_safe_observe(Begin),
-    Reply.
+    prometheus_summary:observe_duration(
+        l4lb, ipvs_updates_seconds, [],
+        fun () -> gen_server:call(Pid, {add_netns, UpdateValue}) end).
 
 remove_netns(Pid, UpdateValue) ->
-    Begin = erlang:monotonic_time(),
-    Reply = gen_server:call(Pid, {remove_netns, UpdateValue}),
-    ipvs_updates_seconds_safe_observe(Begin),
-    Reply.
+    prometheus_summary:observe_duration(
+        l4lb, ipvs_updates_seconds, [],
+        fun () -> gen_server:call(Pid, {remove_netns, UpdateValue}) end).
 
 %% @doc Starts the server
 -spec(start_link() ->
@@ -393,15 +390,6 @@ init_metrics() ->
         {name, ipvs_updates_seconds},
         {help, "The time spent updating ipvs configuration."}]),
     ok.
-
-ipvs_updates_seconds_safe_observe(Begin) ->
-    try
-        prometheus_summary:observe(
-            l4lb, ipvs_updates_seconds, [],
-            erlang:monotonic_time() - Begin)
-    catch error:_Error ->
-        ok
-    end.
 
 %%%===================================================================
 %%% Test functions

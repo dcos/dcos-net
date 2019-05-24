@@ -177,8 +177,8 @@ perform_action(Dst, Action, Namespace, Params = #params{pid = Pid}) ->
     Flags = rt_flags(Action),
     Routes = make_routes(Dst, Namespace, Params), %% v6 has two routes
     lists:foreach(fun(Route) ->
-                    perform_action2(Pid, Action, Flags, Route)
-                  end, Routes).
+        perform_action(Pid, Action, Flags, Route)
+    end, Routes).
 
 perform_action2(Pid, Action, Flags, Route) ->
     Result = gen_netlink_client:rtnl_request(Pid, Action, Flags, Route),

@@ -94,11 +94,6 @@ skip_kv_event(Event, Ref) ->
 
 -spec(handle_event(Event :: map()) -> ok).
 handle_event(#{value := RawVIPs}) ->
-    try
-        prometheus_counter:inc(l4lb, vips_updates_total, [], 1)
-    catch error:_Error ->
-        ok
-    end,
     VIPs = process_vips(RawVIPs),
     ok = cleanup_mappings(VIPs),
     ok = dcos_l4lb_mgr:push_vips(VIPs),
@@ -299,15 +294,3 @@ to_name(Binaries) ->
     Bins = lists:map(fun mesos_state:domain_frag/1, Binaries),
     <<$., Name/binary>> = << <<$., Bin/binary>> || Bin <- Bins >>,
     Name.
-
-%%%===================================================================
-%%% Metrics functions
-%%%===================================================================
-
--spec(init_metrics() -> ok).
-init_metrics() ->
-    prometheus_counter:declare([
-        {registry, l4lb},
-        {name, vips_updates_total},
-        {help, "Total number of times vips were updated."}]),
-    ok.

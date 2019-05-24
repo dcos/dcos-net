@@ -50,21 +50,15 @@ get_entries(Pid) ->
 
 -spec(add_entries(pid(), [entry()]) -> ok | error).
 add_entries(Pid, Entries) ->
-    Begin = erlang:monotonic_time(),
-    Reply = gen_server:call(Pid, {add_entries, Entries}),
-    prometheus_summary:observe(
+    prometheus_summary:observe_duration(
         l4lb, ipset_updates_seconds, [],
-        erlang:monotonic_time() - Begin),
-    Reply.
+        fun () -> gen_server:call(Pid, {add_entries, Entries}) end).
 
 -spec(remove_entries(pid(), [entry()]) -> ok | error).
 remove_entries(Pid, Entries) ->
-    Begin = erlang:monotonic_time(),
-    Reply = gen_server:call(Pid, {remove_entries, Entries}),
-    prometheus_summary:observe(
+    prometheus_summary:observe_duration(
         l4lb, ipset_updates_seconds, [],
-        erlang:monotonic_time() - Begin),
-    Reply.
+        fun () -> gen_server:call(Pid, {remove_entries, Entries}) end).
 
 -spec(start_link() ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
