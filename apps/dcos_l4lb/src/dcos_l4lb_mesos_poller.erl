@@ -304,7 +304,7 @@ init_metrics() ->
     prometheus_gauge:declare([
         {registry, l4lb},
         {name, local_vips},
-        {help, "The number of local VIPs."}]),
+        {help, "The number of local VIP labels."}]),
     prometheus_gauge:declare([
         {registry, l4lb},
         {name, local_tasks},
