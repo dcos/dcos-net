@@ -48,13 +48,13 @@ get_entries() ->
 get_entries(Pid) ->
     gen_server:call(Pid, get_entries).
 
--spec(add_entries(pid(), [entry()]) -> ok | error).
+-spec(add_entries(pid(), [entry()]) -> ok).
 add_entries(Pid, Entries) ->
     prometheus_summary:observe_duration(
         l4lb, ipset_updates_seconds, [],
         fun () -> gen_server:call(Pid, {add_entries, Entries}) end).
 
--spec(remove_entries(pid(), [entry()]) -> ok | error).
+-spec(remove_entries(pid(), [entry()]) -> ok).
 remove_entries(Pid, Entries) ->
     prometheus_summary:observe_duration(
         l4lb, ipset_updates_seconds, [],
