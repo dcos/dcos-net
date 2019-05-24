@@ -730,7 +730,7 @@ init_metrics() ->
     prometheus_gauge:declare([
         {registry, l4lb},
         {name, netns},
-        {help, "The number of network namespaces."}]),
+        {help, "The number of L4LB network namespaces."}]),
     ok.
 
 init_reestablished_metrics() ->
