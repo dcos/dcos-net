@@ -51,9 +51,10 @@ handle_call(_Request, _From, State) ->
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-handle_info({lashup_kv_events, Event = #{ref := Ref}},
-            State0 = #state{ref = Ref}) ->
-    State1 = handle_event(Event, State0),
+handle_info({lashup_kv_events, Event = #{ref := Ref, key := Key}},
+        State0 = #state{ref = Ref}) ->
+    Event0 = skip_kv_event(Event, Ref, Key),
+    State1 = handle_event(Event0, State0),
     {noreply, State1};
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -61,6 +62,17 @@ handle_info(_Info, State) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+-spec(skip_kv_event(Event, reference(), term()) -> Event when Event :: map()).
+skip_kv_event(Event, Ref, Key) ->
+    % Skip current lashup kv event if there is yet another event in
+    % the message queue. It should improve the convergence.
+    receive
+        {lashup_kv_events, #{ref := Ref, key := Key} = Event0} ->
+            skip_kv_event(Event0, Ref, Key)
+    after 0 ->
+        Event
+    end.
 
 handle_event(#{key := ?LASHUP_SET_KEY(ZoneName), value := Value}, State) ->
     {?RECORDS_SET_FIELD, Records} = lists:keyfind(?RECORDS_SET_FIELD, 1, Value),
