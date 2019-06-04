@@ -5,6 +5,9 @@
 -include_lib("erldns/include/erldns.hrl").
 -include("dcos_dns.hrl").
 
+% Lashup mocks
+-export([value/1, request_op/2]).
+
 -define(
     REPEAT(Attempts, Delay, Expr),
     lists:foldl(
@@ -400,24 +403,36 @@ ensure_all_started(erldns) ->
 %%% Lashup mocks
 %%%===================================================================
 
-value(?LASHUP_KEY(ZoneName)) ->
+value(?LASHUP_LWW_KEY(ZoneName)) ->
     case erldns_zone_cache:get_zone_with_records(ZoneName) of
         {ok, #zone{records = Records}} ->
-            [{?RECORDS_FIELD, Records}];
+            [{?RECORDS_LWW_FIELD, Records}];
         {error, zone_not_found} ->
-            [{?RECORDS_FIELD, []}]
+            [{?RECORDS_LWW_FIELD, []}]
+    end;
+value(?LASHUP_SET_KEY(ZoneName)) ->
+    case erldns_zone_cache:get_zone_with_records(ZoneName) of
+        {ok, #zone{records = Records}} ->
+            [{?RECORDS_SET_FIELD, Records}];
+        {error, zone_not_found} ->
+            [{?RECORDS_SET_FIELD, []}]
     end.
 
-request_op(LKey = ?LASHUP_KEY(ZoneName), {update, Updates}) ->
-    [{?RECORDS_FIELD, Records}] = lashup_kv:value(LKey),
+request_op(LKey = ?LASHUP_LWW_KEY(ZoneName), {update, Updates}) ->
+    [{update, ?RECORDS_LWW_FIELD, Op}] = Updates,
+    {assign, Records, _Timestamp} = Op,
+    ok = dcos_dns:push_prepared_zone(ZoneName, Records),
+    {ok, value(LKey)};
+request_op(LKey = ?LASHUP_SET_KEY(ZoneName), {update, Updates}) ->
+    [{?RECORDS_SET_FIELD, Records}] = lashup_kv:value(LKey),
     Records0 = apply_op(Records, Updates),
     ok = dcos_dns:push_prepared_zone(ZoneName, Records0),
     {ok, value(LKey)}.
 
 apply_op(List, Updates) ->
     lists:foldl(
-        fun ({update, ?RECORDS_FIELD, {remove_all, RList}}, Acc) ->
+        fun ({update, ?RECORDS_SET_FIELD, {remove_all, RList}}, Acc) ->
                 Acc -- RList;
-            ({update, ?RECORDS_FIELD, {add_all, AList}}, Acc) ->
+            ({update, ?RECORDS_SET_FIELD, {add_all, AList}}, Acc) ->
                 Acc ++ AList
         end, List, Updates).

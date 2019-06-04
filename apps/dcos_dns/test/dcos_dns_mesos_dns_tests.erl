@@ -165,9 +165,9 @@ setup() ->
     DataFile = filename:join(Cwd, "apps/dcos_dns/test/axfr.json"),
     {ok, Data} = file:read_file(DataFile),
 
-    meck:new(lashup_kv),
-    meck:expect(lashup_kv, value, fun value/1),
-    meck:expect(lashup_kv, request_op, fun request_op/2),
+    meck:new(lashup),
+    meck:expect(lashup_kv, value, fun dcos_dns_mesos_tests:value/1),
+    meck:expect(lashup_kv, request_op, fun dcos_dns_mesos_tests:request_op/2),
 
     meck:new(httpc),
     meck:expect(httpc, request,
@@ -218,29 +218,3 @@ ensure_all_started(erldns) ->
     end, SysConfig),
 
     application:ensure_all_started(erldns).
-
-%%%===================================================================
-%%% Lashup Mocks
-%%%===================================================================
-
-value(?LASHUP_KEY(ZoneName)) ->
-    case erldns_zone_cache:get_zone_with_records(ZoneName) of
-        {ok, #zone{records = Records}} ->
-            [{?RECORDS_FIELD, Records}];
-        {error, zone_not_found} ->
-            [{?RECORDS_FIELD, []}]
-    end.
-
-request_op(LKey = ?LASHUP_KEY(ZoneName), {update, Updates}) ->
-    [{?RECORDS_FIELD, Records}] = lashup_kv:value(LKey),
-    Records0 = apply_op(Records, Updates),
-    dcos_dns:push_prepared_zone(ZoneName, Records0),
-    {ok, value(LKey)}.
-
-apply_op(List, Updates) ->
-    lists:foldl(
-        fun ({update, ?RECORDS_FIELD, {remove_all, RList}}, Acc) ->
-                Acc -- RList;
-            ({update, ?RECORDS_FIELD, {add_all, AList}}, Acc) ->
-                Acc ++ AList
-        end, List, Updates).

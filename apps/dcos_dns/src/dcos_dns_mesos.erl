@@ -77,7 +77,8 @@ handle_init(State) ->
         {ok, Ref, MTasks} ->
             MRef = start_masters_timer(),
             {Tasks, Records} = task_records(MTasks),
-            {ok, NewRRs, OldRRs} = push_tasks(Tasks),
+            {ok, NewRRs, OldRRs} =
+                push_zone(?DCOS_DOMAIN, maps:keys(Records)),
             lager:notice(
                 "DC/OS DNS Sync: ~p records were added, ~p records were removed",
                 [length(NewRRs), length(OldRRs)]),
@@ -127,6 +128,11 @@ task_updated(TaskId, Task, Tasks, RRs) ->
 -spec(task_records(#{task_id() => task()}) ->
     {#{task_id() => [dns:dns_rr()]}, #{dns:dns_rr() => pos_integer()}}).
 task_records(Tasks) ->
+    InitRecords = #{
+        dcos_dns:ns_record(?DCOS_DOMAIN) => 1,
+        dcos_dns:soa_record(?DCOS_DOMAIN) => 1,
+        leader_record(?DCOS_DOMAIN) => 1
+    },
     maps:fold(fun (TaskId, #{state := TaskState} = Task, {Acc, RRs}) ->
         case is_running(TaskState) of
             true ->
@@ -137,7 +143,7 @@ task_records(Tasks) ->
             false ->
                 {Acc, RRs}
         end
-    end, {#{}, #{}}, Tasks).
+    end, {#{}, InitRecords}, Tasks).
 
 -spec(task_records(task_id(), task()) -> dns:dns_rr()).
 task_records(TaskId, Task) ->
@@ -239,8 +245,8 @@ master_records(ZoneName) ->
     Masters = [IP || {IP, _} <- dcos_dns_config:mesos_resolvers()],
     dcos_dns:dns_records(<<"master.", ZoneName/binary>>, Masters).
 
--spec(leader_records(dns:dname()) -> dns:dns_rr()).
-leader_records(ZoneName) ->
+-spec(leader_record(dns:dname()) -> dns:dns_rr()).
+leader_record(ZoneName) ->
     % dcos-net connects only to local mesos,
     % operator API works only on a leader mesos,
     % so this node is the leader node
@@ -256,20 +262,6 @@ start_masters_timer() ->
 %%% DNS functions
 %%%===================================================================
 
--spec(push_tasks(#{task_id() => task()}) ->
-    {ok, New :: [dns:dns_rr()], Old :: [dns:dns_rr()]}).
-push_tasks(Tasks) ->
-    ZoneName = ?DCOS_DOMAIN,
-    Records = maps:values(Tasks),
-    Records0 =
-        lists:flatten([
-            Records,
-            dcos_dns:ns_record(ZoneName),
-            dcos_dns:soa_record(ZoneName),
-            leader_records(ZoneName)
-        ]),
-    push_zone(ZoneName, Records0).
-
 -spec(format_name([binary()], binary()) -> binary()).
 format_name(ListOfNames, Postfix) ->
     ListOfNames1 = lists:map(fun mesos_state:label/1, ListOfNames),
@@ -284,51 +276,90 @@ format_name(ListOfNames, Postfix) ->
 -spec(push_zone(dns:dname(), [dns:dns_rr()]) ->
     {ok, New :: [dns:dns_rr()], Old :: [dns:dns_rr()]}).
 push_zone(ZoneName, Records) ->
-    Key = ?LASHUP_KEY(ZoneName),
+    Modes = dcos_dns_config:store_modes(),
+    lists:foldl(
+        fun (lww, _Acc) ->
+                Dump = get_lww_zone(ZoneName),
+                ok = push_lww_zone(ZoneName, Records),
+                {New, Old} = dcos_net_utils:complement(Records, Dump),
+                {ok, New, Old};
+            (set, _Acc) ->
+                {ok, _New, _Old} = push_set_zone(ZoneName, Records)
+        end, {ok, [], []}, lists:reverse(Modes)).
+
+-spec(get_lww_zone(dns:dname()) -> [dns:dns_rr()]).
+get_lww_zone(ZoneName) ->
+    Value = lashup_kv:value(?LASHUP_LWW_KEY(ZoneName)),
+    case lists:keyfind(?RECORDS_LWW_FIELD, 1, Value) of
+        {?RECORDS_LWW_FIELD, Records} ->
+            Records;
+        false ->
+            []
+    end.
+
+-spec(push_lww_zone(dns:dname(), [dns:dns_rr()]) -> ok).
+push_lww_zone(ZoneName, Records) ->
+    Op = {assign, Records, erlang:system_time(millisecond)},
+    {ok, _Info} = lashup_kv:request_op(
+        ?LASHUP_LWW_KEY(ZoneName),
+        {update, [{update, ?RECORDS_LWW_FIELD, Op}]}),
+    ok.
+
+-spec(push_set_zone(dns:dname(), [dns:dns_rr()]) ->
+    {ok, New :: [dns:dns_rr()], Old :: [dns:dns_rr()]}).
+push_set_zone(ZoneName, Records) ->
+    Key = ?LASHUP_SET_KEY(ZoneName),
     LRecords = lashup_kv:value(Key),
     LRecords0 =
-        case lists:keyfind(?RECORDS_FIELD, 1, LRecords) of
+        case lists:keyfind(?RECORDS_SET_FIELD, 1, LRecords) of
             false -> [];
             {_, LR} -> LR
         end,
-    push_diff(ZoneName, Records, LRecords0).
+    push_set_diff(ZoneName, Records, LRecords0).
 
--spec(push_diff(dns:dname(), [dns:dns_rr()], [dns:dns_rr()]) ->
+-spec(push_set_diff(dns:dname(), [dns:dns_rr()], [dns:dns_rr()]) ->
     {ok, New :: [dns:dns_rr()], Old :: [dns:dns_rr()]}).
-push_diff(ZoneName, New, Old) ->
+push_set_diff(ZoneName, New, Old) ->
     case dcos_net_utils:complement(New, Old) of
         {[], []} ->
             {ok, [], []};
         {AddRecords, RemoveRecords} ->
             Ops = [{remove_all, RemoveRecords}, {add_all, AddRecords}],
-            ok = push_ops(ZoneName, Ops),
+            ok = push_set_ops(ZoneName, Ops),
             {ok, AddRecords, RemoveRecords}
     end.
 
--spec(push_ops(dns:dname(), [riak_dt_orswot:orswot_op()]) -> ok).
-push_ops(_ZoneName, []) ->
+-spec(push_set_ops(dns:dname(), [riak_dt_orswot:orswot_op()]) -> ok).
+push_set_ops(_ZoneName, []) ->
     ok;
-push_ops(ZoneName, Ops) ->
-    % TODO: use lww
-    Key = ?LASHUP_KEY(ZoneName),
-    Updates = [{update, ?RECORDS_FIELD, Op} || Op <- Ops],
+push_set_ops(ZoneName, Ops) ->
+    Key = ?LASHUP_SET_KEY(ZoneName),
+    Updates = [{update, ?RECORDS_SET_FIELD, Op} || Op <- Ops],
     case lashup_kv:request_op(Key, {update, Updates}) of
         {ok, _} -> ok
     end.
 
+-spec(push_zone_ops(dns:dname(), [dns:dns_rr()], [Op]) -> ok
+    when Op :: riak_dt_orswot:orswot_op()).
+push_zone_ops(ZoneName, Records, Ops) ->
+    Modes = dcos_dns_config:store_modes(),
+    [ ok = push_lww_zone(ZoneName, Records) || lists:member(lww, Modes) ],
+    [ ok = push_set_ops(ZoneName, Ops) || lists:member(set, Modes) ],
+    ok.
+
 -spec(handle_push_ops([riak_dt_orswot:orswot_op()], state()) -> state()).
 handle_push_ops([], State) ->
     State;
-handle_push_ops(Ops, #state{ops=[], ops_ref=undefined}=State) ->
+handle_push_ops(Ops, #state{ops=[], ops_ref=undefined, records=RRs}=State) ->
     % NOTE: push data to lashup 1 time per second
-    ok = push_ops(?DCOS_DOMAIN, Ops),
+    ok = push_zone_ops(?DCOS_DOMAIN, maps:keys(RRs), Ops),
     State#state{ops_ref=start_push_ops_timer()};
 handle_push_ops(Ops, #state{ops=Buf}=State) ->
     State#state{ops=Buf ++ Ops}.
 
 -spec(handle_push_ops(state()) -> state()).
-handle_push_ops(#state{ops=Ops}=State) ->
-    ok = push_ops(?DCOS_DOMAIN, Ops),
+handle_push_ops(#state{ops=Ops, records=RRs}=State) ->
+    ok = push_zone_ops(?DCOS_DOMAIN, maps:keys(RRs), Ops),
     State#state{ops=[], ops_ref=undefined}.
 
 -spec(start_push_ops_timer() -> reference()).

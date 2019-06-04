@@ -19,7 +19,8 @@
     handle_info/2, terminate/2, code_change/3]).
 
 -record(state, {
-    ref :: reference()
+    ref :: reference(),
+    hash = <<>> :: binary()
 }).
 -type state() :: #state{}.
 
@@ -82,18 +83,21 @@ handle_poll(true, State) ->
     Timeout = application:get_env(dcos_dns, mesos_dns_timeout, 30000),
     receive
         {http, {Ref, {error, Error}}} ->
-            lager:warning("mesos-dns connection error: ~p", [Error]),
+            lager:warning("Failed to connect to mesos-dns: ~p", [Error]),
             State;
         {http, {Ref, {{_HTTPVersion, 200, _StatusStr}, _Headers, Body}}} ->
-            try
-                Data = jiffy:decode(Body, [return_maps]),
-                handle_data(Data, State)
-            catch Class:Error ->
-                lager:warning("mesos-dns bad json ~p:~p", [Class, Error]),
+            try get_records(Body) of Records ->
+                maybe_push_zone(Records, State)
+            catch Class:Error:ST ->
+                lager:warning(
+                    "Failed to process mesos-dns data [~p] ~p ~p",
+                    [Class, Error, ST]),
                 State
             end;
         {http, {Ref, {{_HTTPVersion, Status, _StatusStr}, _Headers, Body}}} ->
-            lager:warning("mesos-dns error [~p] ~s", [Status, Body]),
+            lager:warning(
+                "Failed to get data from mesos-dns [~p] ~s",
+                [Status, Body]),
             State
     after Timeout ->
         ok = httpc:cancel_request(Ref),
@@ -105,8 +109,10 @@ handle_poll(true, State) ->
 %%% Handle data
 %%%===================================================================
 
--spec(handle_data(jiffy:object(), state()) -> state()).
-handle_data(Data, State) ->
+-spec(get_records(binary()) -> [dns:dns_rr()]).
+get_records(Body) ->
+    Data = jiffy:decode(Body, [return_maps]),
+
     MesosDNSDomain = maps:get(<<"Domain">>, Data, <<"mesos">>),
     MesosDNSRecords = maps:get(<<"Records">>, Data, #{}),
 
@@ -132,14 +138,7 @@ handle_data(Data, State) ->
             srv_records(DName, HPs, MesosDNSDomain) ++ Acc
         end, Records1, SRVRecords),
 
-    case push_zone(Records2) of
-        {ok, [], []} -> State;
-        {ok, NewRRs, OldRRs} ->
-            lager:notice(
-                "Mesos DNS Sync: ~p reconds were added, ~p reconds were removed",
-                [length(NewRRs), length(OldRRs)]),
-            State
-    end.
+    Records2.
 
 -spec(dname(binary(), binary()) -> binary()).
 dname(DName, DomainName) ->
@@ -174,7 +173,21 @@ srv_records(DName, HPs, MesosDNSDomain) ->
         dcos_dns:srv_record(DName0, {Host0, Port0})
     end, HPs).
 
--spec(push_zone([dns:dns_rr()]) ->
-    {ok, New :: [dns:dns_rr()], Old :: [dns:dns_rr()]}).
-push_zone(Records) ->
-    dcos_dns_mesos:push_zone(?MESOS_DOMAIN, Records).
+-spec(maybe_push_zone([dns:dns_rr()], state()) -> state()).
+maybe_push_zone(Records, #state{hash=Hash}=State) ->
+    Records0 = lists:sort(Records),
+    case crypto:hash(sha, term_to_binary(Records0)) of
+        Hash -> State;
+        Hash0 -> push_zone(Records, State#state{hash=Hash0})
+    end.
+
+-spec(push_zone([dns:dns_rr()], state()) -> state()).
+push_zone(Records, State) ->
+    case dcos_dns_mesos:push_zone(?MESOS_DOMAIN, Records) of
+        {ok, [], []} -> State;
+        {ok, NewRRs, OldRRs} ->
+            lager:notice(
+                "Mesos DNS Sync: ~p reconds were added, ~p reconds were removed",
+                [length(NewRRs), length(OldRRs)]),
+            State
+    end.

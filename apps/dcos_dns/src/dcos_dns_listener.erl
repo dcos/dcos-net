@@ -1,26 +1,11 @@
-%%%-------------------------------------------------------------------
-%%% @author sdhillon
-%%% @copyright (C) 2016, <COMPANY>
-%%% @doc
-%%%
-%%% @end
-%%% Created : 02. Jun 2016 3:37 AM
-%%%-------------------------------------------------------------------
 -module(dcos_dns_listener).
--author("sdhillon").
-
 -behaviour(gen_server).
 
-%% API
--export([start_link/0, convert_zone/3]).
+-export([start_link/0]).
 
 %% gen_server callbacks
--export([init/1,
-    handle_call/3,
-    handle_cast/2,
-    handle_info/2,
-    terminate/2,
-    code_change/3]).
+-export([init/1, handle_continue/2,
+    handle_call/3, handle_cast/2, handle_info/2]).
 
 -define(SERVER, ?MODULE).
 
@@ -31,20 +16,12 @@
 -record(state, {
     ref = erlang:error() :: reference()
 }).
--define(RPC_TIMEOUT, 5000).
--define(MON_CALLBACK_TIME, 5000).
--define(RPC_RETRY_TIME, 15000).
 
 -include("dcos_dns.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 -include_lib("dns/include/dns.hrl").
 
 
-%%%===================================================================
-%%% API
-%%%===================================================================
-
-%% @doc Starts the server
 -spec(start_link() ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link() ->
@@ -55,8 +32,18 @@ start_link() ->
 %%%===================================================================
 
 init([]) ->
-    self() ! init,
-    {ok, []}.
+    {ok, {}, {continue, {}}}.
+
+handle_continue({}, {}) ->
+    MatchSpec =
+        case dcos_dns_config:store_modes() of
+            [lww | _Modes] ->
+                ets:fun2ms(fun ({?LASHUP_LWW_KEY('_')}) -> true end);
+            [set | _Modes] ->
+                ets:fun2ms(fun ({?LASHUP_SET_KEY('_')}) -> true end)
+        end,
+    {ok, Ref} = lashup_kv_events_helper:start_link(MatchSpec),
+    {noreply, #state{ref = Ref}}.
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
@@ -64,29 +51,23 @@ handle_call(_Request, _From, State) ->
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-handle_info(init, []) ->
-    MatchSpec = ets:fun2ms(fun({?LASHUP_KEY('_')}) -> true end),
-    {ok, Ref} = lashup_kv_events_helper:start_link(MatchSpec),
-    {noreply, #state{ref = Ref}};
-handle_info({lashup_kv_events, Event = #{ref := Reference}},
-            State0 = #state{ref = Ref}) when Ref == Reference ->
+handle_info({lashup_kv_events, Event = #{ref := Ref}},
+            State0 = #state{ref = Ref}) ->
     State1 = handle_event(Event, State0),
     {noreply, State1};
 handle_info(_Info, State) ->
     {noreply, State}.
 
-terminate(_Reason, _State) ->
-    ok.
-
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
-
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
-handle_event(#{key := ?LASHUP_KEY(ZoneName), value := Value}, State) ->
-    {?RECORDS_FIELD, Records} = lists:keyfind(?RECORDS_FIELD, 1, Value),
+handle_event(#{key := ?LASHUP_SET_KEY(ZoneName), value := Value}, State) ->
+    {?RECORDS_SET_FIELD, Records} = lists:keyfind(?RECORDS_SET_FIELD, 1, Value),
+    ok = push_zone(ZoneName, Records),
+    State;
+handle_event(#{key := ?LASHUP_LWW_KEY(ZoneName), value := Value}, State) ->
+    {?RECORDS_LWW_FIELD, Records} = lists:keyfind(?RECORDS_LWW_FIELD, 1, Value),
     ok = push_zone(ZoneName, Records),
     State.
 
@@ -98,6 +79,10 @@ push_zone(ZoneName, Records) ->
             {SignedZoneName, SignedRecords} = convert_zone(PublicKey, ZoneName, Records),
             ok = dcos_dns:push_prepared_zone(SignedZoneName, SignedRecords)
     end.
+
+%%%===================================================================
+%%% Convert functions
+%%%===================================================================
 
 convert_zone(PublicKey, ZoneName0, Records0) ->
     PublicKeyEncoded = zbase32:encode(PublicKey),
@@ -133,6 +118,10 @@ convert_record(Record0 = #dns_rr{name = Name0}, Postfix, NewPostfix) ->
     Name1 = convert_name(Name0, Postfix, NewPostfix),
     Record1 = Record0#dns_rr{name = Name1},
     {true, Record1}.
+
+%%%===================================================================
+%%% Test functions
+%%%===================================================================
 
 -ifdef(TEST).
 zone_convert_test() ->
