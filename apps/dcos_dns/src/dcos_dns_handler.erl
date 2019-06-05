@@ -79,8 +79,15 @@ init(Begin, Parent, Protocol, Request, Fun) ->
             ok = reply(Begin, Fun, Response, Zone),
             prometheus_counter:inc(dns, forwarder_failures_total, [Zone], 1);
         {internal, Zone} ->
-            Response = internal_resolve(Protocol, DNSMessage),
+            ResponseMsg = internal_resolve(DNSMessage),
+            Response = encode_message(Protocol, ResponseMsg),
             ok = reply(Begin, Fun, Response, Zone);
+        {rename, From, To} ->
+            DNSMessage0 = rename(DNSMessage, From, To),
+            ResponseMsg = internal_resolve(DNSMessage0),
+            ResponseMsg0 = rename(ResponseMsg, To, From),
+            Response = encode_message(Protocol, ResponseMsg0),
+            ok = reply(Begin, Fun, Response, To);
         {Upstreams, Zone} ->
             FailMsg = failed_msg(Protocol, DNSMessage),
             Upstreams0 = take_upstreams(Upstreams),
@@ -115,11 +122,10 @@ resolve_reply_fun(Pid, Ref, Response) ->
 
 -define(LOCALHOST, {127, 0, 0, 1}).
 
--spec(internal_resolve(protocol(), dns:message()) -> binary()).
-internal_resolve(Protocol, DNSMessage) ->
+-spec(internal_resolve(dns:message()) -> dns:message()).
+internal_resolve(DNSMessage) ->
     Response = erldns_handler:do_handle(DNSMessage, ?LOCALHOST),
-    Response0 = randomize(Response),
-    encode_message(Protocol, Response0).
+    randomize(Response).
 
 -spec(resolve(Begin, Protocol, Upstreams, Request, Fun, FailMsg, Zone) -> ok
     when Begin :: integer(),
@@ -314,6 +320,84 @@ upstream_to_binary({Ip, Port}) ->
     IpBin = list_to_binary(inet:ntoa(Ip)),
     PortBin = integer_to_binary(Port),
     <<IpBin/binary, ":", PortBin/binary>>.
+
+%%%===================================================================
+%%% Rename functions
+%%%===================================================================
+
+-define(RENAME_FIELDS, #{
+    ?DNS_TYPE_CNAME => [#dns_rrdata_cname.dname],
+    ?DNS_TYPE_NS    => [#dns_rrdata_ns.dname],
+    ?DNS_TYPE_SOA   => [#dns_rrdata_soa.mname, #dns_rrdata_soa.rname],
+    ?DNS_TYPE_SRV   => [#dns_rrdata_srv.target]
+}).
+
+-spec(rename(term(), From :: binary(), To :: binary()) -> term()).
+rename(DNSMessage, From, To) when is_record(DNSMessage, dns_message) ->
+    #dns_message{
+        questions  = Questions,
+        answers    = Answers,
+        authority  = Authority,
+        additional = Additional
+    } = DNSMessage,
+    DNSMessage#dns_message{
+        questions  = rename(Questions, From, To),
+        answers    = rename(Answers, From, To),
+        authority  = rename(Authority, From, To),
+        additional = rename(Additional, From, To)
+    };
+rename(#dns_query{name = Name} = Query, From, To) ->
+    Query#dns_query{name = rename(Name, From, To)};
+rename(#dns_rr{name = Name, type = Type, data = Data} = RR, From, To) ->
+    Data0 =
+        lists:foldl(fun (N, Acc) ->
+            Value = element(N, Acc),
+            Value0 = rename(Value, From, To),
+            setelement(N, Acc, Value0)
+        end, Data, maps:get(Type, ?RENAME_FIELDS, [])),
+    RR#dns_rr{name = rename(Name, From, To), data = Data0};
+rename(List, From, To) when is_list(List) ->
+    [ rename(L, From, To) || L <- List ];
+rename(Bin, From, To) when is_binary(Bin) ->
+    replace(Bin, From, To);
+rename(Term, _From, _To) ->
+    Term.
+
+-spec(replace(Bin | [Bin], From :: Bin, To :: Bin) -> Bin | [Bin]
+    when Bin :: binary()).
+replace(Bin, From, To) when is_binary(Bin)->
+    case split(Bin) of
+        [<<>> | List] ->
+            List0 = [<<>> | replace(List, From, To)],
+            join(List0);
+        List ->
+            List0 = replace(List, From, To),
+            join(List0)
+    end;
+replace(List, From, To) when is_list(List)->
+    [<<>> | FromL] = split(From),
+    [<<>> | ToL] = split(To),
+    try lists:split(length(FromL), List) of
+        {Head, Tail} ->
+            case [ cowboy_bstr:to_lower(H) || H <- Head ] of
+                FromL ->
+                    ToL ++ Tail;
+                _Head ->
+                    List
+            end
+    catch error:badarg ->
+        List
+    end.
+
+-spec(split(binary()) -> [binary()]).
+split(Bin) ->
+    List = binary:split(Bin, <<".">>, [global]),
+    lists:reverse(List).
+
+-spec(join([binary()]) -> binary()).
+join(List) ->
+    List0 = lists:reverse(List),
+    dcos_net_utils:join(List0, <<".">>).
 
 %%%===================================================================
 %%% DNS functions

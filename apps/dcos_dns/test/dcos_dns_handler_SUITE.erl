@@ -34,11 +34,18 @@
     rr_loadbalance/1,
     random_loadbalance/1,
     none_loadbalance/1,
-    cnames_loadbalance/1
+    cnames_loadbalance/1,
+
+    l4lb_rename/1,
+    dcos_rename/1
 ]).
 
 init_per_suite(Config) ->
     {ok, Apps} = application:ensure_all_started(dcos_dns),
+    {ok, _} = lashup_kv:request_op([navstar, key], {update, [
+        {update, {public_key, riak_dt_lwwreg}, {assign, <<"foobar">>}},
+        {update, {secret_key, riak_dt_lwwreg}, {assign, <<"barqux">>}}
+    ]}),
     [{apps, Apps} | Config].
 
 end_per_suite(Config) ->
@@ -54,7 +61,8 @@ all() ->
         {group, thisnode},
         {group, dcos},
         {group, component},
-        {group, loadbalance}
+        {group, loadbalance},
+        {group, rename}
     ].
 
 groups() ->
@@ -70,7 +78,8 @@ groups() ->
         {loadbalance, [], [
             rr_loadbalance, random_loadbalance,
             none_loadbalance, cnames_loadbalance
-        ]}
+        ]},
+        {rename, [], [l4lb_rename, dcos_rename]}
     ].
 
 %%%===================================================================
@@ -343,6 +352,58 @@ cnames_loadbalance(Config) ->
     cnames(Config),
     ok = application:set_env(dcos_dns, loadbalance, disabled),
     cnames(Config).
+
+%%%===================================================================
+%%% Rename functions
+%%%===================================================================
+
+l4lb_rename(_Config) ->
+    Name = <<"app.marathon">>,
+    Addr = {127, 0, 0, 1},
+    Zones = [
+        <<"l4lb.thisdcos.directory">>,
+        <<"l4lb.thisdcos.global">>,
+        <<"dclb.thisdcos.directory">>,
+        <<"dclb.thisdcos.global">>
+    ],
+    Zone = hd(Zones),
+
+    ok = dcos_dns:push_zone(Zone, []),
+    lists:foreach(fun (Z) ->
+        FQDN = binary_to_list(<<Name/binary, $., Z/binary>>),
+        {error, {nxdomain, _Msg}} = resolve(FQDN, in, a, [])
+    end, Zones),
+
+    ok = dcos_dns:push_zone(Zone, [
+        dcos_dns:dns_record(<<Name/binary, $., Zone/binary>>, Addr)
+    ]),
+    lists:foreach(fun (Z) ->
+        FQDN = binary_to_list(<<Name/binary, $., Z/binary>>),
+        {ok, Msg} = resolve(FQDN, in, a, []),
+        [RR] = inet_dns:msg(Msg, anlist),
+        ?assertEqual(FQDN, inet_dns:rr(RR, domain)),
+        ?assertEqual(Addr, inet_dns:rr(RR, data))
+    end, Zones).
+
+dcos_rename(_Config) ->
+    ZoneName = <<"dcos.thisdcos.directory">>,
+    AppName = <<"app.autoip.", ZoneName/binary>>,
+    IPs = [{127, 0, 0, X} || X <- lists:seq(1, 5)],
+    ok = dcos_dns:push_zone(ZoneName, dcos_dns:dns_records(AppName, IPs)),
+
+    {ok, Msg} = resolve(AppName, in, a, []),
+    ?assertEqual(5, length(inet_dns:msg(Msg, anlist))),
+    RRs = [inet_dns:rr(RR, domain) || RR <- inet_dns:msg(Msg, anlist)],
+    ?assertEqual([binary_to_list(AppName)], lists:usort(RRs)),
+
+    #{public_key := Pk} = dcos_dns_key_mgr:keys(),
+    CryptoId = zbase32:encode(Pk),
+
+    ReName = <<"app.autoip.dcos.", CryptoId/binary, ".dcos.directory">>,
+    {ok, ReMsg} = resolve(ReName, in, a, []),
+    ?assertEqual(5, length(inet_dns:msg(ReMsg, anlist))),
+    ReRRs = [inet_dns:rr(RR, domain) || RR <- inet_dns:msg(ReMsg, anlist)],
+    ?assertEqual([binary_to_list(ReName)], lists:usort(ReRRs)).
 
 %%%===================================================================
 %%% Internal functions

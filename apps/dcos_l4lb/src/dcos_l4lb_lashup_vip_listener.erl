@@ -96,7 +96,7 @@ handle_event(#{value := RawVIPs}) ->
     VIPs = process_vips(RawVIPs),
     ok = cleanup_mappings(VIPs),
     ok = dcos_l4lb_mgr:push_vips(VIPs),
-    ok = push_dns_records().
+    ok = push_dns_zone().
 
 -spec(process_vips([{lkey(), [backend()]}]) -> [{key(), [backend()]}]).
 process_vips(VIPs) ->
@@ -266,13 +266,11 @@ int2ip(inet6, IntIP) ->
 %%% DNS functions
 %%%===================================================================
 
--spec(push_dns_records() -> ok).
-push_dns_records() ->
-    lists:foreach(fun (ZoneComponents) ->
-        ZoneName = to_name(ZoneComponents),
-        Records = records(ZoneComponents),
-        ok = dcos_dns:push_zone(ZoneName, Records)
-    end, ?ZONE_NAMES).
+-spec(push_dns_zone() -> ok).
+push_dns_zone() ->
+    ZoneName = to_name(?L4LB_ZONE_NAME),
+    Records = records(?L4LB_ZONE_NAME),
+    ok = dcos_dns:push_zone(ZoneName, Records).
 
 -spec(records([binary()]) -> [dns:rr()]).
 records(ZoneComponents) ->
