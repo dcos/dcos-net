@@ -66,7 +66,7 @@ skip_kv_event(Event, Ref, Key) ->
         Event
     end.
 
--spec(handle_event(map()) -> ok).
+-spec(handle_event(map()) -> ok | {error, term()}).
 handle_event(#{key := ?LASHUP_SET_KEY(ZoneName), value := Value}) ->
     {?RECORDS_SET_FIELD, Records} = lists:keyfind(?RECORDS_SET_FIELD, 1, Value),
     dcos_dns:push_prepared_zone(ZoneName, Records);

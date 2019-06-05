@@ -421,12 +421,12 @@ value(?LASHUP_SET_KEY(ZoneName)) ->
 request_op(LKey = ?LASHUP_LWW_KEY(ZoneName), {update, Updates}) ->
     [{update, ?RECORDS_LWW_FIELD, Op}] = Updates,
     {assign, Records, _Timestamp} = Op,
-    ok = dcos_dns:push_prepared_zone(ZoneName, Records),
+    _Result = dcos_dns:push_prepared_zone(ZoneName, Records),
     {ok, value(LKey)};
 request_op(LKey = ?LASHUP_SET_KEY(ZoneName), {update, Updates}) ->
     [{?RECORDS_SET_FIELD, Records}] = lashup_kv:value(LKey),
     Records0 = apply_op(Records, Updates),
-    ok = dcos_dns:push_prepared_zone(ZoneName, Records0),
+    _Result = dcos_dns:push_prepared_zone(ZoneName, Records0),
     {ok, value(LKey)}.
 
 apply_op(List, Updates) ->
