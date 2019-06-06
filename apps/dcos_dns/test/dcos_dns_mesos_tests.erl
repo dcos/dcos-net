@@ -405,14 +405,16 @@ ensure_all_started(erldns) ->
 
 value(?LASHUP_LWW_KEY(ZoneName)) ->
     case erldns_zone_cache:get_zone_with_records(ZoneName) of
-        {ok, #zone{records = Records}} ->
+        {ok, #zone{records_by_name = RecordsByName}} ->
+            Records = lists:append(maps:values(RecordsByName)),
             [{?RECORDS_LWW_FIELD, Records}];
         {error, zone_not_found} ->
             [{?RECORDS_LWW_FIELD, []}]
     end;
 value(?LASHUP_SET_KEY(ZoneName)) ->
     case erldns_zone_cache:get_zone_with_records(ZoneName) of
-        {ok, #zone{records = Records}} ->
+        {ok, #zone{records_by_name = RecordsByName}} ->
+            Records = lists:append(maps:values(RecordsByName)),
             [{?RECORDS_SET_FIELD, Records}];
         {error, zone_not_found} ->
             [{?RECORDS_SET_FIELD, []}]
