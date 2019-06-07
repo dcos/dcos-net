@@ -109,85 +109,77 @@ handle_poll(true, State) ->
 %%% Handle data
 %%%===================================================================
 
--spec(get_records(binary()) -> [dns:dns_rr()]).
+-spec(get_records(binary()) -> #{dns:dname() => [dns:dns_rr()]}).
 get_records(Body) ->
     Data = jiffy:decode(Body, [return_maps]),
+    Domain = maps:get(<<"Domain">>, Data, <<"mesos">>),
+    Records = maps:get(<<"Records">>, Data, #{}),
 
-    MesosDNSDomain = maps:get(<<"Domain">>, Data, <<"mesos">>),
-    MesosDNSRecords = maps:get(<<"Records">>, Data, #{}),
+    RecordsByName = #{
+        ?MESOS_DOMAIN => [
+            dcos_dns:soa_record(?MESOS_DOMAIN),
+            dcos_dns:ns_record(?MESOS_DOMAIN)
+        ]
+    },
+    List = [
+        {<<"As">>, fun parse_ip/2, fun dcos_dns:dns_record/2},
+        {<<"AAAAs">>, fun parse_ip/2, fun dcos_dns:dns_record/2},
+        {<<"SRVs">>, fun parse_srv/2, fun dcos_dns:srv_record/2}
+    ],
+    lists:foldl(fun ({Field, ParseFun, RecordFun}, Acc) ->
+        add_records(Domain, Records, Field, ParseFun, RecordFun, Acc)
+    end, RecordsByName, List).
 
-    Records =
-        [ dcos_dns:soa_record(?MESOS_DOMAIN),
-          dcos_dns:ns_record(?MESOS_DOMAIN) ],
+-spec(add_records(Domain, Records, Field, ParseFun, RecordFun, Acc) -> Acc
+    when Domain :: dns:dname(), Records :: jiffy:json_term(),
+         Field :: binary(), Acc :: #{dns:dname() => [dns:dns_rr()]},
+         ParseFun :: fun((binary(), dns:dname()) -> term()),
+         RecordFun :: fun((dns:dname(), term()) -> dns:dns_rr())).
+add_records(Domain, Records, Field, ParseFun, RecordFun, Acc0) ->
+    Data = maps:get(Field, Records, #{}),
+    maps:fold(fun (DName, List, Acc) ->
+        DName0 = dname(DName, Domain),
+        List0 = [ParseFun(L, Domain) || L <- List],
+        RRs = [RecordFun(DName0, L) || L <- lists:sort(List0)],
+        mappend_list(DName0, RRs, Acc)
+    end, Acc0, Data).
 
-    ARecords = maps:get(<<"As">>, MesosDNSRecords, #{}),
-    Records0 =
-        maps:fold(fun (DName, IPs, Acc) ->
-            dns_records(DName, IPs, MesosDNSDomain) ++ Acc
-        end, Records, ARecords),
+-spec(mappend_list(Key :: A, List :: [B], Map) -> Map
+    when Map :: #{A => [B]}, A :: term(), B :: term()).
+mappend_list(Key, List, Map) ->
+    case maps:find(Key, Map) of
+        {ok, Value} ->
+            Map#{Key => List ++ Value};
+        error ->
+            Map#{Key => List}
+    end.
 
-    AAAARecords = maps:get(<<"AAAAs">>, MesosDNSRecords, #{}),
-    Records1 =
-        maps:fold(fun (DName, IPs, Acc) ->
-            dns_records(DName, IPs, MesosDNSDomain) ++ Acc
-        end, Records0, AAAARecords),
-
-    SRVRecords = maps:get(<<"SRVs">>, MesosDNSRecords, #{}),
-    Records2 =
-        maps:fold(fun (DName, HPs, Acc) ->
-            srv_records(DName, HPs, MesosDNSDomain) ++ Acc
-        end, Records1, SRVRecords),
-
-    Records2.
-
--spec(dname(binary(), binary()) -> binary()).
+-spec(dname(dns:dname(), dns:dname()) -> dns:dname()).
 dname(DName, DomainName) ->
     DName0 = binary:part(DName, 0, size(DName) - size(DomainName) - 1),
     <<DName0/binary, ?MESOS_DOMAIN/binary>>.
 
--spec(parse_ips([binary()]) -> [inet:ip_address()]).
-parse_ips(IPs) ->
-    lists:map(fun parse_ip/1, IPs).
-
--spec(parse_ip(binary()) -> inet:ip_address()).
-parse_ip(IPBin) ->
+-spec(parse_ip(binary(), dns:dname()) -> inet:ip_address()).
+parse_ip(IPBin, _Domain) ->
     IPStr = binary_to_list(IPBin),
     {ok, IP} = inet:parse_strict_address(IPStr),
     IP.
 
--spec(dns_records(dns:dname(), IPs, Domain) -> [dns:dns_rr()]
-    when IPs :: [binary()], Domain :: binary()).
-dns_records(DName, IPs, MesosDNSDomain) ->
-    IPs0 = parse_ips(IPs),
-    DName0 = dname(DName, MesosDNSDomain),
-    dcos_dns:dns_records(DName0, IPs0).
+-spec(parse_srv(binary(), dns:dname()) -> {dns:dname(), inet:port_number()}).
+parse_srv(HostPort, Domain) ->
+    [Host, Port] = binary:split(HostPort, <<":">>),
+    {dname(Host, Domain), binary_to_integer(Port)}.
 
--spec(srv_records(dns:dname(), HPs, Domain) -> [dns:dns_rr()]
-    when HPs :: [binary()], Domain :: binary()).
-srv_records(DName, HPs, MesosDNSDomain) ->
-    DName0 = dname(DName, MesosDNSDomain),
-    lists:map(fun (HP) ->
-        [Host, Port] = binary:split(HP, <<":">>),
-        Host0 = dname(Host, MesosDNSDomain),
-        Port0 = binary_to_integer(Port),
-        dcos_dns:srv_record(DName0, {Host0, Port0})
-    end, HPs).
-
--spec(maybe_push_zone([dns:dns_rr()], state()) -> state()).
+-spec(maybe_push_zone(#{dns:dname() => [dns:dns_rr()]}, state()) -> state()).
 maybe_push_zone(Records, #state{hash=Hash}=State) ->
-    Records0 = lists:sort(Records),
-    case crypto:hash(sha, term_to_binary(Records0)) of
+    case crypto:hash(sha, term_to_binary(Records)) of
         Hash -> State;
         Hash0 -> push_zone(Records, State#state{hash=Hash0})
     end.
 
--spec(push_zone([dns:dns_rr()], state()) -> state()).
-push_zone(Records, State) ->
-    case dcos_dns_mesos:push_zone(?MESOS_DOMAIN, Records) of
-        {ok, [], []} -> State;
-        {ok, NewRRs, OldRRs} ->
-            lager:notice(
-                "Mesos DNS Sync: ~p reconds were added, ~p reconds were removed",
-                [length(NewRRs), length(OldRRs)]),
-            State
-    end.
+-spec(push_zone(#{dns:dname() => [dns:dns_rr()]}, state()) -> state()).
+push_zone(RecordsByName, State) ->
+    Counts = lists:map(fun length/1, maps:values(RecordsByName)),
+    ok = dcos_dns_mesos:push_zone(?MESOS_DOMAIN, RecordsByName),
+    lager:notice("Mesos DNS Sync: ~p records", [lists:sum(Counts)]),
+    State.

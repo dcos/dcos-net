@@ -242,8 +242,9 @@ build_named_index(RecordsByName) when is_map(RecordsByName) ->
     RecordsByName;
 build_named_index(Records) ->
     lists:foldl(fun (#dns_rr{name = Name} = RR, Acc) ->
-        maps:update_with(Name, fun (RRs) -> [RR | RRs] end, [RR], Acc)
-    end, #{}, lists:reverse(Records)).
+        RRs = maps:get(Name, Acc, []),
+        Acc#{Name => [RR | RRs]}
+    end, #{}, Records).
 
 %%%===================================================================
 %%% Metrics functions
