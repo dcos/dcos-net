@@ -34,7 +34,7 @@ handle_continue({}, {}) ->
             [set | _Modes] ->
                 ets:fun2ms(fun ({?LASHUP_SET_KEY('_')}) -> true end)
         end,
-    {ok, Ref} = lashup_kv_events_helper:start_link(MatchSpec),
+    {ok, Ref} = lashup_kv:subscribe(MatchSpec),
     {noreply, #state{ref = Ref}}.
 
 handle_call(_Request, _From, State) ->
@@ -43,10 +43,10 @@ handle_call(_Request, _From, State) ->
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-handle_info({lashup_kv_events, Event = #{ref := Ref, key := Key}},
-        State = #state{ref = Ref}) ->
-    Event0 = skip_kv_event(Event, Ref, Key),
-    ok = handle_event(Event0),
+handle_info({lashup_kv_event, Ref, Key}, #state{ref = Ref} = State) ->
+    ok = lashup_kv:flush(Ref, Key),
+    Value = lashup_kv:value(Key),
+    ok = handle_event(Key, Value),
     {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -55,21 +55,10 @@ handle_info(_Info, State) ->
 %%% Internal functions
 %%%===================================================================
 
--spec(skip_kv_event(Event, reference(), term()) -> Event when Event :: map()).
-skip_kv_event(Event, Ref, Key) ->
-    % Skip current lashup kv event if there is yet another event in
-    % the message queue. It should improve the convergence.
-    receive
-        {lashup_kv_events, #{ref := Ref, key := Key} = Event0} ->
-            skip_kv_event(Event0, Ref, Key)
-    after 0 ->
-        Event
-    end.
-
--spec(handle_event(map()) -> ok | {error, term()}).
-handle_event(#{key := ?LASHUP_SET_KEY(ZoneName), value := Value}) ->
+-spec(handle_event(Key :: term(), Value :: term()) -> ok | {error, term()}).
+handle_event(?LASHUP_SET_KEY(ZoneName), Value) ->
     {?RECORDS_SET_FIELD, Records} = lists:keyfind(?RECORDS_SET_FIELD, 1, Value),
     dcos_dns:push_prepared_zone(ZoneName, Records);
-handle_event(#{key := ?LASHUP_LWW_KEY(ZoneName), value := Value}) ->
+handle_event(?LASHUP_LWW_KEY(ZoneName), Value) ->
     {?RECORDS_LWW_FIELD, Records} = lists:keyfind(?RECORDS_LWW_FIELD, 1, Value),
     dcos_dns:push_prepared_zone(ZoneName, Records).

@@ -44,19 +44,19 @@ get_metadata() ->
 get_metadata([]) ->
     get_metadata();
 get_metadata([force_refresh]) ->
-    % It's not possible to unsubscribe from lashup_kv_events_helper's updates.
-    % force_dump/0 function starts a new process that does all the work, sends
-    % the result back and terminates itself.
-    % TODO: Add unsubscribe to the events helper and get rid of spawn_link.
-    Ref = make_ref(),
-    PPid = self(),
-    proc_lib:spawn_link(fun() -> force_refresh(PPid, Ref) end),
-    Timeout = force_refresh_timeout(),
-    receive
-        {Ref, Result} ->
-            Result
-    after Timeout ->
-        exit(timeout)
+    Ref = subscribe(),
+    try
+        Updated = erlang:system_time(millisecond),
+        Op = {assign, #{node => node(), updated => Updated}, Updated},
+        {ok, List} = lashup_kv:request_op(
+            ?LASHUP_KEY,
+            {update, [{update, {refresh, riak_dt_lwwreg}, Op}]}),
+
+        % Wait until all reachable nodes update their metadata.
+        Nodes = dump(List),
+        wait_for_refresh(Ref, Nodes)
+    after
+        lashup_kv:unsubscribe(Ref)
     end.
 
 %%%===================================================================
@@ -82,8 +82,9 @@ handle_info({timeout, TRef, update}, State = #state{timer_ref = TRef}) ->
     ok = update_node_info(),
     TRef0 = start_update_timer(),
     {noreply, State#state{timer_ref=TRef0}, hibernate};
-handle_info({lashup_kv_events, #{ref := Ref, value := Value}},
-            State = #state{lashup_ref = Ref}) ->
+handle_info({lashup_kv_event, Ref, Key}, #state{lashup_ref = Ref} = State) ->
+    ok = lashup_kv:flush(Ref, Key),
+    Value = lashup_kv:value(Key),
     {noreply, handle_kv_event(Value, State)};
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -216,26 +217,10 @@ get_refresh_value(List) ->
             #{}
     end.
 
--spec(force_refresh(pid(), reference()) -> ok).
-force_refresh(Pid, PRef) ->
-    Ref = subscribe(),
-
-    Updated = erlang:system_time(millisecond),
-    Op = {assign, #{node => node(), updated => Updated}, Updated},
-    {ok, List} = lashup_kv:request_op(
-        ?LASHUP_KEY,
-        {update, [{update, {refresh, riak_dt_lwwreg}, Op}]}),
-
-    % Wait till all reachable nodes update their metadata.
-    Nodes = dump(List),
-    Result = wait_for_refresh(Ref, Nodes),
-    Pid ! {PRef, Result},
-    ok.
-
 -spec(subscribe() -> reference()).
 subscribe() ->
     MatchSpec = ets:fun2ms(fun({?LASHUP_KEY}) -> true end),
-    {ok, Ref} = lashup_kv_events_helper:start_link(MatchSpec),
+    {ok, Ref} = lashup_kv:subscribe(MatchSpec),
     Ref.
 
 -spec(wait_for_refresh(reference(), Nodes) -> Nodes
@@ -253,7 +238,9 @@ wait_for_refresh(StartTime, Ref, _Nodes, Wait) ->
     Now = erlang:monotonic_time(millisecond),
     Timeout = force_refresh_timeout() - (Now - StartTime),
     receive
-        {lashup_kv_events, #{ref := Ref, value := Value}} ->
+        {lashup_kv_event, Ref, Key} ->
+            ok = lashup_kv:flush(Ref, Key),
+            Value = lashup_kv:value(Key),
             Nodes = dump(Value),
             Wait0 =
                 maps:filter(fun (IP, Md) ->

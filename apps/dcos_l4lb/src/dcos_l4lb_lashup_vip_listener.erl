@@ -8,8 +8,8 @@
 ]).
 
 %% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2,
-    handle_info/2, terminate/2, code_change/3]).
+-export([init/1, handle_continue/2,
+    handle_call/3, handle_cast/2, handle_info/2]).
 
 -include("dcos_l4lb.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
@@ -46,11 +46,15 @@ ip2name(IP) ->
 %%%===================================================================
 
 init([]) ->
-    self() ! init,
     EtsOpts = [named_table, protected, {read_concurrency, true}],
     ets:new(?NAME2IP, EtsOpts),
     ets:new(?IP2NAME, EtsOpts),
-    {ok, []}.
+    {ok, {}, {continue, {}}}.
+
+handle_continue({}, {}) ->
+    MatchSpec = ets:fun2ms(fun ({?VIPS_KEY2}) -> true end),
+    {ok, Ref} = lashup_kv:subscribe(MatchSpec),
+    {noreply, #state{ref = Ref}}.
 
 handle_call(_Request, _From, State) ->
     {noreply, State}.
@@ -58,41 +62,20 @@ handle_call(_Request, _From, State) ->
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-handle_info(init, []) ->
-    MatchSpec = ets:fun2ms(fun ({?VIPS_KEY2}) -> true end),
-    {ok, Ref} = lashup_kv_events_helper:start_link(MatchSpec),
-    {noreply, #state{ref = Ref}};
-handle_info({lashup_kv_events, #{ref := Ref} = Event},
-            #state{ref=Ref}=State) ->
-    Event0 = skip_kv_event(Event, Ref),
-    ok = handle_event(Event0),
+handle_info({lashup_kv_event, Ref, Key}, #state{ref=Ref}=State) ->
+    ok = lashup_kv:flush(Ref, Key),
+    Value = lashup_kv:value(Key),
+    ok = handle_event(Value),
     {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
-
-terminate(_Reason, _State) ->
-    ok.
-
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
--spec(skip_kv_event(Event, reference()) -> Event when Event :: map()).
-skip_kv_event(Event, Ref) ->
-    % Skip current lashup kv event if there is yet another event in
-    % the message queue. It should improve the convergence.
-    receive
-        {lashup_kv_events, #{ref := Ref} = Event0} ->
-            skip_kv_event(Event0, Ref)
-    after 0 ->
-        Event
-    end.
-
--spec(handle_event(Event :: map()) -> ok).
-handle_event(#{value := RawVIPs}) ->
+-spec(handle_event([{lkey(), [backend()]}]) -> ok).
+handle_event(RawVIPs) ->
     VIPs = process_vips(RawVIPs),
     ok = cleanup_mappings(VIPs),
     ok = dcos_l4lb_mgr:push_vips(VIPs),

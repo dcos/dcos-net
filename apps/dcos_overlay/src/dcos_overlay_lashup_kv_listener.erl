@@ -44,7 +44,7 @@ init([]) ->
 handle_continue({}, {}) ->
     ok = wait_for_vtep(),
     MatchSpec = ets:fun2ms(fun({?KEY('_')}) -> true end),
-    {ok, Ref} = lashup_kv_events_helper:start_link(MatchSpec),
+    {ok, Ref} = lashup_kv:subscribe(MatchSpec),
     RRef = start_reconcile_timer(),
     {noreply, #state{ref=Ref, reconcile_ref=RRef}}.
 
@@ -54,9 +54,10 @@ handle_call(_Request, _From, State) ->
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-handle_info({lashup_kv_events, #{ref:=Ref, key:=Key}=Event},
+handle_info({lashup_kv_event, Ref, Key},
         #state{ref=Ref, config=Config}=State) ->
-    #{value:=Value} = skip_kv_event(Event, Ref, Key),
+    ok = lashup_kv:flush(Ref, Key),
+    Value = lashup_kv:value(Key),
     {Subnet, Delta, Config0} = update_config(Key, Value, Config),
     ok = apply_configuration(#{Subnet => Delta}),
     {noreply, State#state{config=Config0}};
@@ -71,17 +72,6 @@ handle_info(_Info, State) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
--spec(skip_kv_event(Event, reference(), term()) -> Event when Event :: map()).
-skip_kv_event(Event, Ref, Key) ->
-    % Skip current lashup kv event if there is yet another event in
-    % the message queue. It should improve the convergence.
-    receive
-        {lashup_kv_events, #{ref := Ref, key := Key} = Event0} ->
-            skip_kv_event(Event0, Ref, Key)
-    after 0 ->
-        Event
-    end.
 
 -define(WAIT_TIMEOUT, 5000).
 
