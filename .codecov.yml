@@ -1,3 +1,7 @@
+codecov:
+  ci:
+    - circleci.com
+    - !jenkins.mesosphere.com
 coverage:
   range: 50...75
   status:
