@@ -71,27 +71,36 @@ enumerate(Req, State) ->
 records(Req, State) ->
     Req0 = cowboy_req:stream_reply(200, Req),
     ok = cowboy_req:stream_body("[", nofin, Req0),
-    ZonesV = erldns_zone_cache:zone_names_and_versions(),
-    Zones = [Z || {Z, _} <- ZonesV],
-    ok = records_loop(Req0, [], Zones, 0),
+    Zones = erldns_zone_cache:zone_names_and_versions(),
+    ok = zones_loop(Req0, [ZoneName || {ZoneName, _} <- Zones]),
     ok = cowboy_req:stream_body("]", fin, Req0),
     {stop, Req0, State}.
 
-records_loop(_Req, [], [], _N) ->
+zones_loop(Req, Zones) ->
+    zones_loop(Req, Zones, 0).
+
+zones_loop(_Req, [], _N) ->
     ok;
-records_loop(Req, [], [Zone|Zones], N) ->
+zones_loop(Req, [Zone|Zones], N) ->
     case erldns_zone_cache:get_zone_with_records(Zone) of
-        {ok, #zone{records = Records}} ->
-            records_loop(Req, Records, Zones, N);
+        {ok, #zone{records_by_name = RecordsByName}} ->
+            zones_loop(
+                Req, Zones,
+                maps:fold(fun (_Name, Records, Acc) ->
+                    records_loop(Req, Records, Acc)
+                end, N, RecordsByName));
         {error, zone_not_found} ->
-            records_loop(Req, [], Zones, N)
-    end;
-records_loop(Req, [Record|Records], Zones, 0) ->
+            zones_loop(Req, Zones, N)
+    end.
+
+records_loop(_Req, [], N) ->
+    N;
+records_loop(Req, [Record|Records], 0) ->
     Inc = send_record(Req, "", Record),
-    records_loop(Req, Records, Zones, Inc);
-records_loop(Req, [Record|Records], Zones, N) ->
+    records_loop(Req, Records, Inc);
+records_loop(Req, [Record|Records], N) ->
     Inc = send_record(Req, ",\n", Record),
-    records_loop(Req, Records, Zones, N + Inc).
+    records_loop(Req, Records, N + Inc).
 
 send_record(Req, Prefix, RR) ->
     try jsx:encode(record_to_term(RR)) of

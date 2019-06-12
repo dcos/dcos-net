@@ -4,9 +4,4 @@
                 ns :: undefined | binary()}).
 -type netns() :: #netns{}.
 
--define(ZONE_NAMES, [
-    [<<"l4lb">>, <<"thisdcos">>, <<"directory">>],
-    [<<"l4lb">>, <<"thisdcos">>, <<"global">>],
-    [<<"dclb">>, <<"thisdcos">>, <<"directory">>],
-    [<<"dclb">>, <<"thisdcos">>, <<"global">>]
-]).
+-define(L4LB_ZONE_NAME, [<<"l4lb">>, <<"thisdcos">>, <<"directory">>]).

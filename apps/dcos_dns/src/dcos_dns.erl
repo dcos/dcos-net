@@ -162,21 +162,18 @@ cname_record(CName, Name) ->
         data = #dns_rrdata_cname{dname=Name}
     }.
 
--spec(push_zone(dns:dname(), [dns:dns_rr()]) ->
-    ok | {error, Reason :: term()}).
+-spec(push_zone(dns:dname(), Records) -> ok | {error, Reason :: term()}
+    when Records :: [dns:dns_rr()] | #{dns:dname() => [dns:dns_rr()]}).
 push_zone(ZoneName, Records) ->
-    Records0 = [ns_record(ZoneName), soa_record(ZoneName) | Records],
-    push_prepared_zone(ZoneName, Records0).
-
--spec(push_prepared_zone(dns:dname(), [dns:dns_rr()]) ->
-    ok | {error, Reason :: term()}).
-push_prepared_zone(ZoneName, Records) ->
     Begin = erlang:monotonic_time(),
+    Records0 = [ns_record(ZoneName), soa_record(ZoneName) | Records],
+    RecordsByName = build_named_index(Records0),
     try erldns_zone_cache:get_zone_with_records(ZoneName) of
-        {ok, #zone{records=Records}} ->
+        {ok, #zone{records_by_name=RecordsByName}} ->
             ok;
         _Other ->
-            put_zone(Begin, ZoneName, Records)
+            Zone = build_zone(ZoneName, RecordsByName),
+            push_prepared_zone(Begin, ZoneName, Zone)
     catch error:Error ->
         lager:error(
             "Failed to push DNS Zone \"~s\": ~p",
@@ -184,42 +181,70 @@ push_prepared_zone(ZoneName, Records) ->
         {error, Error}
     end.
 
+-spec(push_prepared_zone(dns:dname(), Records) -> ok | {error, term()}
+    when Records :: [dns:dns_rr()] | #{dns:dname() => [dns:dns_rr()]}).
+push_prepared_zone(ZoneName, Records) ->
+    Begin = erlang:monotonic_time(),
+    Zone = build_zone(ZoneName, Records),
+    push_prepared_zone(Begin, ZoneName, Zone).
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
--spec(bin_to_hex(binary()) -> binary()).
-bin_to_hex(Bin) ->
-    Bin0 = << <<(integer_to_binary(N, 16))/binary>> || <<N:4>> <= Bin >>,
-    cowboy_bstr:to_lower(Bin0).
-
--spec(put_zone(integer(), binary(), [dns:dns_rr()]) -> ok).
-put_zone(Begin, ZoneName, Records) ->
-    Hash = crypto:hash(sha, term_to_binary(Records)),
-    case erldns_zone_cache:put_zone({ZoneName, Hash, Records}) of
-        ok ->
-            Duration = erlang:monotonic_time() - Begin,
-            ZoneName0 = <<ZoneName/binary, ".">>,
-            lager:notice(
-                "DNS Zone ~s was updated (~p records, sha: ~s, duration: ~pms)",
-                [ZoneName0, length(Records), bin_to_hex(Hash),
-                erlang:convert_time_unit(Duration, native, millisecond)]),
-            try
-                prometheus_summary:observe(
-                    dns, zone_push_duration_seconds,
-                    [ZoneName0], Duration),
-                prometheus_gauge:set(
-                    dns, zone_records,
-                    [ZoneName0], length(Records))
-            catch error:_Error ->
-                    ok
-            end;
-        {error, Error} ->
-            lager:error(
-                "Failed to push DNS Zone \"~s\": ~p",
-                [ZoneName, Error]),
-            {error, Error}
+-spec(push_prepared_zone(Begin, dns:dname(), Zone) -> ok | {error, term()}
+    when Begin :: integer(), Zone :: erldns:zone()).
+push_prepared_zone(Begin, ZoneName, Zone) ->
+    try
+        ok = erldns_storage:insert(zones, {ZoneName, Zone}),
+        ZoneName0 = <<ZoneName/binary, ".">>,
+        Duration = erlang:monotonic_time() - Begin,
+        DurationMs = erlang:convert_time_unit(Duration, native, millisecond),
+        #zone{record_count = RecordCount} = Zone,
+        lager:notice(
+            "DNS Zone ~s was updated (~p records, duration: ~pms)",
+            [ZoneName0, RecordCount, DurationMs]),
+        prometheus_summary:observe(
+            dns, zone_push_duration_seconds,
+            [ZoneName0], Duration),
+        prometheus_gauge:set(
+            dns, zone_records,
+            [ZoneName0], RecordCount)
+    catch error:Error ->
+        lager:error(
+            "Failed to push DNS Zone \"~s\": ~p",
+            [ZoneName, Error]),
+        {error, Error}
     end.
+
+-spec(build_zone(dns:dname(), Records) -> erldns:zone()
+    when Records :: [dns:dns_rr()] | #{dns:dname() => [dns:dns_rr()]}).
+build_zone(ZoneName, Records) ->
+    Time = erlang:system_time(second),
+    Version = calendar:system_time_to_rfc3339(Time),
+    RecordsByName = build_named_index(Records),
+    RecordCounts = lists:map(fun length/1, maps:values(RecordsByName)),
+    Authorities = lists:filter(
+        erldns_records:match_type(?DNS_TYPE_SOA),
+        maps:get(ZoneName, RecordsByName)),
+    #zone{
+        name = ZoneName,
+        version = list_to_binary(Version),
+        record_count = lists:sum(RecordCounts),
+        authority = Authorities,
+        records_by_name = RecordsByName,
+        keysets = []
+    }.
+
+-spec(build_named_index([dns:rr()] | RecordsByName) -> RecordsByName
+    when RecordsByName :: #{dns:dname() => [dns:rr()]}).
+build_named_index(RecordsByName) when is_map(RecordsByName) ->
+    RecordsByName;
+build_named_index(Records) ->
+    lists:foldl(fun (#dns_rr{name = Name} = RR, Acc) ->
+        RRs = maps:get(Name, Acc, []),
+        Acc#{Name => [RR | RRs]}
+    end, #{}, Records).
 
 %%%===================================================================
 %%% Metrics functions

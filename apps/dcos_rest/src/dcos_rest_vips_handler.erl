@@ -41,8 +41,8 @@ vip_to_json_term({VIP, Backend}) ->
 vip({{Protocol, VIP, Port}, riak_dt_orswot}) ->
     vip({Protocol, VIP, Port});
 vip({Protocol, {name, {Id, Framework}}, Port}) ->
-    [ZoneName|_ZoneNames] = ?ZONE_NAMES,
-    FullName = dcos_l4lb_lashup_vip_listener:to_name([Id, Framework | ZoneName]),
+    List = [Id, Framework | ?L4LB_ZONE_NAME],
+    FullName = dcos_l4lb_lashup_vip_listener:to_name(List),
     vip(Protocol, FullName, Port);
 vip({Protocol, IP, Port}) ->
     vip(Protocol, ip(IP), Port).

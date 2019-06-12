@@ -63,7 +63,7 @@ stage:
 
 DOCKER_IMAGE_REV = $(shell git log -n 1 --pretty=format:%h -- ${BASE_DIR}/Dockerfile)
 DOCKER_IMAGE     = "${PACKAGE}:${DOCKER_IMAGE_REV}"
-BUILD_DIR        = "${BASE_DIR}/_build"
+BUILD_DIR        = ${BASE_DIR}/_build
 
 docker-image:
 	@if [ -z "$(shell docker image ls -q ${DOCKER_IMAGE})" ]; then \
@@ -142,6 +142,8 @@ MINIDCOS_PUBLIC_AGENTS ?= 0
 MINIDCOS_NODE ?= master_0
 MINIDCOS_WEB_PORT ?= 443
 MINIDCOS_INTALLER ?= dcos_generate_config.sh
+ERL_AFLAGS = -kernel shell_history enabled \
+             -kernel shell_history_path \"$(BUILD_DIR)/.erlang-history\"
 
 minidcos-create:
 	@ minidcos docker inspect \
@@ -196,6 +198,7 @@ minidcos-shell: minidcos-create
 	    --transport $(MINIDCOS_TRANSPORT) \
 	    --cluster-id $(MINIDCOS_CLUSTER_ID) \
 	    --node $(MINIDCOS_NODE) \
+	    --env ERL_AFLAGS="$(subst ",\\",$(ERL_AFLAGS))" \
 	    -- 'cd $(BASE_DIR) && exec /opt/mesosphere/bin/dcos-shell'
 
 minidcos-dev: minidcos-create
@@ -203,5 +206,6 @@ minidcos-dev: minidcos-create
 	    --transport $(MINIDCOS_TRANSPORT) \
 	    --cluster-id $(MINIDCOS_CLUSTER_ID) \
 	    --node $(MINIDCOS_NODE) \
+	    --env ERL_AFLAGS="$(ERL_AFLAGS)" \
 	    -- '(which make > /dev/null 2> /dev/null || sudo yum install -y make) ' \
 	    '&& (cd $(BASE_DIR) && exec make dev)'

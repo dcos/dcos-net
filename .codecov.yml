@@ -1,5 +1,11 @@
+codecov:
+  ci:
+    - circleci.com
+    - !jenkins.mesosphere.com
 coverage:
   range: 50...75
   status:
     project: off
     patch: off
+comment:
+  behavior: once

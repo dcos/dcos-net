@@ -11,7 +11,7 @@
 
 %% @doc Resolvers based on a set of "questions"
 -spec(upstreams_from_questions(dns:questions()) ->
-    {[upstream()] | internal, binary()}).
+    {[upstream()] | internal, binary()} | {rename, binary(), binary()}).
 upstreams_from_questions([#dns_query{name=Name}]) ->
     Labels = dcos_dns_app:parse_upstream_name(Name),
     find_upstream(Labels);
@@ -50,7 +50,24 @@ default_resolvers() ->
 
 %% @private
 -spec(find_upstream(Labels :: [binary()]) ->
-    {[upstream()] | internal, binary()}).
+    {[upstream()] | internal, binary()} | {rename, binary(), binary()}).
+find_upstream([<<"directory">>, <<"thisdcos">>, <<"dclb">> |_]) ->
+    {rename, <<"dclb.thisdcos.directory.">>, <<"l4lb.thisdcos.directory.">>};
+find_upstream([<<"global">>, <<"thisdcos">>, <<"dclb">> |_]) ->
+    {rename, <<"dclb.thisdcos.global.">>, <<"l4lb.thisdcos.directory.">>};
+find_upstream([<<"global">>, <<"thisdcos">>, Label |_]) ->
+    From = <<Label/binary, ".thisdcos.global.">>,
+    To = <<Label/binary, ".thisdcos.directory.">>,
+    {rename, From,  To};
+find_upstream([<<"directory">>, <<"dcos">>, Id, Label |_] = Labels) ->
+    case cluster_crypto_id() of
+        Id ->
+            From = <<Label/binary, ".", Id/binary, ".dcos.directory.">>,
+            To = <<Label/binary, ".thisdcos.directory.">>,
+            {rename, From, To};
+        _CryptoId ->
+            maybe_find_custom_upstream(Labels)
+    end;
 find_upstream([<<"mesos">>|_]) ->
    {dcos_dns_config:mesos_resolvers(), <<"mesos.">>};
 find_upstream([<<"localhost">>|_]) ->
@@ -61,11 +78,11 @@ find_upstream([<<"spartan">>|_]) ->
     {internal, <<"spartan.">>};
 find_upstream([<<"directory">>, <<"thisdcos">>, Label |_]) ->
     {internal, <<Label/binary, ".thisdcos.directory.">>};
-find_upstream([<<"global">>, <<"thisdcos">>, Label |_]) ->
-    {internal, <<Label/binary, ".thisdcos.global.">>};
-find_upstream([<<"directory">>, <<"dcos">>, Id, Label |_]) ->
-    {internal, <<Label/binary, ".", Id/binary, ".dcos.directory.">>};
 find_upstream(Labels) ->
+    maybe_find_custom_upstream(Labels).
+
+-spec(maybe_find_custom_upstream([binary()]) -> {[upstream()], binary()}).
+maybe_find_custom_upstream(Labels) ->
     case find_custom_upstream(Labels) of
         {[], _ZoneLabels} ->
             {default_resolvers(), <<".">>};
@@ -93,4 +110,13 @@ upstream_filter_fun(QueryLabels) ->
             false ->
                 Acc
         end
+    end.
+
+-spec(cluster_crypto_id() -> binary() | false).
+cluster_crypto_id() ->
+    case dcos_dns_key_mgr:keys() of
+        false ->
+            false;
+        #{public_key := PublicKey} ->
+            zbase32:encode(PublicKey)
     end.
