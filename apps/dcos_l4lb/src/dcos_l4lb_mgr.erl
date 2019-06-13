@@ -95,7 +95,9 @@ handle_info(?GM_EVENTS(_R, _T)=Event, State) ->
 handle_info({lashup_kv_event, Ref, Key}, State) ->
     {noreply, handle_kv_event(Ref, Key, State)};
 handle_info({timeout, _Ref, reconcile}, State) ->
-    {noreply, handle_reconcile(State)};
+    State0 = handle_reconcile(State),
+    State1 = handle_gc(State0),
+    {noreply, State1, hibernate};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -622,6 +624,19 @@ bes_port_mappings(PMs, Protocol, AgentIP, BEs) ->
             ({BEAgentIP, {BEIP, BEPort}}) ->
                 {BEAgentIP, {BEIP, BEPort}}
         end, BEs).
+
+%%%===================================================================
+%%% GC funtions
+%%%===================================================================
+
+-spec(handle_gc(state()) -> state()).
+handle_gc(#state{ipvs_mgr=IPVSMgr, route_mgr=RouteMgr,
+                 ipset_mgr=IPSetMgr, netns_mgr=NetNSMgr}=State) ->
+    true = erlang:garbage_collect(IPVSMgr),
+    true = erlang:garbage_collect(RouteMgr),
+    true = erlang:garbage_collect(IPSetMgr),
+    true = erlang:garbage_collect(NetNSMgr),
+    State.
 
 %%%===================================================================
 %%% Local Port Mappings API functions

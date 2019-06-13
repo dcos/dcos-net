@@ -65,7 +65,7 @@ handle_info({timeout, RRef0, reconcile},
         #state{config=Config, reconcile_ref=RRef0}=State) ->
     ok = apply_configuration(Config),
     RRef = start_reconcile_timer(),
-    {noreply, State#state{reconcile_ref=RRef}};
+    {noreply, State#state{reconcile_ref=RRef}, hibernate};
 handle_info(_Info, State) ->
     {noreply, State}.
 

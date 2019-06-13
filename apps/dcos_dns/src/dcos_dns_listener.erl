@@ -47,7 +47,7 @@ handle_info({lashup_kv_event, Ref, Key}, #state{ref = Ref} = State) ->
     ok = lashup_kv:flush(Ref, Key),
     Value = lashup_kv:value(Key),
     ok = handle_event(Key, Value),
-    {noreply, State};
+    {noreply, State, hibernate};
 handle_info(_Info, State) ->
     {noreply, State}.
 

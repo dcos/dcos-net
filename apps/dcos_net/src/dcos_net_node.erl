@@ -71,7 +71,7 @@ handle_continue({}, {}) ->
     RTerm = get_refresh_value(),
     TRef = start_update_timer(0),
     State = #state{timer_ref=TRef, lashup_ref = LRef, refresh = RTerm},
-    {noreply, State, hibernate}.
+    {noreply, State}.
 
 handle_call(_Request, _From, State) ->
     {noreply, State}.

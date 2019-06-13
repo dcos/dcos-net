@@ -46,7 +46,7 @@ handle_info({timeout, Ref, kill}, #state{ref=Ref, reductions=Prev}=State) ->
     lists:foreach(fun maybe_kill/1, StuckProcesses),
     Timeout = application:get_env(dcos_net, killer_timeout, timer:minutes(5)),
     Ref0 = erlang:start_timer(Timeout, self(), kill),
-    {noreply, State#state{ref=Ref0, reductions=Rs}};
+    {noreply, State#state{ref=Ref0, reductions=Rs}, hibernate};
 handle_info(_Info, State) ->
     {noreply, State}.
 

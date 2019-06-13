@@ -60,7 +60,7 @@ handle_cast(_Request, State) ->
 handle_info({timeout, TRef, poll}, #state{timer_ref=TRef}=State) ->
     TRef0 = start_poll_timer(),
     ok = handle_poll(),
-    {noreply, State#state{timer_ref=TRef0}};
+    {noreply, State#state{timer_ref=TRef0}, hibernate};
 handle_info(_Info, State) ->
     {noreply, State}.
 

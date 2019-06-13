@@ -36,7 +36,7 @@ handle_info({timeout, Ref, poll}, State = #state{ref = Ref}) ->
     ok = update_masters(MesosResolvers),
     Timeout = application:get_env(dcos_net, update_masters_timeout, 5000),
     Ref0 = erlang:start_timer(Timeout, self(), poll),
-    {noreply, State#state{ref=Ref0}};
+    {noreply, State#state{ref=Ref0}, hibernate};
 handle_info(_Info, State) ->
     {noreply, State}.
 

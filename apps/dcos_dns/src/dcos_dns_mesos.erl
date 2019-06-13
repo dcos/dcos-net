@@ -58,7 +58,7 @@ handle_info({'DOWN', Ref, process, _Pid, Info}, #state{ref=Ref}=State) ->
 handle_info({timeout, Ref, masters}, #state{masters_ref=Ref}=State) ->
     {noreply, handle_masters(State)};
 handle_info({timeout, Ref, push_ops}, #state{ops_ref=Ref}=State) ->
-    {noreply, handle_push_ops(State)};
+    {noreply, handle_push_ops(State), hibernate};
 handle_info(_Info, State) ->
     {noreply, State}.
 

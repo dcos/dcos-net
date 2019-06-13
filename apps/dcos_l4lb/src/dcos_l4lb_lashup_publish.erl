@@ -50,7 +50,7 @@ handle_call(_Request, _From, State) ->
 
 handle_cast(check_metadata, State) ->
   check_metadata(),
-  {noreply, State};
+  {noreply, State, hibernate};
 handle_cast(_Request, State) ->
   {noreply, State}.
 

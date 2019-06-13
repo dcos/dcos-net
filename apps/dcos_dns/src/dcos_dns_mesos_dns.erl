@@ -45,7 +45,7 @@ handle_cast(_Request, State) ->
 handle_info({timeout, Ref, mesos_dns_poll}, #state{ref=Ref}=State) ->
     State0 = handle_poll(State),
     TRef = start_poll_timer(),
-    {noreply, State0#state{ref=TRef}};
+    {noreply, State0#state{ref=TRef}, hibernate};
 handle_info(_Info, State) ->
     {noreply, State}.
 
