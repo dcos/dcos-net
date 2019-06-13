@@ -5,8 +5,8 @@
 -export([start_link/1]).
 
 %% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2,
-    handle_info/2, terminate/2, code_change/3]).
+-export([init/1, handle_call/3,
+    handle_cast/2, handle_info/2]).
 
 -include("dcos_dns.hrl").
 
@@ -15,9 +15,6 @@
     socket :: gen_udp:socket()
 }).
 
-%%%===================================================================
-%%% API
-%%%===================================================================
 
 -spec(start_link(LocalIP :: inet:ip4_address()) ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
@@ -51,10 +48,3 @@ handle_info({udp, Socket, FromIP, FromPort, Data},
     {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
-
-terminate(_Reason, _State = #state{socket = Socket}) ->
-    gen_udp:close(Socket),
-    ok.
-
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.

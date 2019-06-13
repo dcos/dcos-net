@@ -9,8 +9,8 @@
 ]).
 
 %% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2,
-    handle_info/2, terminate/2, code_change/3]).
+-export([init/1, handle_continue/2,
+    handle_call/3, handle_cast/2, handle_info/2]).
 
 -export_type([metadata/0]).
 
@@ -64,8 +64,14 @@ get_metadata([force_refresh]) ->
 %%%===================================================================
 
 init([]) ->
-    self() ! init,
-    {ok, []}.
+    {ok, {}, {continue, {}}}.
+
+handle_continue({}, {}) ->
+    LRef = subscribe(),
+    RTerm = get_refresh_value(),
+    TRef = start_update_timer(0),
+    State = #state{timer_ref=TRef, lashup_ref = LRef, refresh = RTerm},
+    {noreply, State, hibernate}.
 
 handle_call(_Request, _From, State) ->
     {noreply, State}.
@@ -73,11 +79,6 @@ handle_call(_Request, _From, State) ->
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-handle_info(init, []) ->
-    LRef = subscribe(),
-    RTerm = get_refresh_value(),
-    TRef = start_update_timer(0),
-    {noreply, #state{timer_ref=TRef, lashup_ref = LRef, refresh = RTerm}};
 handle_info({timeout, TRef, update}, State = #state{timer_ref = TRef}) ->
     ok = update_node_info(),
     TRef0 = start_update_timer(),
@@ -88,12 +89,6 @@ handle_info({lashup_kv_event, Ref, Key}, #state{lashup_ref = Ref} = State) ->
     {noreply, handle_kv_event(Value, State)};
 handle_info(_Info, State) ->
     {noreply, State}.
-
-terminate(_Reason, _State) ->
-    ok.
-
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
 
 %%%===================================================================
 %%% Internal functions
