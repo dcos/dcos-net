@@ -1,55 +1,109 @@
 -module(dcos_overlay_configure).
 
-%% API
--export([start_link/1, stop/1, maybe_configure/2, configure_overlay/2]).
+-export([
+    start_link/1,
+    stop/1,
+    maybe_configure/2,
+    configure_overlay/2
+]).
 
--type config() :: #{key := term(), value := term()}.
+-type subnet() :: dcos_overlay_lashup_kv_listener:subnet().
+-type config() :: dcos_overlay_lashup_kv_listener:config().
 
 -spec(start_link(config()) -> pid()).
 start_link(Config) ->
-   MyPid = self(),
-   spawn_link(?MODULE, maybe_configure, [Config, MyPid]).
+   Pid = self(),
+   proc_lib:spawn_link(?MODULE, maybe_configure, [Pid, Config]).
 
+-spec(stop(pid()) -> ok).
 stop(Pid) ->
     unlink(Pid),
-    exit(Pid, kill).
+    exit(Pid, kill),
+    ok.
 
-reply(Pid, Msg) ->
-    Pid ! Msg.
-
--spec(maybe_configure(config(), pid()) -> term()).
-maybe_configure(Config, MyPid) ->
-    lager:debug("Started applying config ~p~n", [Config]),
-    KnownOverlays = dcos_overlay_poller:overlays(),
+-spec(maybe_configure(pid(), config()) -> term()).
+maybe_configure(Pid, Config) ->
     {ok, Netlink} = dcos_overlay_netlink:start_link(),
-    lists:foreach(
-        fun(Overlay) -> try_configure_overlay(Netlink, Config, Overlay) end,
-        KnownOverlays
-    ),
-    dcos_overlay_netlink:stop(Netlink),
-    lager:debug("Done applying config ~p for overlays ~p~n", [Config, KnownOverlays]),
-    reply(MyPid, {dcos_overlay_configure, applied_config, Config}).
-
--spec(try_configure_overlay(Pid :: pid(), config(), jiffy:json_term()) -> term()).
-try_configure_overlay(Pid, Config, Overlay) ->
-    #{<<"info">> := OverlayInfo} = Overlay,
-    Subnet = maps:get(<<"subnet">>, OverlayInfo, undefined),
-    try_configure_overlay(Pid, Config, Overlay, Subnet),
-    case application:get_env(dcos_overlay, enable_ipv6, true) of
-      true ->
-        Subnet6 = maps:get(<<"subnet6">>, OverlayInfo, undefined),
-        try_configure_overlay(Pid, Config, Overlay, Subnet6);
-      false -> ok
+    try
+        lists:foreach(fun (Overlay) ->
+            maybe_configure_overlay(Netlink, Config, Overlay)
+        end, dcos_overlay_poller:overlays()),
+        Pid ! {dcos_overlay_configure, applied_config, Config}
+    after
+        dcos_overlay_netlink:stop(Netlink)
     end.
 
-try_configure_overlay(_Pid, _Config, _Overlay, undefined) ->
-    ok;
-try_configure_overlay(Pid, Config, Overlay, Subnet) ->
-    ParsedSubnet = parse_subnet(Subnet),
-    try_configure_overlay2(Pid, Config, Overlay, ParsedSubnet).
+-spec(maybe_configure_overlay(pid(), config(), jiffy:json_term()) -> ok).
+maybe_configure_overlay(Pid, Config, #{<<"info">> := OverlayInfo} = Overlay) ->
+    Subnet = maps:get(<<"subnet">>, OverlayInfo, undefined),
+    #{<<"backend">> := #{<<"vxlan">> := VxLan}} = Overlay,
+    #{<<"vtep_name">> := VTEPName} = VxLan,
+    ok = maybe_configure_overlay(Pid, VTEPName, Config, Subnet),
+    case application:get_env(dcos_overlay, enable_ipv6, true) of
+        true ->
+            Subnet6 = maps:get(<<"subnet6">>, OverlayInfo, undefined),
+            ok = maybe_configure_overlay(Pid, VTEPName, Config, Subnet6);
+        false ->
+            ok
+    end.
 
--type prefix_len() :: 0..32.
--spec(parse_subnet(Subnet :: binary()) -> {inet:ipv4_address(), prefix_len()}).
+-spec(maybe_configure_overlay(pid(), binary(), config(), undefined) -> ok).
+maybe_configure_overlay(_Pid, _VTEPName, _Config, undefined) ->
+    ok;
+maybe_configure_overlay(Pid, VTEPName, Config, Subnet) ->
+    ParsedSubnet = parse_subnet(Subnet),
+    case maps:find(ParsedSubnet, Config) of
+        {ok, OverlayConfig} ->
+            lists:foreach(fun ({VTEPIPPrefix, Data}) ->
+                maybe_configure_overlay_entry(
+                    Pid, VTEPName, VTEPIPPrefix, Data)
+            end, OverlayConfig);
+        error ->
+            ok
+    end.
+
+-spec(maybe_configure_overlay_entry(pid(), binary(), subnet(), map()) -> ok).
+maybe_configure_overlay_entry(Pid, VTEPName, VTEPIPPrefix, Data) ->
+    LocalIP = dcos_overlay_poller:ip(),
+    case maps:get(agent_ip, Data) of
+        LocalIP ->
+            ok;
+        _AgentIP ->
+            configure_overlay_entry(Pid, VTEPName, VTEPIPPrefix, Data)
+    end.
+
+-spec(configure_overlay_entry(pid(), binary(), subnet(), map()) -> ok).
+configure_overlay_entry(Pid, VTEPName, {VTEPIP, _PrefixLen}, Data) ->
+    #{
+        mac := MAC,
+        agent_ip := AgentIP,
+        subnet := {SubnetIP, SubnetPrefixLen}
+    } = Data,
+    VTEPNameStr = binary_to_list(VTEPName),
+    Args = [AgentIP, VTEPNameStr, VTEPIP, MAC, SubnetIP, SubnetPrefixLen],
+    ?MODULE:configure_overlay(Pid, Args).
+
+-spec(configure_overlay(pid(), [term()]) -> ok).
+configure_overlay(Pid, Args) ->
+    [AgentIP, VTEPNameStr, VTEPIP, MAC, SubnetIP, SubnetPrefixLen] = Args,
+    MACTuple = list_to_tuple(MAC),
+    Family = dcos_l4lb_app:family(SubnetIP),
+    {ok, _} = dcos_overlay_netlink:ipneigh_replace(
+                Pid, Family, VTEPIP, MACTuple, VTEPNameStr),
+    {ok, _} = dcos_overlay_netlink:iproute_replace(
+                Pid, Family, SubnetIP, SubnetPrefixLen, VTEPIP, main),
+    case Family of
+        inet ->
+            {ok, _} = dcos_overlay_netlink:bridge_fdb_replace(
+                        Pid, AgentIP, MACTuple, VTEPNameStr),
+            {ok, _} = dcos_overlay_netlink:iproute_replace(
+                        Pid, Family, AgentIP, 32, VTEPIP, 42),
+            ok;
+        _Family  ->
+            ok
+    end.
+
+-spec(parse_subnet(binary()) -> subnet()).
 parse_subnet(Subnet) ->
     [IPBin, PrefixLenBin] = binary:split(Subnet, <<"/">>),
     {ok, IP} = inet:parse_address(binary_to_list(IPBin)),
@@ -57,49 +111,3 @@ parse_subnet(Subnet) ->
     true = is_integer(PrefixLen),
     true = 0 =< PrefixLen andalso PrefixLen =< 128,
     {IP, PrefixLen}.
-
-try_configure_overlay2(Pid,
-  _Config = #{key := [navstar, overlay, Subnet], value := LashupValue},
-  Overlay, ParsedSubnet) when Subnet == ParsedSubnet ->
-    lists:foreach(
-        fun(Value) -> maybe_configure_overlay_entry(Pid, Overlay, Value) end,
-        LashupValue
-    );
-try_configure_overlay2(_Pid, _Config, _Overlay, _ParsedSubnet) ->
-    ok.
-
-maybe_configure_overlay_entry(Pid, Overlay, {{VTEPIPPrefix, riak_dt_map}, Value}) ->
-    MyIP = dcos_overlay_poller:ip(),
-    case lists:keyfind({agent_ip, riak_dt_lwwreg}, 1, Value) of
-        {_, MyIP} ->
-            ok;
-        _Any ->
-            configure_overlay_entry(Pid, Overlay, VTEPIPPrefix, Value)
-    end.
-
-configure_overlay_entry(Pid, Overlay, _VTEPIPPrefix = {VTEPIP, _PrefixLen}, LashupValue) ->
-    #{<<"backend">> := #{<<"vxlan">> := #{<<"vtep_name">> := VTEPName}}} = Overlay,
-    {_, MAC} = lists:keyfind({mac, riak_dt_lwwreg}, 1, LashupValue),
-    {_, AgentIP} = lists:keyfind({agent_ip, riak_dt_lwwreg}, 1, LashupValue),
-    {_, {SubnetIP, SubnetPrefixLen}} = lists:keyfind({subnet, riak_dt_lwwreg}, 1, LashupValue),
-    VTEPNameStr = binary_to_list(VTEPName),
-    ?MODULE:configure_overlay(Pid, [AgentIP, VTEPNameStr, VTEPIP, MAC, SubnetIP, SubnetPrefixLen]).
-
-configure_overlay(Pid, [AgentIP, VTEPNameStr, VTEPIP, MAC, SubnetIP, SubnetPrefixLen]) ->
-    MACTuple = list_to_tuple(MAC),
-    Family = determine_family(inet:ntoa(SubnetIP)),
-    {ok, _} = dcos_overlay_netlink:ipneigh_replace(Pid, Family, VTEPIP, MACTuple, VTEPNameStr),
-    {ok, _} = dcos_overlay_netlink:iproute_replace(Pid, Family, SubnetIP, SubnetPrefixLen, VTEPIP, main),
-    case Family of
-      inet ->
-        {ok, _} = dcos_overlay_netlink:bridge_fdb_replace(Pid, AgentIP, MACTuple, VTEPNameStr),
-        {ok, _} = dcos_overlay_netlink:iproute_replace(Pid, Family, AgentIP, 32, VTEPIP, 42);
-      _  ->
-         ok
-    end.
-
-determine_family(IP) ->
-    case inet:parse_ipv4_address(IP) of
-      {ok, _} -> inet;
-      _ -> inet6
-    end.

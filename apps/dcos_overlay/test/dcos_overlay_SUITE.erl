@@ -51,15 +51,17 @@ start_nodes(Nodes) ->
     Result = [ct_slave:start(Node, Opts) || Node <- Nodes],
     ct:pal("Started result ~p", [Result]),
     NodeNames = [NodeName || {ok, NodeName} <- Result],
-    lists:foreach(fun(Node) -> pong = net_adm:ping(Node) end, NodeNames),
+    lists:foreach(fun (Node) -> pong = net_adm:ping(Node) end, NodeNames),
     NodeNames.
 
 configure_nodes(Nodes, Masters) ->
-    Env = [lashup, contact_nodes, Masters],
-    {_, []} = rpc:multicall(Nodes, code, add_pathsa, [code:get_path()]),
-    {_, []} = rpc:multicall(Nodes, application, set_env, Env),
-    {_, []} = rpc:multicall(Nodes, meck, new, [httpc, [no_link, passthrough]]),
-    {_, []} = rpc:multicall(Nodes, meck, expect, [httpc, request, fun meck_httpc_request/4]).
+    {_, []} = rpc:multicall(Nodes, code, add_paths, [code:get_path()]),
+    {_, []} = rpc:multicall(Nodes, code, load_file, [?MODULE]),
+    {_, []} = rpc:multicall(Nodes, erlang, apply, [fun () ->
+        ok = application:set_env(lashup, contact_nodes, Masters),
+        ok = meck:new(httpc, [no_link, passthrough]),
+        ok = meck:expect(httpc, request, fun meck_httpc_request/4)
+    end, []]).
 
 stop_nodes(Nodes) ->
     StoppedResult = [ct_slave:stop(Node) || Node <- Nodes],
@@ -81,43 +83,44 @@ dcos_overlay_test(Config) ->
     Nodes = ?config(nodes, Config),
     meck_setup(Nodes),
     Expected = expected(Nodes),
-    Actual = actual(Nodes),
+    {Actual, []} = actual(Nodes),
     ?assertMatch(Expected, Actual).
 
 meck_setup(Nodes) ->
-    {_, []} = rpc:multicall(Nodes, erlang, apply, [fun() ->
-        meck:new(dcos_overlay_configure, [no_link, passthrough]),
-        meck:expect(dcos_overlay_configure, configure_overlay, fun (_, _) -> ok end),
+    {_, []} = rpc:multicall(Nodes, erlang, apply, [fun () ->
+        ok = meck:new(dcos_overlay_configure, [no_link, passthrough]),
+        ok = meck:expect(
+                dcos_overlay_configure, configure_overlay,
+                fun (_, _) -> ok end),
 
-        meck:new(gen_netlink_client, [no_link, passthrough]),
-        meck:expect(gen_netlink_client, rtnl_request,
+        ok = meck:new(gen_netlink_client, [no_link, passthrough]),
+        ok = meck:expect(
+            gen_netlink_client, rtnl_request,
             fun (_, Type, _, _) when Type == getlink ->
                     Msg = {unspec, arphrd_ether, 13, [], [], []},
                     {ok, [#rtnetlink{type=newlink, msg=Msg}]};
                 (_, _, _, _) -> {ok, []}
             end),
-        meck:expect(gen_netlink_client, if_nametoindex, fun (_) -> {ok, 0} end),
-        application:ensure_all_started(dcos_overlay)
+        ok = meck:expect(
+            gen_netlink_client, if_nametoindex,
+            fun (_) -> {ok, 0} end),
+        {ok, _Apps} = application:ensure_all_started(dcos_overlay)
     end, []]).
 
 actual(Nodes) ->
-    {Result, []} = rpc:multicall(Nodes, meck, wait,
-                       [3, dcos_overlay_configure, configure_overlay, ['_', '_'], 120000]),
-    ct:pal("wait result ~p", [Result]),
-    {First, []} = rpc:multicall(Nodes, meck, capture,
-                      [first, dcos_overlay_configure, configure_overlay, ['_', '_'], 2]),
-    {Second, []} = rpc:multicall(Nodes, meck, capture,
-                       [2, dcos_overlay_configure, configure_overlay, ['_', '_'], 2]),
-    {Third, []} = rpc:multicall(Nodes, meck, capture,
-                       [3, dcos_overlay_configure, configure_overlay, ['_', '_'], 2]),
-    Zipped = lists:zipwith3(fun(X, Y, Z) -> [X, Y, Z] end, First, Second, Third),
-    [lists:sort(L) || L <- Zipped].
+    {Mod, Fun} = {dcos_overlay_configure, configure_overlay},
+    rpc:multicall(Nodes, erlang, apply, [fun () ->
+        ok = meck:wait(3, Mod, Fun, ['_', '_'], 120000),
+        History = meck:history(Mod),
+        List = [Args || {_, {M, F, [_, Args]}, ok} <- History,
+                M =:= Mod, F =:= Fun],
+        lists:sort(List)
+    end, []]).
 
 expected(Nodes) ->
     NodeNums = [parse_node(atom_to_binary(Node, latin1)) || Node <- Nodes],
-    [lists:sort(
-        [node_config(Node) || Node <- NodeNums, Node =/= NodeNum])
-     || NodeNum <- NodeNums].
+    [ lists:sort([node_config(Node) || Node <- NodeNums, Node =/= NodeNum])
+    || NodeNum <- NodeNums ].
 
 node_config(Node) ->
     AgentIP = {10, 0, 0, Node},

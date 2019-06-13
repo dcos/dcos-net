@@ -1,218 +1,132 @@
-%%%-------------------------------------------------------------------
-%%% @author dgoel
-%%% @copyright (C) 2016, <COMPANY>
-%%% @doc
-%%%
-%%% @end
-%%% Created : 11 OCT 2016 9:27 PM
-%%%-------------------------------------------------------------------
 -module(dcos_overlay_lashup_kv_listener).
--author("dgoel").
-
--behaviour(gen_statem).
-
-%% API
--export([start_link/0]).
-
-%% gen_statem callbacks
--export([init/1, callback_mode/0, terminate/3, code_change/4]).
-
-%% state API
--export([init/3,
-         wait/3,
-         subscribe/3,
-         unconfigured/3,
-         configuring/3,
-         batching/3,
-         reapplying/3]).
-
--define(SERVER, ?MODULE).
--define(HEAPSIZE, 100). %% In MB
--define(KILL_TIMER, 300000). %% 5 min
--define(WAIT_TIMEOUT, 5000). %% 5 secs
--define(BATCH_TIMEOUT, 5000). %% 5 secs
--define(REAPPLY_TIMEOUT, 300000). %% 5 min
+-behaviour(gen_server).
 
 -include_lib("stdlib/include/ms_transform.hrl").
 
--type config() :: orddict:orddict(term(), term()).
+-export([start_link/0]).
 
--record(data, {
-    ref :: undefined | reference(),
-    pid :: undefined | pid(),
-    config = orddict:new() :: config(),
-    num_req = 0 :: non_neg_integer(),
-    num_res = 0 :: non_neg_integer(),
-    kill_timer :: undefined | timer:tref()
+%% gen_server callbacks
+-export([init/1, handle_continue/2,
+    handle_call/3, handle_cast/2, handle_info/2]).
+
+-export_type([subnet/0, config/0]).
+
+-define(KEY(Subnet), [navstar, overlay, Subnet]).
+
+-type subnet() :: {inet:ip_address(), 0..32}.
+-type config() :: #{
+    OverlaySubnet :: subnet() =>
+        {VTEPIPPrefix :: subnet(), #{
+            agent_ip => inet:ip_address(),
+            mac => list(0..16#FF),
+            subnet => subnet()
+        }}
+    }.
+
+-record(state, {
+    ref :: reference(),
+    config = #{} :: config(),
+    reconcile_ref :: reference()
 }).
--type data() :: #data{}.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Starts the server
-%%
-%% @end
-%%--------------------------------------------------------------------
 -spec(start_link() ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link() ->
-    gen_statem:start_link({local, ?SERVER}, ?MODULE, [], []).
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 %%%===================================================================
-%%% gen_statem callbacks
+%%% gen_server callbacks
 %%%===================================================================
 
 init([]) ->
-    {ok, init, [], {timeout, 0, init}}.
+    {ok, {}, {continue, {}}}.
 
-callback_mode() ->
-    state_functions.
+handle_continue({}, {}) ->
+    ok = wait_for_vtep(),
+    MatchSpec = ets:fun2ms(fun({?KEY('_')}) -> true end),
+    {ok, Ref} = lashup_kv:subscribe(MatchSpec),
+    RRef = start_reconcile_timer(),
+    {noreply, #state{ref=Ref, reconcile_ref=RRef}}.
 
-terminate(_Reason, _State, _Data) ->
-    ok.
+handle_call(_Request, _From, State) ->
+    {noreply, State}.
 
-code_change(_OldVsn, OldState, OldData, _Extra) ->
-    {ok, OldState, OldData}.
+handle_cast(_Request, State) ->
+    {noreply, State}.
 
-%%-----------------------------------------------------------------------------------------------------
-%% State transition
-%%-----------------------------------------------------------------------------------------------------
-%%                                                              lashup_event
-%%                                                               +------+
-%%                                                               |      |
-%%  +--------------+              +-------------+ lashup event +-+------+-+               +------------+
-%%  |              |              |             +      or      |          |               |            |
-%%  |              | lashup_event |             |    timeout1  |          |    reapply    |            |
-%%  | unconfigured +------------> | configuring +------------> | batching +-------------> | reapplying |
-%%  |              |              |             | <------------+          |               |            |
-%%  |              |              |             |    timeout2  |          |               |            |
-%%  |              |              |             |              |          |               |            |
-%%  +--------------+              +-------------+              +----------+               +------------+
-%%                                       |<------------------------------------------------------|
-%%------------------------------------------------------------------------------------------------------
+handle_info({lashup_kv_event, Ref, Key},
+        #state{ref=Ref, config=Config}=State) ->
+    ok = lashup_kv:flush(Ref, Key),
+    Value = lashup_kv:value(Key),
+    {Subnet, Delta, Config0} = update_config(Key, Value, Config),
+    ok = apply_configuration(#{Subnet => Delta}),
+    {noreply, State#state{config=Config0}};
+handle_info({timeout, RRef0, reconcile},
+        #state{config=Config, reconcile_ref=RRef0}=State) ->
+    ok = apply_configuration(Config),
+    RRef = start_reconcile_timer(),
+    {noreply, State#state{reconcile_ref=RRef}};
+handle_info(_Info, State) ->
+    {noreply, State}.
 
-init(timeout, init, []) ->
-    MaxHeapSizeInWords = (?HEAPSIZE bsl 20) div erlang:system_info(wordsize), %%100 MB
-    process_flag(message_queue_data, on_heap),
-    process_flag(max_heap_size, MaxHeapSizeInWords),
-    {next_state, wait, #data{}, {timeout, 0, []}}.
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
 
-wait(timeout, [], _StateData) ->
-    Overlays = dcos_overlay_poller:overlays(),
-    {keep_state_and_data, {timeout, ?WAIT_TIMEOUT, Overlays}};
-wait(timeout, _Overlays, StateData) ->
-    {next_state, subscribe, StateData, {next_event, internal, []}}.
+-define(WAIT_TIMEOUT, 5000).
 
-subscribe(internal, _, _) ->
-    MatchSpec = mk_key_matchspec(),
-    {ok, Ref} = lashup_kv_events_helper:start_link(MatchSpec),
-    {next_state, unconfigured, #data{ref = Ref}}.
+-spec(wait_for_vtep() -> ok).
+wait_for_vtep() ->
+    % listener must wait until vtep is configured.
+    % dcos_overlay_poller polls local mesos agent module and
+    % configures vtep interfaces.
+    try dcos_overlay_poller:overlays() of
+        [] ->
+            timer:sleep(?WAIT_TIMEOUT),
+            wait_for_vtep();
+        _Overlays ->
+            ok
+    catch _Class:_Error ->
+        wait_for_vtep()
+    end.
 
-unconfigured(info, LashupEvent = {lashup_kv_events, #{key := OverlayKey, value := Value}}, StateData0) ->
-    StateData1 = handle_lashup_event(LashupEvent, StateData0),
-    {ok, Timer} = timer:kill_after(?KILL_TIMER),
-    EventContent = #{key => OverlayKey, value => Value},
-    StateData2 = StateData1#data{kill_timer = Timer, num_req = 1, num_res = 0},
-    {next_state, configuring, StateData2, {next_event, internal, EventContent}}.
+-spec(start_reconcile_timer() -> reference()).
+start_reconcile_timer() ->
+    Timeout =
+        application:get_env(dcos_overlay, reconcile_timeout, timer:minutes(5)),
+    erlang:start_timer(Timeout, self(), reconcile).
 
-configuring(internal, Config, _StateData) ->
-    lager:debug("Applying configuration: ~p", [Config]),
-    dcos_overlay_configure:start_link(Config),
-    keep_state_and_data;
-configuring(info, {dcos_overlay_configure, applied_config, AppliedConfig}, StateData0) ->
-    lager:debug("Done applying configuration: ~p", [AppliedConfig]),
-    StateData1 = maybe_update_state(StateData0),
-    next_state_transition(StateData1);
-configuring(info, _EventContent, _StateData) ->
-    {keep_state_and_data, postpone}.
+-spec(update_config(Key :: term(), Value :: [term()], config()) ->
+    {subnet(), Delta :: [{subnet(), map()}], config()}).
+update_config(?KEY(Subnet), Value, Config) ->
+    OldValue = maps:get(Subnet, Config, []),
+    NewValue =
+        [ {IP, maps:from_list(
+             [{K, V} || {{K, riak_dt_lwwreg}, V} <- L])}
+        || {{IP, riak_dt_map}, L} <- Value ],
+    {Delta, _} = dcos_net_utils:complement(NewValue, OldValue),
+    lists:foreach(fun ({VTEP, Data}) ->
+        Info = maps:map(fun (_K, V) -> to_str(V) end, Data#{vtep => VTEP}),
+        lager:notice(
+            "Overlay configuration was gossiped, subnet: ~s data: ~p",
+            [to_str(Subnet), Info])
+    end, Delta),
+    {Subnet, Delta, Config#{Subnet => NewValue}}.
 
-batching(info, LashupEvent, StateData0) ->
-    StateData1 = handle_lashup_event(LashupEvent, StateData0),
-    {keep_state, StateData1, {timeout, ?BATCH_TIMEOUT, do_configure}};
-batching(timeout, do_configure, StateData0 = #data{config = Config}) ->
-    {StateData1, Actions} = next_state_and_actions(Config, StateData0),
-    {next_state, configuring, StateData1, Actions};
-batching(timeout, do_reapply, StateData) ->
-    {next_state , reapplying, StateData, {next_event, internal, reapply}}.
+-spec(apply_configuration(config()) -> ok).
+apply_configuration(Config) ->
+    Timeout =
+        application:get_env(dcos_overlay, apply_timeout, timer:minutes(5)),
+    Pid = dcos_overlay_configure:start_link(Config),
+    receive
+        {dcos_overlay_configure, applied_config, _Config} ->
+            ok
+    after Timeout ->
+        lager:error("dcos_overlay_configure got stuck applying ~p", [Config]),
+        exit(Pid, kill)
+    end.
 
-reapplying(internal, reapply, StateData0) ->
-    Config = fetch_lashup_config(),
-    {StateData1, Actions} = next_state_and_actions(Config, StateData0),
-    {next_state, configuring, StateData1, Actions}.
-
-%% private API
-
-mk_key_matchspec() ->
-    ets:fun2ms(fun({[navstar, overlay, '_']}) -> true end).
-
--spec(handle_lashup_event(LashupEvent :: tuple(), data()) -> data()).
-handle_lashup_event({lashup_kv_events, #{type := ingest_new, key := OverlayKey, value := NewOverlayConfig, ref := Ref}},
-             StateData = #data{ref = Ref}) ->
-    handle_lashup_event2(OverlayKey, NewOverlayConfig, [], StateData);
-handle_lashup_event({lashup_kv_events, #{type := ingest_update, key := OverlayKey, value := NewOverlayConfig,
-             old_value := OldOverlayConfig, ref := Ref}}, StateData = #data{ref = Ref}) ->
-    handle_lashup_event2(OverlayKey, NewOverlayConfig, OldOverlayConfig, StateData).
-
--spec(handle_lashup_event2(Key :: list(), NewOverlayConfig :: list(), OldOverlayConfig :: list(), data()) -> data()).
-handle_lashup_event2(OverlayKey = [navstar, overlay, Subnet], NewOverlayConfig, OldOverlayConfig,
-             StateData = #data{config = OldConfig}) when is_tuple(Subnet), tuple_size(Subnet) == 2 ->
-    DeltaOverlayConfig = determine_delta_config(NewOverlayConfig, OldOverlayConfig),
-    NewConfig = orddict:append_list(OverlayKey, DeltaOverlayConfig, OldConfig),
-    DeltaInfo =
-        maps:from_list(
-            [ {to_str(IP), maps:from_list([{K, to_str(V)} || {{K, riak_dt_lwwreg}, V} <- Value])}
-            || {{IP, riak_dt_map}, Value} <- DeltaOverlayConfig ]),
-    lager:notice("Overlay configuration was gossiped, ~s => ~p", [to_str(Subnet), DeltaInfo]),
-    StateData#data{config = NewConfig}.
-
-determine_delta_config(NewOverlayConfig, OldOverlayConfig) ->
-    Nc = ordsets:from_list(NewOverlayConfig),
-    Oc = ordsets:from_list(OldOverlayConfig),
-    Dc = ordsets:subtract(Nc, Oc),
-    ordsets:to_list(Dc).
-
-maybe_update_state(StateData = #data{kill_timer = Timer, num_req = Req, num_res = Res}) when Req == Res + 1 ->
-    timer:cancel(Timer),
-    StateData#data{config = [], num_res = Res + 1}; %% clean cached config
-maybe_update_state(StateData = #data{num_res = Res}) ->
-    StateData#data{num_res = Res + 1}.
-
-next_state_transition(StateData = #data{num_req = Req, num_res = Res}) when Req == Res ->
-    ReapplyTimeout = application:get_env(dcos_overlay, reapply_timeout, ?REAPPLY_TIMEOUT),
-    {next_state, batching, StateData, {timeout, ReapplyTimeout, do_reapply}};
-next_state_transition(StateData) ->
-    {keep_state, StateData}.
-
--spec(fetch_lashup_config() -> config()).
-fetch_lashup_config() ->
-    MatchSpec = mk_key_matchspec(),
-    OverlayKeys = lashup_kv:keys(MatchSpec),
-    lists:foldl(
-        fun(OverlayKey, Acc) ->
-            KeyValue = lashup_kv:value(OverlayKey),
-            orddict:append_list(OverlayKey, KeyValue, Acc)
-        end,
-        orddict:new(), OverlayKeys).
-
-next_state_and_actions(Config, StateData0) ->
-    Actions = create_actions(Config),
-    {ok, Timer} = timer:kill_after(?KILL_TIMER),
-    StateData1 = StateData0#data{kill_timer = Timer, num_req = length(Actions), num_res = 0},
-    {StateData1, Actions}.
-
-create_actions(Config) ->
-    create_actions(Config, []).
-
-create_actions([], Acc) ->
-    lists:reverse(Acc);
-create_actions([Config|Configs], Acc) ->
-    Action = create_action(Config),
-    create_actions(Configs, [Action|Acc]).
-
-create_action({OverlayKey, KeyValue}) ->
-    EventContent = #{key => OverlayKey, value => KeyValue},
-    {next_event, internal, EventContent}.
-
+-spec(to_str(term()) -> string()).
 to_str({IP, Prefix}) ->
     lists:concat([inet:ntoa(IP), "/", Prefix]);
 to_str(Mac) when length(Mac) =:= 6 ->

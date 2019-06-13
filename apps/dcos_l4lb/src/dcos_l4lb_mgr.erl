@@ -19,8 +19,8 @@
 -export([start_link/0]).
 
 %% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2,
-    handle_info/2, terminate/2, code_change/3]).
+-export([init/1, handle_continue/2,
+    handle_call/3, handle_cast/2, handle_info/2]).
 
 -record(state, {
     % pids and refs
@@ -47,7 +47,6 @@
 -type namespace() :: term().
 
 -define(GM_EVENTS(R, T), {lashup_gm_route_events, #{ref := R, tree := T}}).
--define(KV_EVENTS(R, V), {lashup_kv_events, #{ref := R, value := V}}).
 
 
 -spec(push_vips(VIPs :: [{Key, [Backend]}]) -> ok
@@ -76,8 +75,10 @@ start_link() ->
 %%%===================================================================
 
 init([]) ->
-    self() ! init,
-    {ok, []}.
+    {ok, {}, {continue, {}}}.
+
+handle_continue({}, {}) ->
+    {noreply, handle_init()}.
 
 handle_call({vips, VIPs}, _From, State) ->
     {reply, ok, handle_vips(VIPs, State)};
@@ -89,22 +90,14 @@ handle_cast({netns, Event}, State) ->
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-handle_info(init, []) ->
-    {noreply, handle_init()};
 handle_info(?GM_EVENTS(_R, _T)=Event, State) ->
     {noreply, handle_gm_event(Event, State)};
-handle_info(?KV_EVENTS(_R, _T)=Event, State) ->
-    {noreply, handle_kv_event(Event, State)};
+handle_info({lashup_kv_event, Ref, Key}, State) ->
+    {noreply, handle_kv_event(Ref, Key, State)};
 handle_info({timeout, _Ref, reconcile}, State) ->
     {noreply, handle_reconcile(State)};
 handle_info(_Info, State) ->
     {noreply, State}.
-
-terminate(_Reason, _State) ->
-    ok.
-
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
 
 %%%===================================================================
 %%% Events functions
@@ -129,7 +122,7 @@ handle_init() ->
     {ok, NetNSMgr} = dcos_l4lb_netns_watcher:start_link(),
 
     MatchSpec = ets:fun2ms(fun ({?NODEMETADATA_KEY}) -> true end),
-    {ok, NodesRef} = lashup_kv_events_helper:start_link(MatchSpec),
+    {ok, NodesRef} = lashup_kv:subscribe(MatchSpec),
     {ok, RouteRef} = lashup_gm_route_events:subscribe(),
     ReconRef = start_reconcile_timer(),
 
@@ -146,13 +139,14 @@ handle_gm_event(?GM_EVENTS(Ref, Tree), #state{route_ref=Ref}=State) ->
 handle_gm_event(_Event, State) ->
     State.
 
--spec(handle_kv_event(?KV_EVENTS(Ref, Value), state()) -> state()
-    when Ref :: reference(), Value :: [tuple()]).
-handle_kv_event(?KV_EVENTS(Ref, Value), #state{nodes_ref=Ref}=State) ->
-    Value0 = ?SKIP(?KV_EVENTS(Ref, V), V, Value),
-    Nodes = [{IP, Node} || {?LWW_REG(IP), Node} <- Value0],
+-spec(handle_kv_event(Ref, Key, state()) -> state()
+    when Ref :: reference(), Key :: term()).
+handle_kv_event(Ref, Key, #state{nodes_ref=Ref}=State) ->
+    ok = lashup_kv:flush(Ref, Key),
+    Value = lashup_kv:value(Key),
+    Nodes = [{IP, Node} || {?LWW_REG(IP), Node} <- Value],
     State#state{nodes=maps:from_list(Nodes)};
-handle_kv_event(_Event, State) ->
+handle_kv_event(_Ref, _Key, State) ->
     State.
 
 -spec(handle_netns_event({pid(), EventType, [netns()]}, state()) -> state()
