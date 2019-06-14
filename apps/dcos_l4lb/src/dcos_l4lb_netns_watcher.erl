@@ -18,7 +18,7 @@
 -export([start_link/0]).
 
 %% gen_statem callbacks
--export([init/1, terminate/3, code_change/4, callback_mode/0]).
+-export([init/1, callback_mode/0]).
 
 %% State callbacks
 -export([uninitialized/3, reconcile/3, watch/3]).
@@ -53,12 +53,6 @@ init([]) ->
 
 callback_mode() ->
     state_functions.
-
-terminate(Reason, State, Data) ->
-    lager:warning("Terminating, due to: ~p, in state: ~p, with state data: ~p", [Reason, State, Data]).
-
-code_change(_OldVsn, OldState, OldData, _Extra) ->
-    {ok, OldState, OldData}.
 
 %%--------------------------------------------------------------------
 %% State transition uninitialized -> reconcile -> maintain

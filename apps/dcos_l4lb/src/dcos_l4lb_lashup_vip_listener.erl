@@ -15,8 +15,10 @@
 -include_lib("stdlib/include/ms_transform.hrl").
 
 -record(state, {
-    ref = erlang:error() :: reference()
+    ref = erlang:error() :: reference(),
+    gc_ref :: undefined | reference()
 }).
+-type state() :: #state{}.
 
 -type family() :: inet | inet6.
 -type lkey() :: dcos_l4lb_mesos_poller:lkey().
@@ -66,13 +68,23 @@ handle_info({lashup_kv_event, Ref, Key}, #state{ref=Ref}=State) ->
     ok = lashup_kv:flush(Ref, Key),
     Value = lashup_kv:value(Key),
     ok = handle_event(Value),
-    {noreply, State};
+    {noreply, start_gc_timer(State)};
+handle_info({timeout, GCRef, gc}, #state{gc_ref=GCRef}=State) ->
+    {noreply, State#state{gc_ref=undefined}, hibernate};
 handle_info(_Info, State) ->
     {noreply, State}.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+-spec(start_gc_timer(state()) -> state()).
+start_gc_timer(#state{gc_ref = undefined} = State) ->
+    Timeout = application:get_env(dcos_net, gc_timeout, 15000),
+    TRef = erlang:start_timer(Timeout, self(), gc),
+    State#state{gc_ref = TRef};
+start_gc_timer(State) ->
+    State.
 
 -spec(handle_event([{lkey(), [backend()]}]) -> ok).
 handle_event(RawVIPs) ->

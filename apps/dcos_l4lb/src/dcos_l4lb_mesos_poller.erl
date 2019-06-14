@@ -14,8 +14,8 @@
 ]).
 
 %% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2,
-    handle_info/2, terminate/2, code_change/3]).
+-export([init/1, handle_call/3,
+    handle_cast/2, handle_info/2]).
 
 -export_type([named_vip/0, vip/0, protocol/0,
     key/0, lkey/0, backend/0]).
@@ -60,15 +60,9 @@ handle_cast(_Request, State) ->
 handle_info({timeout, TRef, poll}, #state{timer_ref=TRef}=State) ->
     TRef0 = start_poll_timer(),
     ok = handle_poll(),
-    {noreply, State#state{timer_ref=TRef0}};
+    {noreply, State#state{timer_ref=TRef0}, hibernate};
 handle_info(_Info, State) ->
     {noreply, State}.
-
-terminate(_Reason, _State) ->
-    ok.
-
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
 
 %%%===================================================================
 %%% Internal functions

@@ -5,19 +5,17 @@
 -export([start_link/1]).
 
 %% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2,
-    handle_info/2, terminate/2, code_change/3]).
+-export([init/1, handle_call/3,
+    handle_cast/2, handle_info/2]).
 
 -include("dcos_dns.hrl").
 
 -record(state, {
-    port :: inet:port_number(),
-    socket :: gen_udp:socket()
+    socket :: gen_udp:socket(),
+    gc_ref :: undefined | reference()
 }).
+-type state() :: #state{}.
 
-%%%===================================================================
-%%% API
-%%%===================================================================
 
 -spec(start_link(LocalIP :: inet:ip4_address()) ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
@@ -36,7 +34,7 @@ init([LocalIP]) ->
         {ip, LocalIP}, {recbuf, RecBuf}
     ]),
     link(Socket),
-    {ok, #state{port = Port, socket = Socket}}.
+    {ok, #state{socket = Socket}}.
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
@@ -48,13 +46,20 @@ handle_info({udp, Socket, FromIP, FromPort, Data},
             State = #state{socket = Socket}) ->
     Fun = {fun gen_udp:send/4, [Socket, FromIP, FromPort]},
     _ = dcos_dns_handler:start(udp, Data, Fun),
-    {noreply, State};
+    {noreply, start_gc_timer(State)};
+handle_info({timeout, GCRef, gc}, #state{gc_ref=GCRef}=State) ->
+    {noreply, State#state{gc_ref=undefined}, hibernate};
 handle_info(_Info, State) ->
     {noreply, State}.
 
-terminate(_Reason, _State = #state{socket = Socket}) ->
-    gen_udp:close(Socket),
-    ok.
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
 
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
+-spec(start_gc_timer(state()) -> state()).
+start_gc_timer(#state{gc_ref = undefined} = State) ->
+    Timeout = application:get_env(dcos_net, gc_timeout, 15000),
+    TRef = erlang:start_timer(Timeout, self(), gc),
+    State#state{gc_ref = TRef};
+start_gc_timer(State) ->
+    State.

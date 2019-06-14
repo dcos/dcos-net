@@ -34,6 +34,7 @@ init_per_testcase(_, Config) ->
 
     meck:new(dcos_l4lb_mgr, [no_link]),
     meck:expect(dcos_l4lb_mgr, local_port_mappings, fun (_) -> ok end),
+    meck:expect(dcos_l4lb_mgr, push_vips, fun (_) -> ok end),
 
     {ok, _} = application:ensure_all_started(dcos_l4lb),
     meck:wait(dcos_net_mesos_listener, poll, '_', 5000),

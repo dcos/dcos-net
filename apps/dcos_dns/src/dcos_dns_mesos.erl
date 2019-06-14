@@ -11,8 +11,8 @@
 ]).
 
 %% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2,
-    handle_info/2, terminate/2, code_change/3]).
+-export([init/1, handle_call/3,
+    handle_cast/2, handle_info/2]).
 
 -type task() :: dcos_net_mesos_listener:task().
 -type task_id() :: dcos_net_mesos_listener:task_id().
@@ -58,15 +58,9 @@ handle_info({'DOWN', Ref, process, _Pid, Info}, #state{ref=Ref}=State) ->
 handle_info({timeout, Ref, masters}, #state{masters_ref=Ref}=State) ->
     {noreply, handle_masters(State)};
 handle_info({timeout, Ref, push_ops}, #state{ops_ref=Ref}=State) ->
-    {noreply, handle_push_ops(State)};
+    {noreply, handle_push_ops(State), hibernate};
 handle_info(_Info, State) ->
     {noreply, State}.
-
-terminate(_Reason, _State) ->
-    ok.
-
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
 
 %%%===================================================================
 %%% Internal functions

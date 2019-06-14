@@ -71,7 +71,7 @@ handle_info(?REFRESH_MESSAGE, State) ->
         error ->
             {ok, _} = timer:send_after(FailRefreshInterval, ?REFRESH_MESSAGE)
     end,
-    {noreply, State};
+    {noreply, State, hibernate};
 handle_info(Msg, State) ->
     lager:warning("Unhandled messages: ~p", [Msg]),
     {noreply, State}.

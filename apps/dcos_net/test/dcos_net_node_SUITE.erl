@@ -41,6 +41,8 @@ wait_ready(Pid) ->
     case erlang:process_info(Pid, current_stacktrace) of
         {current_stacktrace, [{gen_server, loop, _, _} | _ST]} ->
             ok;
+        {current_stacktrace, []} ->
+            ok;
         {current_stacktrace, _ST} ->
             wait_ready(Pid)
     end.

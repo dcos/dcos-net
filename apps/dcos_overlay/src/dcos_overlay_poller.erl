@@ -95,7 +95,7 @@ handle_info(poll, State0) ->
                 NewState#state{poll_period = NewPollPeriod}
         end,
     timer:send_after(State1#state.poll_period, poll),
-    {noreply, State1};
+    {noreply, State1, hibernate};
 handle_info(_Info, State) ->
     {noreply, State}.
 

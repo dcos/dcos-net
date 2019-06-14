@@ -15,8 +15,8 @@
 ]).
 
 %% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2,
-    handle_info/2, terminate/2, code_change/3]).
+-export([init/1, handle_call/3,
+    handle_cast/2, handle_info/2]).
 
 -record(state, {
     ref :: reference(),
@@ -45,15 +45,9 @@ handle_cast(_Request, State) ->
 handle_info({timeout, Ref, mesos_dns_poll}, #state{ref=Ref}=State) ->
     State0 = handle_poll(State),
     TRef = start_poll_timer(),
-    {noreply, State0#state{ref=TRef}};
+    {noreply, State0#state{ref=TRef}, hibernate};
 handle_info(_Info, State) ->
     {noreply, State}.
-
-terminate(_Reason, _State) ->
-    ok.
-
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
 
 %%%===================================================================
 %%% Internal functions
