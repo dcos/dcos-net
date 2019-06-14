@@ -13,7 +13,7 @@ jobs:
               set -xe
               if [ -d otp ]; then exit 0; fi # restored
               git clone --branch maint-22 https://github.com/erlang/otp.git otp
-              git -C otp checkout 6618ce7b6a621e92db72ea4f01f7d38553c8818c # 22.0
+              git -C otp checkout b4fb2e5669acb02697d9a9ab168eb0fbff6f370c # 22.0.3
               ( cd otp && ./otp_build autoconf && ./configure )
               make -C otp -j$(getconf _NPROCESSORS_ONLN)
       - save_cache:
