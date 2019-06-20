@@ -554,6 +554,7 @@ setup(FileName) ->
         end),
 
     ok = application:start(prometheus),
+    dcos_net_mesos:init_metrics(),
     dcos_net_mesos_listener:init_metrics(),
 
     {ok, _Pid} = dcos_net_mesos_listener:start_link(),

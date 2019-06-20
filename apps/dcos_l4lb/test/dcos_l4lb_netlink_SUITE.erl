@@ -1,26 +1,29 @@
-%%%-------------------------------------------------------------------
-%%% @author sdhillon
-%%% @copyright (C) 2016, <COMPANY>
-%%% @doc
-%%%
-%%% @end
-%%% Created : 27. Sep 2016 5:55 PM
-%%%-------------------------------------------------------------------
 -module(dcos_l4lb_netlink_SUITE).
--author("sdhillon").
-
-
 -include_lib("gen_netlink/include/netlink.hrl").
 -include("dcos_l4lb.hrl").
-
 -include_lib("common_test/include/ct.hrl").
 
-%% API
--export([all/0, enc_generic/1, getfamily/1, init_per_testcase/2,
-         end_per_testcase/2, test_ipvs_mgr/1, test_route_mgr/1]).
+-export([
+    all/0,
+    init_per_suite/1, end_per_suite/1,
+    init_per_testcase/2, end_per_testcase/2,
 
-%% root tests
-all() -> [enc_generic, test_ipvs_mgr, test_route_mgr].
+    enc_generic/1,
+    getfamily/1,
+    test_ipvs_mgr/1,
+    test_route_mgr/1
+]).
+
+all() ->
+    [enc_generic, getfamily, test_ipvs_mgr, test_route_mgr].
+
+init_per_suite(Config) ->
+    ok = application:start(prometheus),
+    Config.
+
+end_per_suite(Config) ->
+    ok = application:stop(prometheus),
+    Config.
 
 init_per_testcase(enc_generic, Config) ->
     Config;
@@ -28,7 +31,7 @@ init_per_testcase(TestCase, Config) ->
     Uid = list_to_integer(string:strip(os:cmd("id -u"), right, $\n)),
     init_per_testcase(Uid, TestCase, Config).
 
-init_per_testcase(0, TestCase, Config) when TestCase == getfamily; TestCase == test_ipvs_mgr->
+init_per_testcase(0, TestCase, Config) when TestCase == getfamily; TestCase == test_ipvs_mgr ->
     case file:read_file_info("/sys/module/ip_vs") of
         {ok, _} ->
             Config;
@@ -58,6 +61,7 @@ getfamily(_Config) ->
 
 test_ipvs_mgr(_Config) ->
     %% Reset IPVS State
+    ok = dcos_l4lb_ipvs_mgr:init_metrics(),
     {ok, Pid} = dcos_l4lb_ipvs_mgr:start_link(),
     "" = os:cmd("ipvsadm -C"),
     [] =  dcos_l4lb_ipvs_mgr:get_services(Pid, host),
@@ -94,6 +98,7 @@ get_routes(Pid) ->
 
 test_route_mgr(_Config) ->
     os:cmd("ip link add minuteman type dummy"),
+    ok = dcos_l4lb_route_mgr:init_metrics(),
     {ok, Pid} = dcos_l4lb_route_mgr:start_link(),
     [] = get_routes(Pid),
     dcos_l4lb_route_mgr:add_routes(Pid, [{1, 2, 3, 4}], host),

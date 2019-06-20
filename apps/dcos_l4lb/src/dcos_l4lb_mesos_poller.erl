@@ -10,7 +10,8 @@
 
 %% API
 -export([
-    start_link/0
+    start_link/0,
+    init_metrics/0
 ]).
 
 %% gen_server callbacks
@@ -93,13 +94,19 @@ handle_poll(true) ->
 
 -spec(handle_poll_state(#{task_id() => task()}) -> ok).
 handle_poll_state(Tasks) ->
-    Tasks0 = maps:filter(fun is_healthy/2, Tasks),
+    HealthyTasks = maps:filter(fun is_healthy/2, Tasks),
 
-    PortMappings = collect_port_mappings(Tasks0),
+    PortMappings = collect_port_mappings(HealthyTasks),
     dcos_l4lb_mgr:local_port_mappings(PortMappings),
 
-    VIPs = collect_vips(Tasks0),
-    ok = push_vips(VIPs).
+    VIPs = collect_vips(HealthyTasks),
+    ok = push_vips(VIPs),
+
+    LocalBackends = lists:sum([length(BEs) || BEs <- maps:values(VIPs)]),
+    prometheus_gauge:set(l4lb, local_tasks, [], maps:size(Tasks)),
+    prometheus_gauge:set(l4lb, local_healthy_tasks, [], maps:size(HealthyTasks)),
+    prometheus_gauge:set(l4lb, local_vips, [], maps:size(VIPs)),
+    prometheus_gauge:set(l4lb, local_backends, [], LocalBackends).
 
 -spec(is_healthy(task_id(), task()) -> boolean()).
 is_healthy(_TaskId, Task) ->
@@ -278,6 +285,30 @@ log_ops(Key, {remove_all, Backends}) ->
     lists:foreach(fun ({_AgentIP, Backend}) ->
         lager:notice("VIP updated: ~p, removed: ~p", [Key, Backend])
     end, Backends).
+
+
+%%%===================================================================
+%%% Metrics functions
+%%%===================================================================
+
+-spec(init_metrics() -> ok).
+init_metrics() ->
+    prometheus_gauge:new([
+        {registry, l4lb},
+        {name, local_vips},
+        {help, "The number of local VIP labels."}]),
+    prometheus_gauge:new([
+        {registry, l4lb},
+        {name, local_tasks},
+        {help, "The number of local tasks."}]),
+    prometheus_gauge:new([
+        {registry, l4lb},
+        {name, local_healthy_tasks},
+        {help, "The number of local healthy tasks."}]),
+    prometheus_gauge:new([
+        {registry, l4lb},
+        {name, local_backends},
+        {help, "The number of local VIP backends."}]).
 
 %%%===================================================================
 %%% Test functions

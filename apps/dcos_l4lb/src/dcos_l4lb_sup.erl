@@ -1,36 +1,20 @@
 -module(dcos_l4lb_sup).
-
 -behaviour(supervisor).
+-export([start_link/1, init/1]).
 
-%% API
--export([start_link/1]).
-
-%% Supervisor callbacks
--export([init/1]).
-
-%% Helper macro for declaring children of supervisor
--define(CHILD(I, Type), {I, {I, start_link, []}, permanent, 5000, Type, [I]}).
-
-%% ===================================================================
-%% API functions
-%% ===================================================================
+-define(CHILD(Module), #{id => Module, start => {Module, start_link, []}}).
+-define(CHILD(Module, Custom), maps:merge(?CHILD(Module), Custom)).
 
 start_link([Enabled]) ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, [Enabled]).
 
-%% ===================================================================
-%% Supervisor callbacks
-%% ===================================================================
-get_children(false) ->
-    [];
-get_children(true) ->
-    [
-        ?CHILD(dcos_l4lb_network_sup, supervisor),
-        ?CHILD(dcos_l4lb_mesos_poller, worker),
-        ?CHILD(dcos_l4lb_metrics, worker),
-        ?CHILD(dcos_l4lb_lashup_publish, worker)
-    ].
-
-init([Enabled]) ->
-    {ok, {#{intensity => 10000, period => 1}, get_children(Enabled)}}.
-
+init([false]) ->
+    {ok, {#{}, []}};
+init([true]) ->
+    dcos_l4lb_mesos_poller:init_metrics(),
+    {ok, {#{intensity => 10000, period => 1}, [
+        ?CHILD(dcos_l4lb_network_sup, #{type => supervisor}),
+        ?CHILD(dcos_l4lb_mesos_poller),
+        ?CHILD(dcos_l4lb_metrics),
+        ?CHILD(dcos_l4lb_lashup_publish)
+    ]}}.

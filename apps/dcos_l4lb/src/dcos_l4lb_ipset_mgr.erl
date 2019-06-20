@@ -11,7 +11,8 @@
     get_entries/1,
     add_entries/2,
     remove_entries/2,
-    cleanup/0
+    cleanup/0,
+    init_metrics/0
 ]).
 
 %% gen_server callbacks
@@ -45,15 +46,15 @@ get_entries() ->
 
 -spec(get_entries(pid()) -> [entry()]).
 get_entries(Pid) ->
-    gen_server:call(Pid, get_entries).
+    call(Pid, get_entries).
 
 -spec(add_entries(pid(), [entry()]) -> ok).
 add_entries(Pid, Entries) ->
-    gen_server:call(Pid, {add_entries, Entries}).
+    call(Pid, {add_entries, Entries}).
 
 -spec(remove_entries(pid(), [entry()]) -> ok).
 remove_entries(Pid, Entries) ->
-    gen_server:call(Pid, {remove_entries, Entries}).
+    call(Pid, {remove_entries, Entries}).
 
 -spec(start_link() ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
@@ -380,3 +381,20 @@ cleanup() ->
         list_to_binary(?IPSET_NAME_IPV6)
     ]),
     ok.
+
+%%%===================================================================
+%%% Metrics functions
+%%%===================================================================
+
+-spec(call(pid(), term()) -> term()).
+call(Pid, Request) ->
+    prometheus_summary:observe_duration(
+        l4lb, ipset_duration_seconds, [],
+        fun () -> gen_server:call(Pid, Request) end).
+
+-spec(init_metrics() -> ok).
+init_metrics() ->
+    prometheus_summary:new([
+        {registry, l4lb},
+        {name, ipset_duration_seconds},
+        {help, "The time spent prossing IPSet configuration."}]).
