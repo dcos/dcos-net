@@ -13,7 +13,8 @@
 -export([
     push_vips/1,
     push_netns/2,
-    local_port_mappings/1
+    local_port_mappings/1,
+    init_metrics/0
 ]).
 
 -export([start_link/0]).
@@ -53,10 +54,14 @@
     when Key :: dcos_l4lb_mesos_poller:key(),
          Backend :: dcos_l4lb_mesos_poller:backend()).
 push_vips(VIPs) ->
+    Begin = erlang:monotonic_time(),
     try
         gen_server:call(?MODULE, {vips, VIPs})
     catch exit:{noproc, _MFA} ->
         ok
+    after
+        End = erlang:monotonic_time(),
+        update_summary(vips_duration_seconds, End - Begin)
     end.
 
 -spec(push_netns(EventType, [netns()]) -> ok
@@ -166,9 +171,15 @@ handle_netns_event(_Event, State) ->
 -spec(handle_reconcile(state()) -> state()).
 handle_reconcile(#state{vips=VIPs, recon_ref=Ref}=State) ->
     erlang:cancel_timer(Ref),
-    State0 = handle_reconcile(VIPs, State),
-    Ref0 = start_reconcile_timer(),
-    State0#state{recon_ref=Ref0}.
+    Begin = erlang:monotonic_time(),
+    try handle_reconcile(VIPs, State) of
+        State0 ->
+            Ref0 = start_reconcile_timer(),
+            State0#state{recon_ref=Ref0}
+    after
+        End = erlang:monotonic_time(),
+        update_summary(vips_duration_seconds, End - Begin)
+    end.
 
 -spec(start_reconcile_timer() -> reference()).
 start_reconcile_timer() ->
@@ -217,25 +228,29 @@ handle_reconcile_apply(
                ipset_mgr=IPSetMgr}=State) ->
     lists:foreach(fun ({Namespace, LogPrefix, {_, RoutesToDel}, _DiffVIPs}) ->
         ok = remove_routes(RouteMgr, RoutesToDel, Namespace),
-        ok = log_routes_diff(LogPrefix, {[], RoutesToDel})
+        ok = log_routes_diff(LogPrefix, {[], RoutesToDel}),
+        update_counter(reconciled_routes_total, length(RoutesToDel))
     end, Diffs),
 
     add_ipset_entries(IPSetMgr, KeysToAdd),
     log_ipset_diff({KeysToAdd, []}),
+    update_counter(reconciled_ipset_entries_total, length(KeysToAdd)),
 
     lists:foreach(fun ({Namespace, LogPrefix, _DiffRoutes, DiffVIPs}) ->
         ok = apply_vips_diff(IPVSMgr, Namespace, DiffVIPs),
-        ok = log_vips_diff(LogPrefix, DiffVIPs)
+        ok = log_vips_diff(LogPrefix, DiffVIPs),
+        update_counter(reconciled_ipvs_rules_total, vip_diff_size(DiffVIPs))
     end, Diffs),
 
     remove_ipset_entries(IPSetMgr, KeysToDel),
     log_ipset_diff({[], KeysToDel}),
+    update_counter(reconciled_ipset_entries_total, length(KeysToDel)),
 
     lists:foreach(fun ({Namespace, LogPrefix, {RoutesToAdd, _}, _DiffVIPs}) ->
         ok = add_routes(RouteMgr, RoutesToAdd, Namespace),
-        ok = log_routes_diff(LogPrefix, {RoutesToAdd, []})
+        ok = log_routes_diff(LogPrefix, {RoutesToAdd, []}),
+        update_counter(reconciled_routes_total, length(RoutesToAdd))
     end, Diffs),
-
     State.
 
 -spec(handle_vips([{key(), [backend()]}], state()) -> state()).
@@ -254,6 +269,7 @@ handle_vips(VIPs, #state{tree=Tree, nodes=Nodes, prev_vips=PrevVIPs}=State) ->
 
     State0 = handle_vips_apply(DiffVIPs, DiffRoutes, DiffKeys, State),
 
+    update_gauge(vips, length(VIPs)),
     State0#state{vips=VIPs, prev_vips=VIPs1}.
 
 -spec(handle_vips_apply(DiffVIPs, DiffRoutes, DiffKeys, State) -> State
@@ -412,6 +428,13 @@ vip_mod(IPVSMgr, Namespace, {{Protocol, IP, Port}, ToAdd, ToDel}) ->
             Protocol, Namespace)
     end, ToDel).
 
+-spec(vip_diff_size(diff_vips()) -> non_neg_integer()).
+vip_diff_size({ToAdd, ToDel, ToMod}) ->
+    ToAddSize = lists:sum([length(V) || {_K, V} <- ToAdd]),
+    ToDelSize = lists:sum([length(V) || {_K, V} <- ToDel]),
+    ToModSize = lists:sum([length(A) + length(B) || {_K, A, B} <- ToMod]),
+    ToAddSize + ToDelSize + ToModSize.
+
 %%%===================================================================
 %%% Diff functions
 %%%===================================================================
@@ -456,9 +479,20 @@ healthy_vips(VIPs, Nodes, Tree)
     VIPs;
 healthy_vips(VIPs, Nodes, Tree) ->
     Agents = agents(VIPs, Nodes, Tree),
-    lists:map(fun ({VIP, BEs}) ->
-        {VIP, healthy_backends(BEs, Agents)}
-    end, VIPs).
+
+    Result =
+        lists:map(fun ({VIP, BEs}) ->
+            {Healthy, BEs0} = healthy_backends(BEs, Agents),
+            {{VIP, BEs0}, {length(BEs), Healthy}}
+        end, VIPs),
+    {VIPs0, Stat} = lists:unzip(Result),
+
+    % Stat :: [{AllBackends, HealthyBackends}]
+    update_gauge(backends, lists:sum([B || {B, _H} <- Stat])),
+    update_gauge(unreachable_backends, lists:sum([B - H || {B, H} <- Stat])),
+    update_gauge(unreachable_vips, length([B || {B, 0} <- Stat, B =/= 0])),
+
+    VIPs0.
 
 -spec(agents(VIPs, Nodes, Tree) -> #{inet:ip4_address() => boolean()}
     when VIPs :: [{key(), [backend()]}],
@@ -476,14 +510,15 @@ agents(VIPs, Nodes, Tree) ->
         "L4LB unreachable agent nodes, size: ~p, ~p",
         [length(Unreachable), Unreachable])
     || Unreachable =/= [] ],
+    update_gauge(unreachable_nodes, length(Unreachable)),
     maps:from_list(Result).
 
--spec(healthy_backends([backend()], Agents) -> [backend()]
+-spec(healthy_backends([backend()], Agents) -> {non_neg_integer(), [backend()]}
     when Agents :: #{inet:ip4_address() => boolean()}).
 healthy_backends(BEs, Agents) ->
     case [BE || BE={IP, _BE} <- BEs, maps:get(IP, Agents)] of
-        [] -> BEs;
-        BEs0 -> BEs0
+        [] -> {0, BEs};
+        BEs0 -> {length(BEs0), BEs0}
     end.
 
 -spec(is_reachable(inet:ip4_address(), Nodes, Tree) -> boolean()
@@ -583,6 +618,7 @@ handle_netns_event(remove_netns, ToDel,
     Namespaces = dcos_l4lb_ipvs_mgr:remove_netns(IPVSMgr, ToDel),
     Result = ordsets:subtract(Prev, ordsets:from_list(Namespaces)),
     log_netns_diff(Result, Prev),
+    update_gauge(netns, ordsets:size(Result)),
     State#state{namespaces=Result};
 handle_netns_event(add_netns, ToAdd,
         #state{ipvs_mgr=IPVSMgr, route_mgr=RouteMgr, namespaces=Prev}=State) ->
@@ -590,6 +626,7 @@ handle_netns_event(add_netns, ToAdd,
     Namespaces = dcos_l4lb_ipvs_mgr:add_netns(IPVSMgr, ToAdd),
     Result = ordsets:union(ordsets:from_list(Namespaces), Prev),
     log_netns_diff(Result, Prev),
+    update_gauge(netns, ordsets:size(Result)),
     State#state{namespaces=Result};
 handle_netns_event(reconcile_netns, Namespaces, State) ->
     handle_netns_event(add_netns, Namespaces, State).
@@ -675,6 +712,84 @@ local_port_mappings() ->
     catch error:badarg ->
         #{}
     end.
+
+%%%===================================================================
+%%% Metrics functions
+%%%===================================================================
+
+-spec(update_counter(atom(), non_neg_integer()) -> ok).
+update_counter(Name, Value) ->
+    prometheus_counter:inc(l4lb, Name, [], Value).
+
+-spec(update_gauge(atom(), non_neg_integer()) -> ok).
+update_gauge(Name, Value) ->
+    prometheus_gauge:set(l4lb, Name, [], Value).
+
+-spec(update_summary(atom(), non_neg_integer()) -> ok).
+update_summary(Name, Value) ->
+    prometheus_summary:observe(l4lb, Name, [], Value).
+
+-spec(init_metrics() -> ok).
+init_metrics() ->
+    ok = dcos_l4lb_ipvs_mgr:init_metrics(),
+    ok = dcos_l4lb_route_mgr:init_metrics(),
+    ok = dcos_l4lb_ipset_mgr:init_metrics(),
+    init_vips_metrics(),
+    init_reconciled_metrics(),
+    init_unreachable_metrics().
+
+-spec(init_vips_metrics() -> ok).
+init_vips_metrics() ->
+    prometheus_gauge:new([
+        {registry, l4lb},
+        {name, vips},
+        {help, "The number of VIP labels."}]),
+    prometheus_gauge:new([
+        {registry, l4lb},
+        {name, backends},
+        {help, "The number of VIP backends."}]),
+    prometheus_gauge:new([
+        {registry, l4lb},
+        {name, netns},
+        {help, "The number of L4LB network namespaces."}]),
+    prometheus_summary:new([
+        {registry, l4lb},
+        {name, vips_duration_seconds},
+        {help, "The time spent processing VIPs configuration."}]).
+
+-spec(init_reconciled_metrics() -> ok).
+init_reconciled_metrics() ->
+    prometheus_counter:new([
+        {registry, l4lb},
+        {name, reconciled_routes_total},
+        {help, "Total number of reconciled routes."}]),
+    prometheus_counter:new([
+        {registry, l4lb},
+        {name, reconciled_ipvs_rules_total},
+        {help, "Total number of reconciled IPVS rules."}]),
+    prometheus_counter:new([
+        {registry, l4lb},
+        {name, reconciled_ipset_entries_total},
+        {help, "Total number of reconciled IPSet entries."}]).
+
+-spec(init_unreachable_metrics() -> ok).
+init_unreachable_metrics() ->
+    prometheus_gauge:new([
+        {registry, l4lb},
+        {name, unreachable_backends},
+        {help, "The number of unreachable VIP backends."}]),
+    prometheus_gauge:new([
+        {registry, l4lb},
+        {name, unreachable_vips},
+        {help, "The number of unreachable VIPs."}]),
+    prometheus_gauge:new([
+        {registry, l4lb},
+        {name, unreachable_nodes},
+        {help, "The number of unreachable nodes."}]).
+
+%%%===================================================================
+%%% Test functions
+%%%===================================================================
 
 -ifdef(TEST).
 

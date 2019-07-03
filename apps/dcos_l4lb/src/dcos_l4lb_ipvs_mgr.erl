@@ -23,7 +23,8 @@
          service_address/1,
          destination_address/2,
          add_netns/2,
-         remove_netns/2]).
+         remove_netns/2,
+         init_metrics/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3,
@@ -77,41 +78,41 @@
 
 -spec(get_services(Pid :: pid(), Namespace :: term()) -> [service()]).
 get_services(Pid, Namespace) ->
-    gen_server:call(Pid, {get_services, Namespace}).
+    call(Pid, {get_services, Namespace}).
 
 -spec(add_service(Pid :: pid(), IP :: inet:ip_address(), Port :: inet:port_number(),
                   Protocol :: protocol(), Namespace :: term()) -> ok | error).
 add_service(Pid, IP, Port, Protocol, Namespace) ->
-    gen_server:call(Pid, {add_service, IP, Port, Protocol, Namespace}).
+    call(Pid, {add_service, IP, Port, Protocol, Namespace}).
 
 -spec(remove_service(Pid :: pid(), IP :: inet:ip_address(),
                      Port :: inet:port_number(),
                      Protocol :: protocol(), Namespace :: term()) -> ok | error).
 remove_service(Pid, IP, Port, Protocol, Namespace) ->
-    gen_server:call(Pid, {remove_service, IP, Port, Protocol, Namespace}).
+    call(Pid, {remove_service, IP, Port, Protocol, Namespace}).
 
 -spec(get_dests(Pid :: pid(), Service :: service(), Namespace :: term()) -> [dest()]).
 get_dests(Pid, Service, Namespace) ->
-    gen_server:call(Pid, {get_dests, Service, Namespace}).
+    call(Pid, {get_dests, Service, Namespace}).
 
 -spec(remove_dest(Pid :: pid(), ServiceIP :: inet:ip_address(),
                   ServicePort :: inet:port_number(),
                   DestIP :: inet:ip_address(), DestPort :: inet:port_number(),
                   Protocol :: protocol(), Namespace :: term()) -> ok | error).
 remove_dest(Pid, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace) ->
-    gen_server:call(Pid, {remove_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace}).
+    call(Pid, {remove_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace}).
 
 -spec(add_dest(Pid :: pid(), ServiceIP :: inet:ip_address(), ServicePort :: inet:port_number(),
                DestIP :: inet:ip_address(), DestPort :: inet:port_number(),
                Protocol :: protocol(), Namespace :: term()) -> ok | error).
 add_dest(Pid, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace) ->
-    gen_server:call(Pid, {add_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace}).
+    call(Pid, {add_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace}).
 
 add_netns(Pid, UpdateValue) ->
-    gen_server:call(Pid, {add_netns, UpdateValue}).
+    call(Pid, {add_netns, UpdateValue}).
 
 remove_netns(Pid, UpdateValue) ->
-    gen_server:call(Pid, {remove_netns, UpdateValue}).
+    call(Pid, {remove_netns, UpdateValue}).
 
 %% @doc Starts the server
 -spec(start_link() ->
@@ -351,6 +352,27 @@ maybe_remove_netns(true, #netns{id = Id}, NetnsMap) ->
     maps:remove(Id, NetnsMap);
 maybe_remove_netns(false, _, NetnsMap) ->
     NetnsMap.
+
+%%%===================================================================
+%%% Metrics functions
+%%%===================================================================
+
+-spec(call(pid(), term()) -> term()).
+call(Pid, Request) ->
+    prometheus_summary:observe_duration(
+        l4lb, ipvs_duration_seconds, [],
+        fun () -> gen_server:call(Pid, Request) end).
+
+-spec(init_metrics() -> ok).
+init_metrics() ->
+    prometheus_summary:new([
+        {registry, l4lb},
+        {name, ipvs_duration_seconds},
+        {help, "The time spent processing IPVS configuration."}]).
+
+%%%===================================================================
+%%% Test functions
+%%%===================================================================
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").

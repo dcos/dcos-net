@@ -17,7 +17,8 @@
          add_routes/3,
          remove_routes/3,
          add_netns/2,
-         remove_netns/2]).
+         remove_netns/2,
+         init_metrics/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3,
@@ -42,23 +43,25 @@
     lo_iface :: non_neg_integer() | undefined
 }).
 
+
 %%%===================================================================
 %%% API
 %%%===================================================================
+
 get_routes(Pid, Namespace) ->
-    gen_server:call(Pid, {get_routes, Namespace}).
+    call(Pid, {get_routes, Namespace}).
 
 add_routes(Pid, Routes, Namespace) ->
-    gen_server:call(Pid, {add_routes, Routes, Namespace}).
+    call(Pid, {add_routes, Routes, Namespace}).
 
 remove_routes(Pid, Routes, Namespace) ->
-    gen_server:call(Pid, {remove_routes, Routes, Namespace}).
+    call(Pid, {remove_routes, Routes, Namespace}).
 
 add_netns(Pid, UpdateValue) ->
-    gen_server:call(Pid, {add_netns, UpdateValue}).
+    call(Pid, {add_netns, UpdateValue}).
 
 remove_netns(Pid, UpdateValue) ->
-    gen_server:call(Pid, {remove_netns, UpdateValue}).
+    call(Pid, {remove_netns, UpdateValue}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -229,3 +232,20 @@ rt_type(_, _) -> unicast.
 
 rt_flags(newroute) -> [create, replace];
 rt_flags(delroute) -> [].
+
+%%%===================================================================
+%%% Metrics functions
+%%%===================================================================
+
+-spec(call(pid(), term()) -> term()).
+call(Pid, Request) ->
+    prometheus_summary:observe_duration(
+        l4lb, routes_duration_seconds, [],
+        fun () -> gen_server:call(Pid, Request) end).
+
+-spec(init_metrics() -> ok).
+init_metrics() ->
+    prometheus_summary:new([
+        {registry, l4lb},
+        {name, routes_duration_seconds},
+        {help, "The time spent processing routes configuration."}]).
