@@ -3,7 +3,7 @@
 
 -include_lib("stdlib/include/ms_transform.hrl").
 
--export([start_link/0]).
+-export([start_link/0, init_metrics/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_continue/2,
@@ -14,13 +14,16 @@
 -define(KEY(Subnet), [navstar, overlay, Subnet]).
 
 -type subnet() :: {inet:ip_address(), 0..32}.
--type config() :: #{
-    OverlaySubnet :: subnet() =>
-        {VTEPIPPrefix :: subnet(), #{
+-type overlay_config() :: {
+        VTEPIPPrefix :: subnet(),
+        #{
             agent_ip => inet:ip_address(),
             mac => list(0..16#FF),
             subnet => subnet()
-        }}
+        }
+    }.
+-type config() :: #{
+        OverlaySubnet :: subnet() => OverlayConfig :: overlay_config()
     }.
 
 -record(state, {
@@ -55,17 +58,17 @@ handle_cast(_Request, State) ->
     {noreply, State}.
 
 handle_info({lashup_kv_event, Ref, Key},
-        #state{ref=Ref, config=Config}=State) ->
+    #state{ref = Ref, config = Config} = State) ->
     ok = lashup_kv:flush(Ref, Key),
     Value = lashup_kv:value(Key),
     {Subnet, Delta, Config0} = update_config(Key, Value, Config),
     ok = apply_configuration(#{Subnet => Delta}),
-    {noreply, State#state{config=Config0}};
+    {noreply, State#state{config = Config0}};
 handle_info({timeout, RRef0, reconcile},
-        #state{config=Config, reconcile_ref=RRef0}=State) ->
+    #state{config = Config, reconcile_ref = RRef0} = State) ->
     ok = apply_configuration(Config),
     RRef = start_reconcile_timer(),
-    {noreply, State#state{reconcile_ref=RRef}, hibernate};
+    {noreply, State#state{reconcile_ref = RRef}, hibernate};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -101,29 +104,61 @@ start_reconcile_timer() ->
 update_config(?KEY(Subnet), Value, Config) ->
     OldValue = maps:get(Subnet, Config, []),
     NewValue =
-        [ {IP, maps:from_list(
-             [{K, V} || {{K, riak_dt_lwwreg}, V} <- L])}
-        || {{IP, riak_dt_map}, L} <- Value ],
+        [{IP, maps:from_list(
+            [{K, V} || {{K, riak_dt_lwwreg}, V} <- L])}
+        || {{IP, riak_dt_map}, L} <- Value],
     {Delta, _} = dcos_net_utils:complement(NewValue, OldValue),
-    lists:foreach(fun ({VTEP, Data}) ->
-        Info = maps:map(fun (_K, V) -> to_str(V) end, Data#{vtep => VTEP}),
-        lager:notice(
-            "Overlay configuration was gossiped, subnet: ~s data: ~p",
-            [to_str(Subnet), Info])
-    end, Delta),
+    lists:foreach(
+        fun ({VTEP, Data}) ->
+                Info = maps:map(
+                           fun (_K, V) -> to_str(V) end,
+                           Data#{vtep => VTEP}),
+                lager:notice(
+                    "Overlay configuration was gossiped, subnet: ~s data: ~p",
+                    [to_str(Subnet), Info])
+        end, Delta),
     {Subnet, Delta, Config#{Subnet => NewValue}}.
 
 -spec(apply_configuration(config()) -> ok).
 apply_configuration(Config) ->
+    Begin = erlang:monotonic_time(),
+    Pid = dcos_overlay_configure:start_link(Config),
+    Response = wait_for_response(Config),
+    prometheus_summary:observe(
+        overlay, update_processing_duration_seconds, [],
+        erlang:monotonic_time() - Begin),
+    case Response of
+        ok ->
+            ok;
+        {error, Error} ->
+            prometheus_counter:inc(
+                overlay, update_failures_total, [], 1),
+            lager:error(
+                "Failed to apply overlay config: ~p due to ~p",
+                [Config, Error]),
+            exit(Error);
+        timeout ->
+            prometheus_counter:inc(
+                overlay, update_failures_total, [], 1),
+            lager:error(
+                "dcos_overlay_configure got stuck applying ~p",
+                [Config]),
+            exit(Pid, kill),
+            exit(overlay_configuration_timeout)
+    end.
+
+-spec(wait_for_response(config()) -> ok | timeout | {error, term()}).
+wait_for_response(Config) ->
     Timeout =
         application:get_env(dcos_overlay, apply_timeout, timer:minutes(5)),
-    Pid = dcos_overlay_configure:start_link(Config),
     receive
-        {dcos_overlay_configure, applied_config, _Config} ->
-            ok
-    after Timeout ->
-        lager:error("dcos_overlay_configure got stuck applying ~p", [Config]),
-        exit(Pid, kill)
+        {dcos_overlay_configure, applied_config, Config} ->
+            ok;
+        {dcos_overlay_configure, failed, Error, Config} ->
+            {error, Error}
+    after
+        Timeout ->
+            timeout
     end.
 
 -spec(to_str(term()) -> string()).
@@ -132,7 +167,23 @@ to_str({IP, Prefix}) ->
 to_str(Mac) when length(Mac) =:= 6 ->
     List = [[integer_to_list(A div 16, 16),
              integer_to_list(A rem 16, 16)]
-           || A <- Mac],
+            || A <- Mac],
     lists:flatten(string:join(List, ":"));
 to_str(IP) ->
     inet:ntoa(IP).
+
+%%%===================================================================
+%%% Metrics functions
+%%%===================================================================
+
+-spec(init_metrics() -> ok).
+init_metrics() ->
+    prometheus_summary:new([
+        {registry, overlay},
+        {name, update_processing_duration_seconds},
+        {duration_unit, seconds},
+        {help, "The time spent processing overlay updates."}]),
+    prometheus_counter:new([
+        {registry, overlay},
+        {name, update_failures_total},
+        {help, "Total number of overlay update failures."}]).
