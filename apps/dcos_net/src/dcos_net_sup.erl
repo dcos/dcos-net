@@ -12,10 +12,12 @@ init([]) ->
     dcos_net_mesos_listener:init_metrics(),
     dcos_net_logger_h:add_handler(),
     dcos_net_vm_metrics_collector:init(),
+    dcos_net_sysmon:init_metrics(),
     IsMaster = dcos_net_app:is_master(),
     MChildren = [?CHILD(dcos_net_mesos_listener) || IsMaster],
     {ok, {#{intensity => 10000, period => 1}, [
         ?CHILD(dcos_net_masters),
         ?CHILD(dcos_net_killer),
-        ?CHILD(dcos_net_node) | MChildren
+        ?CHILD(dcos_net_node),
+        ?CHILD(dcos_net_sysmon) | MChildren
     ]}}.
