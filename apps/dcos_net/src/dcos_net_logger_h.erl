@@ -7,11 +7,11 @@
     changing_config/3, filter_config/1]).
 
 %% Lager callbacks
--export([init/1, handle_call/2, handle_event/2]).
+-export([init/1, handle_call/2, handle_event/2, handle_info/2]).
 
 add_handler() ->
     prometheus_counter:new([
-        {name, erlang_vm_logger_events},
+        {name, erlang_vm_logger_events_total},
         {help, "Logger events count"},
         {labels, [level]}
     ]),
@@ -32,7 +32,7 @@ removing_handler(_Config) ->
     ok.
 
 log(#{level := Level}, _Config) ->
-    safe_inc(erlang_vm_logger_events, [Level], 1).
+    safe_inc(erlang_vm_logger_events_total, [Level], 1).
 
 filter_config(Config) ->
     Config.
@@ -53,9 +53,12 @@ handle_call(_Request, State) ->
 
 handle_event({log, Message}, State) ->
     Severity = lager_msg:severity(Message),
-    safe_inc(erlang_vm_logger_events, [Severity], 1),
+    safe_inc(erlang_vm_logger_events_total, [Severity], 1),
     {ok, State};
 handle_event(_Event, State) ->
+    {ok, State}.
+
+handle_info(_Info, State) ->
     {ok, State}.
 
 %%%===================================================================
