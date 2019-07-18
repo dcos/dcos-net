@@ -16,7 +16,8 @@
 
 start(_StartType, _StartArgs) ->
     dcos_net_app:load_config_files(dcos_overlay),
-    dcos_overlay_sup:start_link([application:get_env(dcos_overlay, enable_overlay, true)]).
+    dcos_overlay_sup:start_link(
+        [application:get_env(dcos_overlay, enable_overlay, true)]).
 
 stop(_State) ->
     ok.

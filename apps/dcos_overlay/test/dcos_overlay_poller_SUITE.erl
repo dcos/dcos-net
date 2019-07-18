@@ -29,6 +29,8 @@ all() ->
 
 init_per_testcase(TestCaseName, Config) ->
     ct:pal("Starting Testcase: ~p", [TestCaseName]),
+    ok = application:start(prometheus),
+    ok = dcos_overlay_poller:init_metrics(),
     meck:new(lashup_kv),
     meck:expect(lashup_kv, value, fun (_Key) ->
         []
@@ -47,6 +49,7 @@ init_per_testcase(TestCaseName, Config) ->
 
 end_per_testcase(_, _Config) ->
     meck:unload([httpc, lashup_kv]),
+    ok = application:stop(prometheus),
     os:cmd("ip link del vtep1024").
 
 unique_iprules_test(_Config) ->

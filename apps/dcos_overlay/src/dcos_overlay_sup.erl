@@ -15,9 +15,9 @@
 
 -define(SERVER, ?MODULE).
 
-
 %% API
 -export([]).
+
 %% Helper macro for declaring children of supervisor
 -define(CHILD(I, Type), {I, {I, start_link, []}, permanent, 5000, Type, [I]}).
 
@@ -41,6 +41,11 @@ get_children(true) ->
     ].
 
 init([Enabled]) ->
+    %% Configure metrics.
+    dcos_overlay_lashup_kv_listener:init_metrics(),
+    dcos_overlay_netlink:init_metrics(),
+    dcos_overlay_poller:init_metrics(),
+
     {ok, {#{
         strategy => rest_for_one,
         intensity => 10000,
