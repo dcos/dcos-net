@@ -9,7 +9,7 @@ start_link() ->
 
 init([]) ->
     dcos_l4lb_mgr:init_metrics(),
-    {ok, {#{strategy => rest_for_one},
+    {ok, {#{strategy => rest_for_one, intensity => 10000, period => 1},
         [?CHILD(dcos_l4lb_mgr) || dcos_l4lb_config:networking()] ++
         [?CHILD(dcos_l4lb_lashup_vip_listener)]
     }}.
