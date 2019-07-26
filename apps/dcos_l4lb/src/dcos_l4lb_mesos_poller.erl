@@ -227,27 +227,38 @@ push_vips(LocalVIPs) ->
 generate_ops(LocalVIPs, VIPs) ->
     AgentIP = dcos_net_dist:nodeip(),
     {Ops, LocalVIPs0} =
-        lists:foldl(
-            fun ({{Key, riak_dt_orswot} = LKey, Backends}, {Acc, LVIPs}) ->
-                {LBackends, LVIPs0} = mtake(Key, LVIPs, []),
-                case generate_backend_ops(AgentIP, LBackends, Backends) of
-                    [] -> {Acc, LVIPs0};
-                    Ops -> {[{update, LKey, {update, Ops}}|Acc], LVIPs0}
-                end
-            end, {[], LocalVIPs}, VIPs),
+        lists:foldl(fun (VIP, {Ops, LVIPs}) ->
+            generate_vip_ops(AgentIP, LVIPs, VIP, Ops)
+        end, {[], LocalVIPs}, VIPs),
     maps:fold(fun (Key, Backends, Acc) ->
         LKey = {Key, riak_dt_orswot},
         [{update, LKey, {add_all, Backends}} | Acc]
     end, Ops, LocalVIPs0).
 
--spec(generate_backend_ops(inet:ip4_address(), [backend()], [backend()]) ->
-    [riak_dt_orswot:orswot_op()]).
-generate_backend_ops(AgentIP, LocalBackends, Backends) ->
-    Backends0 = [B || {IP, _Backend} = B <- Backends, IP =:= AgentIP],
-    {Added, Removed} = dcos_net_utils:complement(LocalBackends, Backends0),
+-spec(generate_vip_ops(inet:ip4_address(), #{key() => [backend()]},
+    {lkey(), [backend()]}, [riak_dt_orswot:orswot_op()]) ->
+    {[riak_dt_map:map_field_update()], #{key() => [backend()]}}).
+generate_vip_ops(AgentIP, LocalVIPs, VIP, Ops) ->
+    {{Key, riak_dt_orswot} = LKey, Backends} = VIP,
+    {LocalBackends, LocalVIPs0} = mtake(Key, LocalVIPs, []),
+    {PrevLocalBackends, RemoteBackends} =
+        lists:partition(fun ({IP, _B}) -> IP =:= AgentIP end, Backends),
+    {Added, Removed} =
+        dcos_net_utils:complement(LocalBackends, PrevLocalBackends),
     AddOps = [{add_all, Added} || Added =/= []],
     RemoveOps = [{remove_all, Removed} || Removed =/= []],
-    AddOps ++ RemoveOps.
+    case {LocalBackends, RemoteBackends, AddOps ++ RemoveOps} of
+        {[], [], _BackendOps} ->
+            %% There is no single backend for the VIP in question,
+            %% hence the VIP is to be dropped completely in order
+            %% to avoid unbounded growth of the state and messages
+            %% that are exchanged among dcos-net nodes.
+            {[{remove, LKey} | Ops], LocalVIPs0};
+        {LocalBackends, RemoteBackends, []} ->
+            {Ops, LocalVIPs0};
+        {LocalBackends, RemoteBackends, BackendOps} ->
+            {[{update, LKey, {update, BackendOps}} | Ops], LocalVIPs0}
+    end.
 
 -spec(mtake(Key, Map, Value) -> {Value, Map}
     when Key :: term(), Value :: term(),
@@ -267,23 +278,30 @@ push_ops(Key, Ops) ->
 
 -spec(log_ops([riak_dt_map:map_field_update()]) -> ok).
 log_ops(Ops) ->
-    lists:foreach(fun ({update, {VIPKey, riak_dt_orswot}, VIPOps}) ->
-        log_ops(VIPKey, VIPOps)
-    end, Ops).
+    lists:foreach(
+        fun ({update, {VIPKey, riak_dt_orswot}, VIPOps}) ->
+                log_update_ops(VIPKey, VIPOps);
+            ({remove, {VIPKey, riak_dt_orswot}}) ->
+                log_remove_op(VIPKey)
+        end, Ops).
 
--spec(log_ops(key(), riak_dt_orswot:orswot_op()) -> ok).
-log_ops(Key, {update, Ops}) ->
+-spec(log_update_ops(key(), riak_dt_orswot:orswot_op()) -> ok).
+log_update_ops(Key, {update, Ops}) ->
     lists:foreach(fun (Op) ->
-        log_ops(Key, Op)
+        log_update_ops(Key, Op)
     end, Ops);
-log_ops(Key, {add_all, Backends}) ->
+log_update_ops(Key, {add_all, Backends}) ->
     lists:foreach(fun ({_AgentIP, Backend}) ->
         lager:notice("VIP updated: ~p, added: ~p", [Key, Backend])
     end, Backends);
-log_ops(Key, {remove_all, Backends}) ->
+log_update_ops(Key, {remove_all, Backends}) ->
     lists:foreach(fun ({_AgentIP, Backend}) ->
         lager:notice("VIP updated: ~p, removed: ~p", [Key, Backend])
     end, Backends).
+
+-spec(log_remove_op(key()) -> ok).
+log_remove_op(Key) ->
+    lager:notice("VIP removed: ~p", [Key]).
 
 %%%===================================================================
 %%% Test functions
