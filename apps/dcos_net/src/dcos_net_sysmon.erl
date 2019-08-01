@@ -49,14 +49,14 @@ handle_info({monitor, Obj, long_schedule, Info}, State) ->
     {noreply, State};
 handle_info({monitor, Pid, busy_port, Port}, State) ->
     lager:warning(
-        "sysmon busy_port: ~p, process: ~p, port: ~p",
-        [recon:port_info(Port), info(Pid), info(Port)]),
+        "sysmon busy_port: ~p, process: ~p",
+        [info(Port), info(Pid)]),
     prometheus_counter:inc(erlang_vm_sysmon_busy_port_total, 1),
     {noreply, State};
 handle_info({monitor, Pid, busy_dist_port, Port}, State) ->
     lager:warning(
-        "sysmon busy_dist_port: ~p, process: ~p, port: ~p",
-        [recon:port_info(Port), info(Pid), info(Port)]),
+        "sysmon busy_dist_port: ~p, process: ~p",
+        [info(Port), info(Pid)]),
     prometheus_counter:inc(erlang_vm_sysmon_busy_dist_port_total, 1),
     {noreply, State};
 handle_info(_Info, State) ->
