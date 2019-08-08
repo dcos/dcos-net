@@ -18,22 +18,28 @@ complement(ListA, ListB) ->
     complement(
         lists:sort(ListA),
         lists:sort(ListB),
-        [], []).
+        [], [], 0).
 
--spec(complement([A], [B], [A], [B]) -> {[A], [B]}
-    when A :: term(), B :: term()).
-complement([], ListB, Acc, Bcc) ->
+-spec(complement([A], [B], [A], [B], R) -> {[A], [B]}
+    when A :: term(), B :: term(), R :: non_neg_integer()).
+complement(ListA, ListB, Acc, Bcc, R) when R > 10000 ->
+    % NOTE: VM doesn't increment reductions in the complement function.
+    % Sysmon shows that on huge lists it regurarly blocks schedulers.
+    % We have to increment recuctions manually to force a context switch.
+    erlang:bump_reductions(1000),
+    complement(ListA, ListB, Acc, Bcc, 0);
+complement([], ListB, Acc, Bcc, _R) ->
     {Acc, ListB ++ Bcc};
-complement(ListA, [], Acc, Bcc) ->
+complement(ListA, [], Acc, Bcc, _R) ->
     {ListA ++ Acc, Bcc};
-complement(List, List, Acc, Bcc) ->
+complement(List, List, Acc, Bcc, _R) ->
     {Acc, Bcc};
-complement([A|ListA], [A|ListB], Acc, Bcc) ->
-    complement(ListA, ListB, Acc, Bcc);
-complement([A|_]=ListA, [B|ListB], Acc, Bcc) when A > B ->
-    complement(ListA, ListB, Acc, [B|Bcc]);
-complement([A|ListA], [B|_]=ListB, Acc, Bcc) when A < B ->
-    complement(ListA, ListB, [A|Acc], Bcc).
+complement([A|ListA], [A|ListB], Acc, Bcc, R) ->
+    complement(ListA, ListB, Acc, Bcc, R + 1);
+complement([A|_]=ListA, [B|ListB], Acc, Bcc, R) when A > B ->
+    complement(ListA, ListB, Acc, [B|Bcc], R + 1);
+complement([A|ListA], [B|_]=ListB, Acc, Bcc, R) when A < B ->
+    complement(ListA, ListB, [A|Acc], Bcc, R + 1).
 
 %%%===================================================================
 %%% System functions
