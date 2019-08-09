@@ -104,7 +104,7 @@ reply(Begin, {Fun, Args}, Response, Zone) ->
     after
         prometheus_histogram:observe(
             dns,
-            forwarder_requests_duration_seconds,
+            forwarder_request_duration_seconds,
             [Zone], erlang:monotonic_time() - Begin)
     end;
 reply(Begin, Fun, Response, Zone) ->
@@ -190,7 +190,7 @@ worker(Protocol, Pid, Upstream, Request) ->
                 [Protocol, UpstreamAddress, Reason], 1)
     after
         prometheus_histogram:observe(
-            dns, worker_requests_duration_seconds,
+            dns, worker_request_duration_seconds,
             [Protocol, UpstreamAddress],
             erlang:monotonic_time() - Begin)
     end.
@@ -486,7 +486,7 @@ init_metrics() ->
         {help, "Total number of DNS request failures."}]),
     prometheus_histogram:new([
         {registry, dns},
-        {name, forwarder_requests_duration_seconds},
+        {name, forwarder_request_duration_seconds},
         {labels, [zone]},
         {duration_unit, seconds},
         {buckets, [0.001, 0.005, 0.010, 0.050, 0.100, 0.500, 1.000, 5.000]},
@@ -498,7 +498,7 @@ init_metrics() ->
         {help, "Total number of worker failures processing DNS requests."}]),
     prometheus_histogram:new([
         {registry, dns},
-        {name, worker_requests_duration_seconds},
+        {name, worker_request_duration_seconds},
         {labels, [protocol, upstream_address]},
         {duration_unit, seconds},
         {buckets, [0.001, 0.005, 0.010, 0.050, 0.100, 0.500, 1.000, 5.000]},
