@@ -100,8 +100,9 @@ request(Method, Request, HTTPOptions, Opts) ->
     URI = mesos_uri(URIPath),
     Headers0 = maybe_add_token(Headers),
     Headers1 = add_useragent(Headers0),
+    Headers2 = add_basic_auth(Headers1),
     Request0 = setelement(1, Request, URI),
-    Request1 = setelement(2, Request0, Headers1),
+    Request1 = setelement(2, Request0, Headers2),
     httpc:request(Method, Request1, mesos_http_options(HTTPOptions), Opts).
 
 -spec(handle_response({ok, response()} | {error, Reason :: term()}) ->
@@ -125,6 +126,15 @@ maybe_add_token(Headers) ->
         AuthToken0 ->
             AuthToken1 = format_token(AuthToken0),
             [{"Authorization", AuthToken1}|Headers]
+    end.
+
+-spec(add_basic_auth(httpc:headers()) -> httpc:headers()).
+add_basic_auth(Headers) ->
+    case os:getenv("MESOS_BASIC_AUTH") of
+        false ->
+            Headers;
+        BasicAuth ->
+            [{"Authorization", BasicAuth}|Headers]
     end.
 
 -spec(add_useragent(httpc:headers()) -> httpc:headers()).
