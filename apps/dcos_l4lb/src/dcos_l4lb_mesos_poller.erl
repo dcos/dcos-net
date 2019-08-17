@@ -18,13 +18,14 @@
 
 %% gen_server callbacks
 -export([init/1, handle_call/3,
-    handle_cast/2, handle_info/2]).
+    handle_cast/2, handle_info/2, handle_continue/2]).
 
 -export_type([named_vip/0, vip/0, protocol/0,
     key/0, lkey/0, backend/0]).
 
 -record(state, {
-    timer_ref :: reference()
+    backoff :: backoff:backoff(),
+    timer_ref = make_ref() :: reference()
 }).
 
 -type task() :: dcos_net_mesos_listener:task().
@@ -51,47 +52,65 @@ start_link() ->
 %%%===================================================================
 
 init([]) ->
-    TRef = start_poll_timer(),
-    {ok, #state{timer_ref=TRef}}.
+    PollInterval = dcos_l4lb_config:agent_poll_interval(),
+    PollMaxInterval = dcos_l4lb_config:agent_poll_max_interval(),
+    Backoff0 = backoff:init(PollInterval, PollMaxInterval, self(), poll),
+    Backoff = backoff:type(Backoff0, jitter),
+    {ok, #state{backoff = Backoff}, {continue, poll}}.
 
-handle_call(_Request, _From, State) ->
+handle_call(Request, _From, State) ->
+    ?LOG_WARNING("Unexpected request: ~p", [Request]),
     {reply, ok, State}.
 
-handle_cast(_Request, State) ->
+handle_cast(Request, State) ->
+    ?LOG_WARNING("Unexpected request: ~p", [Request]),
     {noreply, State}.
 
-handle_info({timeout, TRef, poll}, #state{timer_ref=TRef}=State) ->
-    TRef0 = start_poll_timer(),
-    ok = handle_poll(),
-    {noreply, State#state{timer_ref=TRef0}, hibernate};
-handle_info(_Info, State) ->
+handle_info({timeout, TRef, poll}, #state{timer_ref = TRef} = State) ->
+    {noreply, State, {continue, poll}};
+handle_info(Info, State) ->
+    ?LOG_WARNING("Unexpected info: ~p", [Info]),
+    {noreply, State}.
+
+handle_continue(poll, #state{backoff = Backoff0} = State) ->
+    {Backoff, TimerRef} = handle_poll(Backoff0),
+    {noreply, State#state{backoff = Backoff, timer_ref = TimerRef}, hibernate};
+handle_continue(Request, State) ->
+    ?LOG_WARNING("Unexpected request: ~p", [Request]),
     {noreply, State}.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
--spec(start_poll_timer() -> reference()).
-start_poll_timer() ->
-    Timeout = dcos_l4lb_config:agent_poll_interval(),
-    erlang:start_timer(Timeout, self(), poll).
-
--spec(handle_poll() -> ok).
-handle_poll() ->
+-spec(handle_poll(backoff:backoff()) -> {backoff:backoff(), reference()}).
+handle_poll(Backoff) ->
     IsEnabled = dcos_l4lb_config:agent_polling_enabled(),
-    handle_poll(IsEnabled).
+    handle_poll(IsEnabled, Backoff).
 
--spec(handle_poll(boolean()) -> ok).
-handle_poll(false) ->
-    ok;
-handle_poll(true) ->
+-spec(handle_poll(boolean(), backoff:backoff()) ->
+    {backoff:backoff(), reference()}).
+handle_poll(false, Backoff0) ->
+    TimerRef = backoff:fire(Backoff0),
+    {_, Backoff} = backoff:succeed(Backoff0),
+    {Backoff, TimerRef};
+handle_poll(true, Backoff0) ->
     try dcos_net_mesos_listener:poll() of
         {error, Error} ->
-            ?LOG_WARNING("Unable to poll mesos agent: ~p", [Error]);
+            TimerRef = backoff:fire(Backoff0),
+            {_, Backoff} = backoff:fail(Backoff0),
+            ?LOG_WARNING("Unable to poll mesos agent: ~p", [Error]),
+            {Backoff, TimerRef};
         {ok, Tasks} ->
-            handle_poll_state(Tasks)
+            handle_poll_state(Tasks),
+            TimerRef = backoff:fire(Backoff0),
+            {_, Backoff} = backoff:succeed(Backoff0),
+            {Backoff, TimerRef}
     catch error:bad_agent_id ->
-        ?LOG_WARNING("Mesos agent is not ready")
+        ?LOG_WARNING("Mesos agent is not ready"),
+        TimerRef = backoff:fire(Backoff0),
+        {_, Backoff} = backoff:succeed(Backoff0),
+        {Backoff, TimerRef}
     end.
 
 -spec(handle_poll_state(#{task_id() => task()}) -> ok).

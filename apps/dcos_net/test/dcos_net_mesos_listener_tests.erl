@@ -145,7 +145,7 @@ unhealthy_test() ->
 %%% Basic Tests
 %%%===================================================================
 
-is_leader(_Tasts) ->
+is_leader(_Tasks) ->
     IsLeader = dcos_net_mesos_listener:is_leader(),
     ?assertEqual(true, IsLeader).
 
@@ -565,8 +565,8 @@ setup(FileName) ->
     {ok, _Pid} = dcos_net_mesos_listener:start_link(),
     stream_wait(),
 
-    {ok, _MonRef, Tasks} = dcos_net_mesos_listener:subscribe(),
-    Tasks.
+    {ok, MonRef} = dcos_net_mesos_listener:subscribe(),
+    wait_for_tasks(MonRef).
 
 cleanup(_Tasks) ->
     Pid = whereis(dcos_net_mesos_listener),
@@ -593,6 +593,13 @@ stream_wait() ->
             false
         end
     end, lists:seq(1, 20)).
+
+wait_for_tasks(Ref) ->
+    receive
+        {{tasks, Tasks}, Ref} -> Tasks
+    after 5000 ->
+        error(timeout)
+    end.
 
 %%%===================================================================
 %%% Mesos Operator API Server
