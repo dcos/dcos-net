@@ -37,6 +37,8 @@
     family
 }).
 -type state() :: #state{}.
+
+-include_lib("kernel/include/logger.hrl").
 -include_lib("gen_netlink/include/netlink.hrl").
 -include("dcos_l4lb.hrl").
 
@@ -221,7 +223,7 @@ handle_remove_service(IP, Port, Protocol, Namespace, State) ->
 
 -spec(handle_remove_service(Service :: service(), Namespace :: term(), State :: state()) -> ok | error).
 handle_remove_service(Service, Namespace, #state{netns = NetnsMap, family = Family}) ->
-    lager:info("Namespace: ~p, Removing Service: ~p", [Namespace, Service]),
+    ?LOG_INFO("Namespace: ~p, Removing Service: ~p", [Namespace, Service]),
     Pid = maps:get(Namespace, NetnsMap),
     case gen_netlink_client:request(Pid, Family, ipvs, [], #del_service{request = [{service, Service}]}) of
         {ok, _} -> ok;
@@ -242,7 +244,7 @@ handle_add_service(IP, Port, Protocol, Namespace, #state{netns = NetnsMap, famil
         {timeout, 0}
     ],
     Service1 = ip_to_address(IP) ++ Service0,
-    lager:info("Namespace: ~p, Adding Service: ~p", [Namespace, Service1]),
+    ?LOG_INFO("Namespace: ~p, Adding Service: ~p", [Namespace, Service1]),
     case gen_netlink_client:request(Pid, Family, ipvs, [], #new_service{request = [{service, Service1}]}) of
         {ok, _} -> ok;
         _ -> error
@@ -269,7 +271,7 @@ handle_add_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol,
 handle_add_dest(Pid, Service, IP, Port, Family) ->
     Base = [{fwd_method, ?IP_VS_CONN_F_MASQ}, {weight, 1}, {u_threshold, 0}, {l_threshold, 0}],
     Dest = [{port, Port}] ++ Base ++ ip_to_address(IP),
-    lager:info("Adding backend ~p to service ~p~n", [{IP, Port}, Service]),
+    ?LOG_INFO("Adding backend ~p to service ~p~n", [{IP, Port}, Service]),
     Msg = #new_dest{request = [{dest, Dest}, {service, Service}]},
     case gen_netlink_client:request(Pid, Family, ipvs, [], Msg) of
         {ok, _} -> ok;
@@ -287,7 +289,7 @@ handle_remove_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol, Namespace
 
 -spec(handle_remove_dest(Service :: service(), Dest :: dest(), Namespace :: term(), State :: state()) -> ok | error).
 handle_remove_dest(Service, Dest, Namespace, #state{netns = NetnsMap, family = Family}) ->
-    lager:info("Removing Dest ~p to service ~p~n", [Dest, Service]),
+    ?LOG_INFO("Removing Dest ~p to service ~p~n", [Dest, Service]),
     Pid = maps:get(Namespace, NetnsMap),
     Msg = #del_dest{request = [{dest, Dest}, {service, Service}]},
     case gen_netlink_client:request(Pid, Family, ipvs, [], Msg) of
@@ -338,7 +340,7 @@ maybe_add_netns(false, #netns{id = Id, ns = Namespace}, NetnsMap) ->
         {ok, Pid} ->
             maps:put(Id, Pid, NetnsMap);
         {error, Reason} ->
-            lager:error("Couldn't create route netlink client for ~p due to ~p", [Id, Reason]),
+            ?LOG_ERROR("Couldn't create route netlink client for ~p due to ~p", [Id, Reason]),
             NetnsMap
     end.
 

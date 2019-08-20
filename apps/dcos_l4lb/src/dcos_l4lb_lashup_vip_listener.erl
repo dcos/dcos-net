@@ -12,6 +12,7 @@
     handle_call/3, handle_cast/2, handle_info/2]).
 
 -include("dcos_l4lb.hrl").
+-include_lib("kernel/include/logger.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 
 -record(state, {
@@ -130,8 +131,8 @@ maybe_add_mapping(Family, FwName, Label) ->
         [{_Key, IP}] -> IP;
         [] ->
             IP = add_mapping(Family, FwName, Label),
-            lager:notice("VIP mapping was added: ~p -> ~p",
-                         [{Label, FwName}, IP]),
+            ?LOG_NOTICE("VIP mapping was added: ~p -> ~p",
+                        [{Label, FwName}, IP]),
             IP
     end.
 
@@ -166,8 +167,8 @@ cleanup_mappings(VIPs) ->
     lists:foreach(fun (IP) ->
         [{IP, {_Family, FwName, Label}=Key}] = ets:take(?IP2NAME, IP),
         ets:delete(?NAME2IP, Key),
-        lager:notice("VIP mapping was removed: ~p -> ~p",
-                    [{Label, FwName}, IP])
+        ?LOG_NOTICE("VIP mapping was removed: ~p -> ~p",
+                   [{Label, FwName}, IP])
     end, OldIPs).
 
 %%%===================================================================

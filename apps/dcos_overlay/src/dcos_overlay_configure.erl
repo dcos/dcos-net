@@ -7,6 +7,8 @@
     configure_overlay/2
 ]).
 
+-include_lib("kernel/include/logger.hrl").
+
 -type subnet() :: dcos_overlay_lashup_kv_listener:subnet().
 -type config() :: dcos_overlay_lashup_kv_listener:config().
 
@@ -40,13 +42,13 @@ apply_config(Config) ->
                 ok ->
                     ok;
                 {error, Error} ->
-                    lager:error(
+                    ?LOG_ERROR(
                         "Failed to apply overlay config ~p due to ~p",
                         [Config, Error]),
                     {error, Error}
             catch
                 Class:Error:StackTrace ->
-                    lager:error(
+                    ?LOG_ERROR(
                         "Failed to apply overlay config ~p due to ~p",
                         [Config, {Class, Error, StackTrace}]),
                     {error, {Class, Error}}
@@ -54,7 +56,7 @@ apply_config(Config) ->
                 dcos_overlay_netlink:stop(Netlink)
             end;
         {error, Error} ->
-            lager:error(
+            ?LOG_ERROR(
                 "Failed to apply overlay config ~p due to ~p",
                 [Config, Error]),
             {error, Error}
@@ -68,7 +70,7 @@ maybe_configure(Netlink, Config) ->
                     ok ->
                         ok;
                     {error, Error} ->
-                        lager:error(
+                        ?LOG_ERROR(
                             "Failed to configure overlay ~p due to ~p",
                             [Overlay, Error]),
                         {error, Error}
@@ -117,7 +119,7 @@ maybe_configure_overlay_entries(Pid, VTEPName, OverlayConfig0) ->
         ok ->
             maybe_configure_overlay_entries(Pid, VTEPName, OverlayConfig);
         {error, Error} ->
-            lager:error(
+            ?LOG_ERROR(
                 "Failed to configure overlay for VTEP IP "
                 "prefix: ~p; data: ~p; due to ~p",
                 [VTEPIPPrefix, Data, Error]),
@@ -162,7 +164,7 @@ configure_overlay_ipneigh_replace(Pid, Family, AgentIP, VTEPNameStr, VTEPIP,
                 Pid, Family, AgentIP, VTEPNameStr, VTEPIP, SubnetIP,
                 SubnetPrefixLen, MACTuple);
         {error, Error} ->
-            lager:error(
+            ?LOG_ERROR(
                 "Failed to create or replace a neighbor table entry for "
                 "family: ~p; VTEP IP: ~p; MAC: ~p, VTEP name: ~s due to ~p",
                 [Family, VTEPIP, MAC, VTEPNameStr, Error]),
@@ -181,7 +183,7 @@ configure_overlay_subnet_iproute_replace(Pid, Family, AgentIP, VTEPNameStr,
                 _Family -> ok
             end;
         {error, Error} ->
-            lager:error(
+            ?LOG_ERROR(
                 "Failed to create or replace a network route for "
                 "family: ~p; subnet IP: ~p/~p; VTEP IP: ~p due to ~p",
                 [Family, SubnetIP, SubnetPrefixLen, VTEPIP, Error]),
@@ -195,7 +197,7 @@ configure_overlay_bridge_fdb_replace(
         {ok, _} ->
             configure_overlay_agent_iproute_replace(Pid, Family, AgentIP, VTEPIP);
         {error, Error} ->
-            lager:error(
+            ?LOG_ERROR(
                 "Failed to create or replace a neighbor table entry for "
                 "agent IP: ~p; MAC: ~p, VTEP name: ~s due to ~p",
                 [AgentIP, MACTuple, VTEPNameStr, Error]),
@@ -207,7 +209,7 @@ configure_overlay_agent_iproute_replace(Pid, Family, AgentIP, VTEPIP) ->
              Pid, Family, AgentIP, 32, VTEPIP, 42) of
         {ok, _} -> ok;
         {error, Error} ->
-            lager:error(
+            ?LOG_ERROR(
                 "Failed to create or replace a network route for "
                 "family: ~p; agent IP: ~p; VTEP IP: ~p due to ~p",
                 [Family, AgentIP, VTEPIP, Error]),

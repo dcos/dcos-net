@@ -2,6 +2,8 @@
 -behaviour(supervisor).
 -export([start_link/1, init/1]).
 
+-include_lib("kernel/include/logger.hrl").
+
 -define(CHILD(Module), #{id => Module, start => {Module, start_link, []}}).
 -define(CHILD(Module, Custom), maps:merge(?CHILD(Module), Custom)).
 
@@ -103,7 +105,7 @@ record(ZoneName, #{type := cname, name := CName, value := DName}) ->
     CName1 = <<CName0/binary, ".", ZoneName/binary>>,
     dcos_dns:cname_record(CName1, to_binary(DName));
 record(_ZoneName, Record) ->
-    lager:error("Unexpected format: ~p", [Record]),
+    ?LOG_ERROR("Unexpected format: ~p", [Record]),
     init:stop(1),
     error(stop).
 

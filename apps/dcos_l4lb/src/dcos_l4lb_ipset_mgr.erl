@@ -1,5 +1,6 @@
 -module(dcos_l4lb_ipset_mgr).
 
+-include_lib("kernel/include/logger.hrl").
 -include_lib("gen_netlink/include/netlink.hrl").
 
 -behaviour(gen_server).
@@ -119,7 +120,7 @@ get_protocol_version(Pid) ->
                 {ok, ?IPSET_PROTOCOL} ->
                     {ok, ?IPSET_PROTOCOL};
                 {ok, Ver} ->
-                    lager:alert(
+                    ?LOG_ALERT(
                         "ipset protocol (ver. ~p) is not supported: ~p",
                         [?IPSET_PROTOCOL, Ver]),
                     {error, Ver};
@@ -128,12 +129,12 @@ get_protocol_version(Pid) ->
                          VerMin =< ?IPSET_PROTOCOL ->
                     {ok, ?IPSET_PROTOCOL};
                 {ok, Ver, VerMin} ->
-                    lager:alert(
+                    ?LOG_ALERT(
                         "ipset protocol (ver. ~p) is not supported: ~p, ~p",
                         [?IPSET_PROTOCOL, Ver, VerMin]),
                     {error, Ver};
                 error ->
-                    lager:alert("Failed to initialize ipset"),
+                    ?LOG_ALERT("Failed to initialize ipset"),
                     {error, no_version}
             end;
         {error, Error, _Response} ->

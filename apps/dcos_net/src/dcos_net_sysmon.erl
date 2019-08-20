@@ -10,6 +10,8 @@
 -export([init/1, handle_call/3,
     handle_cast/2, handle_info/2]).
 
+-include_lib("kernel/include/logger.hrl").
+
 -record(state, {}).
 
 -spec(start_link() -> {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
@@ -36,25 +38,25 @@ handle_cast(_Request, State) ->
 
 handle_info({monitor, Pid, long_gc, Info}, State) ->
     {timeout, Timeout} = lists:keyfind(timeout, 1, Info),
-    [ lager:warning("sysmon long_gc: ~p, process: ~p", [Info, info(Pid)])
+    [ ?LOG_WARNING("sysmon long_gc: ~p, process: ~p", [Info, info(Pid)])
     || Timeout > application:get_env(dcos_net, long_gc_threshold, 100) ],
     prometheus_histogram:observe(erlang_vm_sysmon_long_gc_seconds, Timeout),
     {noreply, State};
 handle_info({monitor, Obj, long_schedule, Info}, State) ->
     {timeout, Timeout} = lists:keyfind(timeout, 1, Info),
-    [ lager:warning("sysmon long_schedule: ~p, process: ~p", [Info, info(Obj)])
+    [ ?LOG_WARNING("sysmon long_schedule: ~p, process: ~p", [Info, info(Obj)])
     || Timeout > application:get_env(dcos_net, long_schedule_threshold, 100) ],
     prometheus_histogram:observe(
         erlang_vm_sysmon_long_schedule_seconds, Timeout),
     {noreply, State};
 handle_info({monitor, Pid, busy_port, Port}, State) ->
-    lager:warning(
+    ?LOG_WARNING(
         "sysmon busy_port: ~p, process: ~p",
         [info(Port), info(Pid)]),
     prometheus_counter:inc(erlang_vm_sysmon_busy_port_total, 1),
     {noreply, State};
 handle_info({monitor, Pid, busy_dist_port, Port}, State) ->
-    lager:warning(
+    ?LOG_WARNING(
         "sysmon busy_dist_port: ~p, process: ~p",
         [info(Port), info(Pid)]),
     prometheus_counter:inc(erlang_vm_sysmon_busy_dist_port_total, 1),

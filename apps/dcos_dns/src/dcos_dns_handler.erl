@@ -1,6 +1,7 @@
 -module(dcos_dns_handler).
 
 -include("dcos_dns.hrl").
+-include_lib("kernel/include/logger.hrl").
 -include_lib("dns/include/dns_records.hrl").
 
 -define(TIMEOUT, 5000).
@@ -30,7 +31,7 @@ start(Protocol, Request, Fun) ->
     case sidejob_supervisor:start_child(dcos_dns_handler_sj,
                                         ?MODULE, start_link, Args) of
         {error, Error} ->
-            lager:error("Unexpected error: ~p", [Error]),
+            ?LOG_ERROR("Unexpected error: ~p", [Error]),
             {error, Error};
         {ok, Pid} ->
             {ok, Pid}
@@ -182,7 +183,7 @@ worker(Protocol, Pid, Upstream, Request) ->
         {ok, Response} ->
             Pid ! {reply, self(), Response};
         {error, Reason} ->
-            lager:warning(
+            ?LOG_WARNING(
                 "DNS worker [~p] ~s failed with ~p",
                 [Protocol, UpstreamAddress, Reason]),
             prometheus_counter:inc(

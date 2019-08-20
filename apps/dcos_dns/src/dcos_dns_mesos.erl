@@ -2,6 +2,7 @@
 -behavior(gen_server).
 
 -include("dcos_dns.hrl").
+-include_lib("kernel/include/logger.hrl").
 -include_lib("dns/include/dns.hrl").
 
 %% API
@@ -73,7 +74,7 @@ handle_init(State) ->
             MRef = start_masters_timer(),
             {Tasks, Records, RecordsByName} = task_records(MTasks),
             ok = push_zone(?DCOS_DOMAIN, RecordsByName),
-            lager:notice("DC/OS DNS Sync: ~p records", [maps:size(Records)]),
+            ?LOG_NOTICE("DC/OS DNS Sync: ~p records", [maps:size(Records)]),
             #state{ref=Ref, tasks=Tasks, records=Records,
                    records_by_name=RecordsByName, masters_ref=MRef};
         {error, timeout} ->
@@ -180,7 +181,7 @@ task_agentip(_TaskId, #{name := Name,
     DName = format_name([Name, Fwrk, <<"agentip">>], ?DCOS_DOMAIN),
     dcos_dns:dns_records(DName, [AgentIP]);
 task_agentip(TaskId, Task) ->
-    lager:warning("Unexpected task ~p with ~p", [TaskId, Task]),
+    ?LOG_WARNING("Unexpected task ~p with ~p", [TaskId, Task]),
     [].
 
 -spec(task_containerip(task_id(), task()) -> [dns:dns_rr()]).
@@ -208,7 +209,7 @@ task_autoip(_TaskId, #{name := Name,
     DName = format_name([Name, Fwrk, <<"autoip">>], ?DCOS_DOMAIN),
     dcos_dns:dns_records(DName, [AgentIP]);
 task_autoip(TaskId, Task) ->
-    lager:warning("Unexpected task ~p with ~p", [TaskId, Task]),
+    ?LOG_WARNING("Unexpected task ~p with ~p", [TaskId, Task]),
     [].
 
 -spec(is_running(dcos_net_mesos_listener:task_state()) -> boolean()).
@@ -267,10 +268,10 @@ handle_masters(#state{masters=MRRs, records_by_name=RecordsByName}=State) ->
 
     {NewRRs, OldRRs} = dcos_net_utils:complement(MRRs0, MRRs),
     lists:foreach(fun (#dns_rr{data=#dns_rrdata_a{ip = IP}}) ->
-        lager:notice("DNS records: master ~p was added", [IP])
+        ?LOG_NOTICE("DNS records: master ~p was added", [IP])
     end, NewRRs),
     lists:foreach(fun (#dns_rr{data=#dns_rrdata_a{ip = IP}}) ->
-        lager:notice("DNS records: master ~p was removed", [IP])
+        ?LOG_NOTICE("DNS records: master ~p was removed", [IP])
     end, OldRRs),
 
     RecordsByName0 = add_to_index(NewRRs, RecordsByName),

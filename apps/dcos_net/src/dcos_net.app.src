@@ -7,7 +7,6 @@
         kernel,
         stdlib,
         lashup,
-        lager,
         ranch,
         inets,
         ssl,

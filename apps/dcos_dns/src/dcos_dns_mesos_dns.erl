@@ -2,6 +2,7 @@
 -behavior(gen_server).
 
 -include("dcos_dns.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -77,25 +78,25 @@ handle_poll(true, State) ->
     Timeout = application:get_env(dcos_dns, mesos_dns_timeout, 30000),
     receive
         {http, {Ref, {error, Error}}} ->
-            lager:warning("Failed to connect to mesos-dns: ~p", [Error]),
+            ?LOG_WARNING("Failed to connect to mesos-dns: ~p", [Error]),
             State;
         {http, {Ref, {{_HTTPVersion, 200, _StatusStr}, _Headers, Body}}} ->
             try get_records(Body) of Records ->
                 maybe_push_zone(Records, State)
             catch Class:Error:ST ->
-                lager:warning(
+                ?LOG_WARNING(
                     "Failed to process mesos-dns data [~p] ~p ~p",
                     [Class, Error, ST]),
                 State
             end;
         {http, {Ref, {{_HTTPVersion, Status, _StatusStr}, _Headers, Body}}} ->
-            lager:warning(
+            ?LOG_WARNING(
                 "Failed to get data from mesos-dns [~p] ~s",
                 [Status, Body]),
             State
     after Timeout ->
         ok = httpc:cancel_request(Ref),
-        lager:warning("mesos-dns connection timeout"),
+        ?LOG_WARNING("mesos-dns connection timeout"),
         State
     end.
 
@@ -175,5 +176,5 @@ maybe_push_zone(Records, #state{hash=Hash}=State) ->
 push_zone(RecordsByName, State) ->
     Counts = lists:map(fun length/1, maps:values(RecordsByName)),
     ok = dcos_dns_mesos:push_zone(?MESOS_DOMAIN, RecordsByName),
-    lager:notice("Mesos DNS Sync: ~p records", [lists:sum(Counts)]),
+    ?LOG_NOTICE("Mesos DNS Sync: ~p records", [lists:sum(Counts)]),
     State.

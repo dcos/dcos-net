@@ -11,6 +11,7 @@
 
 -behaviour(gen_statem).
 
+-include_lib("kernel/include/logger.hrl").
 -include_lib("inotify/include/inotify.hrl").
 -include("dcos_l4lb.hrl").
 
@@ -83,7 +84,7 @@ watch(cast, {[?DELETE], FileName, Ref}, #data{watchRef = Ref}) ->
   send_event(remove_netns, [#netns{id = FileName}]),
   keep_state_and_data;
 watch(EventType, EventContent, _) ->
-  lager:warning("Unknown event ~p with ~p", [EventType, EventContent]),
+  ?LOG_WARNING("Unknown event ~p with ~p", [EventType, EventContent]),
   keep_state_and_data.
 
 %%%===================================================================
@@ -115,7 +116,7 @@ read_files(CniDir) ->
       {ok, FileNames} ->
           lists:filtermap(fun(FileName) -> read_file(FileName, CniDir) end, FileNames);
       {error, Reason} ->
-          lager:info("Couldn't read cni dir ~p due to ~p", [CniDir, Reason]),
+          ?LOG_INFO("Couldn't read cni dir ~p due to ~p", [CniDir, Reason]),
           []
   end.
 
@@ -125,6 +126,6 @@ read_file(FileName, CniDir) ->
         {ok, Namespace} ->
             {true, #netns{id = FileName, ns = Namespace}};
         {error, Reason} ->
-            lager:warning("Couldn't read ~p, due to ~p", [AbsFileName, Reason]),
+            ?LOG_WARNING("Couldn't read ~p, due to ~p", [AbsFileName, Reason]),
             false
     end.

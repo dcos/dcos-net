@@ -553,6 +553,11 @@ setup(FileName) ->
             Pid ! stream_next
         end),
 
+    DefaultHandlerMounted = lists:member(default, logger:get_handler_ids()),
+    case DefaultHandlerMounted of
+        true -> ok = logger:remove_handler(default);
+        _ -> ok
+    end,
     ok = application:start(prometheus),
     dcos_net_mesos:init_metrics(),
     dcos_net_mesos_listener:init_metrics(),

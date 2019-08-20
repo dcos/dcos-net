@@ -1,5 +1,6 @@
 -module(dcos_dns).
 
+-include_lib("kernel/include/logger.hrl").
 -include("dcos_dns.hrl").
 -include_lib("dns/include/dns_records.hrl").
 -include_lib("erldns/include/erldns.hrl").
@@ -175,7 +176,7 @@ push_zone(ZoneName, Records) ->
             Zone = build_zone(ZoneName, RecordsByName),
             push_prepared_zone(Begin, ZoneName, Zone)
     catch error:Error ->
-        lager:error(
+        ?LOG_ERROR(
             "Failed to push DNS Zone \"~s\": ~p",
             [ZoneName, Error]),
         {error, Error}
@@ -201,7 +202,7 @@ push_prepared_zone(Begin, ZoneName, Zone) ->
         Duration = erlang:monotonic_time() - Begin,
         DurationMs = erlang:convert_time_unit(Duration, native, millisecond),
         #zone{record_count = RecordCount} = Zone,
-        lager:notice(
+        ?LOG_NOTICE(
             "DNS Zone ~s was updated (~p records, duration: ~pms)",
             [ZoneName0, RecordCount, DurationMs]),
         prometheus_summary:observe(
@@ -211,7 +212,7 @@ push_prepared_zone(Begin, ZoneName, Zone) ->
             dns, zone_records,
             [ZoneName0], RecordCount)
     catch error:Error ->
-        lager:error(
+        ?LOG_ERROR(
             "Failed to push DNS Zone \"~s\": ~p",
             [ZoneName, Error]),
         {error, Error}

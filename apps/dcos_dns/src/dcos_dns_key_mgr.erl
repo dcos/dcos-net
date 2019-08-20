@@ -1,6 +1,8 @@
 -module(dcos_dns_key_mgr).
 -behaviour(gen_server).
 
+-include_lib("kernel/include/logger.hrl").
+
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 -endif.
@@ -136,7 +138,7 @@ create_zk_key() ->
             erlzk:close(Pid),
             Ret;
         {error, Reason} ->
-            lager:error("Unable to connect to zookeeper: ~p", [Reason]),
+            ?LOG_ERROR("Unable to connect to zookeeper: ~p", [Reason]),
             false
     end.
 
@@ -148,7 +150,7 @@ create_zk_key(Pid) ->
         {error, no_node} ->
             do_create_zk_key(Pid);
         {error, closed} ->
-            lager:warning("Unable to get data from zk: closed"),
+            ?LOG_WARNING("Unable to get data from zk: closed"),
             false
     end.
 
@@ -161,7 +163,7 @@ do_create_zk_key(Pid) ->
         Else ->
             %% This can actually just be a side effect of a concurrency violation
             %% Rather than trying to handle all the cases, we just try again later
-            lager:warning("Unable to create zknode: ~p", [Else]),
+            ?LOG_WARNING("Unable to create zknode: ~p", [Else]),
             false
     end.
 
