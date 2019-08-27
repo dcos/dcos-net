@@ -50,11 +50,13 @@ handle_cast(Request, State) ->
     {noreply, State}.
 
 handle_info({{tasks, MTasks}, Ref}, #state{ref = Ref} = State0) ->
+    ok = dcos_net_mesos_listener:next(Ref),
     {noreply, handle_tasks(MTasks, State0)};
 handle_info({{task_updated, TaskId, Task}, Ref}, #state{ref = Ref} = State) ->
     ok = dcos_net_mesos_listener:next(Ref),
     {noreply, handle_task_updated(TaskId, Task, State)};
 handle_info({eos, Ref}, #state{ref = Ref} = State) ->
+    ok = dcos_net_mesos_listener:next(Ref),
     {noreply, reset_state(State)};
 handle_info({'DOWN', Ref, process, _Pid, Info}, #state{ref = Ref} = State) ->
     {stop, Info, State};
