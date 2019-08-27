@@ -213,7 +213,7 @@ do_reconcile(VIPs, State0 = #state{route_mgr = RouteMgr, ipset_mgr = IPSetMgr, n
     State1 = State0#state{last_received_vips = VIPs0, last_configured_vips = VIPs1, routes = Routes},
 
     Keys = ordsets:from_list([Key || {Key, _Backends} <- VIPs1]),
-    InstalledKeys = dcos_l4lb_ipset_mgr:get_entries(),
+    InstalledKeys = dcos_l4lb_ipset_mgr:get_entries(IPSetMgr),
     KeysToAdd = ordsets:subtract(Keys, InstalledKeys),
     KeysToDel = ordsets:subtract(InstalledKeys, Keys),
 
