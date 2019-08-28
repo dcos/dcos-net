@@ -363,6 +363,11 @@ setup(SetupFun) ->
     meck:expect(lashup_kv, value, fun value/1),
     meck:expect(lashup_kv, request_op, fun request_op/2),
 
+    DefaultHandlerMounted = lists:member(default, logger:get_handler_ids()),
+    case DefaultHandlerMounted of
+        true -> ok = logger:remove_handler(default);
+        _ -> ok
+    end,
     {ok, Apps} = ensure_all_started(erldns),
     Tasks = dcos_net_mesos_listener_tests:SetupFun(),
     {ok, Pid} = dcos_dns_mesos:start_link(),
@@ -385,7 +390,6 @@ cleanup({Tasks, Pid, Apps}) ->
     dcos_net_mesos_listener_tests:cleanup(Tasks).
 
 ensure_all_started(erldns) ->
-    ok = application:load(lager),
     ok = application:load(erldns),
 
     {ok, Cwd} = file:get_cwd(),

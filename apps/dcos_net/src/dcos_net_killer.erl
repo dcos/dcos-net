@@ -10,6 +10,8 @@
 -export([init/1, handle_call/3, handle_cast/2,
     handle_info/2]).
 
+-include_lib("kernel/include/logger.hrl").
+
 -record(state, {
     ref :: reference(),
     reductions :: #{pid() => non_neg_integer()}
@@ -81,7 +83,7 @@ maybe_kill(Pid, MFA) ->
 
 -spec(kill(pid(), mfa()) -> true | no_return()).
 kill(Pid, MFA) ->
-    lager:alert("~p got stuck: ~p", [Pid, MFA]),
+    ?LOG_ALERT("~p got stuck: ~p", [Pid, MFA]),
     case application:get_env(dcos_net, killer, disabled) of
         disabled -> true;
         enabled -> exit(Pid, kill);

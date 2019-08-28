@@ -1,6 +1,7 @@
 -module(dcos_overlay_lashup_kv_listener).
 -behaviour(gen_server).
 
+-include_lib("kernel/include/logger.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 
 -export([start_link/0, init_metrics/0]).
@@ -113,7 +114,7 @@ update_config(?KEY(Subnet), Value, Config) ->
                 Info = maps:map(
                            fun (_K, V) -> to_str(V) end,
                            Data#{vtep => VTEP}),
-                lager:notice(
+                ?LOG_NOTICE(
                     "Overlay configuration was gossiped, subnet: ~s data: ~p",
                     [to_str(Subnet), Info])
         end, Delta),
@@ -133,14 +134,14 @@ apply_configuration(Config) ->
         {error, Error} ->
             prometheus_counter:inc(
                 overlay, update_failures_total, [], 1),
-            lager:error(
+            ?LOG_ERROR(
                 "Failed to apply overlay config: ~p due to ~p",
                 [Config, Error]),
             exit(Error);
         timeout ->
             prometheus_counter:inc(
                 overlay, update_failures_total, [], 1),
-            lager:error(
+            ?LOG_ERROR(
                 "dcos_overlay_configure got stuck applying ~p",
                 [Config]),
             exit(Pid, kill),

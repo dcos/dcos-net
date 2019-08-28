@@ -1,6 +1,7 @@
 -module(dcos_l4lb_mgr).
 -behaviour(gen_server).
 
+-include_lib("kernel/include/logger.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 -include("dcos_l4lb_lashup.hrl").
 -include("dcos_l4lb.hrl").
@@ -506,7 +507,7 @@ agents(VIPs, Nodes, Tree) ->
     AgentIPs0 = lists:usort(AgentIPs),
     Result = [{IP, is_reachable(IP, Nodes, Tree)} || IP <- AgentIPs0],
     Unreachable = [IP || {IP, false} <- Result],
-    [ lager:warning(
+    [ ?LOG_WARNING(
         "L4LB unreachable agent nodes, size: ~p, ~p",
         [length(Unreachable), Unreachable])
     || Unreachable =/= [] ],
@@ -556,17 +557,17 @@ log_vips_diff(Diff) ->
 -spec(log_vips_diff(binary(), diff_vips()) -> ok).
 log_vips_diff(Prefix, {ToAdd, ToDel, ToMod}) ->
     lists:foreach(fun ({{Proto, VIP, Port}, Backends}) ->
-        lager:notice(
+        ?LOG_NOTICE(
             "~sVIP service was added: ~p://~s:~p, Backends: ~p",
             [Prefix, Proto, inet:ntoa(VIP), Port, Backends])
     end, ToAdd),
     lists:foreach(fun ({{Proto, VIP, Port}, _BEs}) ->
-        lager:notice(
+        ?LOG_NOTICE(
             "~sVIP service was deleted: ~p://~s:~p",
             [Prefix, Proto, inet:ntoa(VIP), Port])
     end, ToDel),
     lists:foreach(fun ({{Proto, VIP, Port}, Added, Removed}) ->
-        lager:notice(
+        ?LOG_NOTICE(
             "~sVIP service was modified: ~p://~s:~p, Backends: +~p -~p",
             [Prefix, Proto, inet:ntoa(VIP), Port, Added, Removed])
     end, ToMod).
@@ -577,10 +578,10 @@ log_routes_diff(Diff) ->
 
 -spec(log_routes_diff(binary(), diff_routes()) -> ok).
 log_routes_diff(Prefix, {ToAdd, ToDel}) ->
-    [ lager:notice(
+    [ ?LOG_NOTICE(
         "~sVIP routes were added, routes: ~p, IPs: ~p",
         [Prefix, length(ToAdd), ToAdd]) || ToAdd =/= [] ],
-    [ lager:notice(
+    [ ?LOG_NOTICE(
         "~sVIP routes were removed, routes: ~p, IPs: ~p",
         [Prefix, length(ToDel), ToDel]) || ToDel =/= [] ],
     ok.
@@ -588,10 +589,10 @@ log_routes_diff(Prefix, {ToAdd, ToDel}) ->
 -spec(log_ipset_diff(diff_keys()) -> ok).
 log_ipset_diff({ToAdd, ToDel}) ->
     IPSetEnabled = dcos_l4lb_config:ipset_enabled(),
-    [ lager:notice(
+    [ ?LOG_NOTICE(
         "VIPs were added to ipset: ~p",
         [ToAdd]) || ToAdd =/= [], IPSetEnabled ],
-    [ lager:notice(
+    [ ?LOG_NOTICE(
         "VIPs were removed from ipset: ~p",
         [ToDel]) || ToDel =/= [], IPSetEnabled ],
     ok.
@@ -604,7 +605,7 @@ log_netns_diff(Namespaces, _PrevNamespaces) ->
     <<", ", Str/binary>> =
         << <<", ", (namespace2bin(Namespace))/binary>>
         || Namespace <- Namespaces>>,
-    lager:notice("L4LB network namespaces: ~s", [Str]).
+    ?LOG_NOTICE("L4LB network namespaces: ~s", [Str]).
 
 %%%===================================================================
 %%% Network Namespace functions

@@ -17,6 +17,7 @@
 -define(REFRESH_INTERVAL, 10000).
 -define(REFRESH_MESSAGE,  refresh).
 
+-include_lib("kernel/include/logger.hrl").
 -include("dcos_dns.hrl").
 
 %% State record.
@@ -50,11 +51,11 @@ handle_call(?REFRESH_MESSAGE, _FRom, State0) ->
     {noreply, State1} = handle_info(?REFRESH_MESSAGE, State0),
     {reply, ok, State1};
 handle_call(Msg, _From, State) ->
-    lager:warning("Unhandled messages: ~p", [Msg]),
+    ?LOG_WARNING("Unhandled messages: ~p", [Msg]),
     {reply, ok, State}.
 
 handle_cast(Msg, State) ->
-    lager:warning("Unhandled messages: ~p", [Msg]),
+    ?LOG_WARNING("Unhandled messages: ~p", [Msg]),
     {noreply, State}.
 
 handle_info(init, State) ->
@@ -72,7 +73,7 @@ handle_info(?REFRESH_MESSAGE, State) ->
     timer:send_after(?REFRESH_INTERVAL, ?REFRESH_MESSAGE),
     {noreply, State};
 handle_info(Msg, State) ->
-    lager:warning("Unhandled messages: ~p", [Msg]),
+    ?LOG_WARNING("Unhandled messages: ~p", [Msg]),
     {noreply, State}.
 
 terminate(_Reason, _State) ->

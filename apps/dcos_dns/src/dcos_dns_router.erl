@@ -3,6 +3,7 @@
 
 -include("dcos_dns.hrl").
 
+-include_lib("kernel/include/logger.hrl").
 -include_lib("dns/include/dns_terms.hrl").
 -include_lib("dns/include/dns_records.hrl").
 
@@ -21,7 +22,7 @@ upstreams_from_questions(Questions) ->
         [Upstream] ->
             Upstream;
         _Upstreams ->
-            lager:warning(
+            ?LOG_WARNING(
                 "DNS queries with mixed-upstream questions are not supported, "
                 "the query will be resolved through internal DNS server: ~p",
                 [Questions]),

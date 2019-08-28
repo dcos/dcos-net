@@ -9,6 +9,7 @@
 -module(dcos_dns_config).
 -author("Sargun Dhillon <sargun@mesosphere.com>").
 
+-include_lib("kernel/include/logger.hrl").
 -include("dcos_dns.hrl").
 
 %% API
@@ -59,12 +60,12 @@ bind_ips() ->
         V ->
             V
     end,
-    lager:debug("found ips: ~p", [IPs0]),
+    ?LOG_DEBUG("found ips: ~p", [IPs0]),
     BlacklistedIPs = application:get_env(?APP, bind_ip_blacklist, []),
-    lager:debug("blacklist ips: ~p", [BlacklistedIPs]),
+    ?LOG_DEBUG("blacklist ips: ~p", [BlacklistedIPs]),
     IPs1 = [ IP || IP <- IPs0, not lists:member(IP, BlacklistedIPs) ],
     IPs2 = lists:usort(IPs1),
-    lager:debug("final ips: ~p", [IPs2]),
+    ?LOG_DEBUG("final ips: ~p", [IPs2]),
     IPs2.
 
 -spec(get_ips() -> [inet:ip_address()]).

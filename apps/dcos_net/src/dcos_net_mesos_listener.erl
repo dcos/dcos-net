@@ -17,6 +17,8 @@
 
 -export_type([task_id/0, task/0, task_state/0, task_port/0, runtime/0]).
 
+-include_lib("kernel/include/logger.hrl").
+
 -opaque task_id() :: {framework_id(), binary()}.
 -type framework_id() :: binary().
 -type task() :: #{
@@ -121,13 +123,13 @@ handle_info({http, {Ref, stream, Data}}, #state{ref=Ref}=State) ->
     handle_stream(Data, State);
 handle_info({timeout, TRef, httpc}, #state{ref=Ref, timeout_ref=TRef}=State) ->
     ok = httpc:cancel_request(Ref),
-    lager:error("Mesos timeout"),
+    ?LOG_ERROR("Mesos timeout"),
     {stop, {httpc, timeout}, State};
 handle_info({http, {Ref, {error, Error}}}, #state{ref=Ref}=State) ->
-    lager:error("Mesos connection terminated: ~p", [Error]),
+    ?LOG_ERROR("Mesos connection terminated: ~p", [Error]),
     {stop, Error, State};
 handle_info({'DOWN', _MonRef, process, Pid, Info}, #state{pid=Pid}=State) ->
-    lager:error("Mesos http client: ~p", [Info]),
+    ?LOG_ERROR("Mesos http client: ~p", [Info]),
     {stop, Info, State};
 handle_info({'DOWN', _MonRef, process, Pid, _Info}, State) ->
     {noreply, handle_unsubscribe(Pid, State)};
@@ -174,7 +176,7 @@ handle(#{<<"type">> := <<"AGENT_REMOVED">>} = Obj, State) ->
     Obj0 = mget(<<"agent_removed">>, Obj),
     handle_agent_removed(Obj0, State);
 handle(Obj, State) ->
-    lager:error("Unexpected mesos message type: ~p", [Obj]),
+    ?LOG_ERROR("Unexpected mesos message type: ~p", [Obj]),
     State.
 
 -spec(handle_subscribed(jiffy:object(), state()) -> state()).
@@ -241,14 +243,14 @@ handle_framework_updated(Obj, #state{frameworks=F}=State) ->
     FObj = mget(<<"framework">>, Obj),
     #{id := Id, name := Name} = handle_framework(FObj),
 
-    lager:notice("Framework ~s added, ~s", [Id, Name]),
+    ?LOG_NOTICE("Framework ~s added, ~s", [Id, Name]),
     State0 = State#state{frameworks=mput(Id, Name, F)},
     handle_waiting_tasks(framework, Id, Name, State0).
 
 -spec(handle_framework_removed(jiffy:object(), state()) -> state()).
 handle_framework_removed(Obj, #state{frameworks=F}=State) ->
     #{id := Id} = handle_framework(Obj),
-    lager:notice("Framework ~s removed", [Id]),
+    ?LOG_NOTICE("Framework ~s removed", [Id]),
     State#state{frameworks=mremove(Id, F)}.
 
 -spec(handle_framework(jiffy:object()) ->
@@ -263,14 +265,14 @@ handle_framework(Obj) ->
 handle_agent_added(Obj, #state{agents=A}=State) ->
     AObj = mget(<<"agent">>, Obj),
     #{id := Id, ip := IP} = handle_agent(AObj),
-    lager:notice("Agent ~s added, ~p", [Id, IP]),
+    ?LOG_NOTICE("Agent ~s added, ~p", [Id, IP]),
     State0 = State#state{agents=mput(Id, IP, A)},
     handle_waiting_tasks(agent_ip, Id, IP, State0).
 
 -spec(handle_agent_removed(jiffy:object(), state()) -> state()).
 handle_agent_removed(Obj, #state{agents=A}=State) ->
     Id = mget([<<"agent_id">>, <<"value">>], Obj),
-    lager:notice("Agent ~s removed", [Id]),
+    ?LOG_NOTICE("Agent ~s removed", [Id]),
     State#state{agents=mremove(Id, A)}.
 
 -spec(handle_agent(jiffy:object()) ->
@@ -295,12 +297,12 @@ handle_agent_hostname(Hostname) ->
         {ok, [IP]} ->
             IP;
         {ok, [IP|IPs]} ->
-            lager:warning(
+            ?LOG_WARNING(
                 "Unexpected agent ips were ignored, ~s -> ~p: ~p",
                 [Hostname, IP, IPs]),
             IP;
         {error, Error} ->
-            lager:error(
+            ?LOG_ERROR(
                 "Couldn't resolve agent hostname, ~s: ~p",
                 [Hostname, Error]),
             undefined
@@ -326,7 +328,7 @@ handle_task(TaskId, TaskObj, Task,
         Task0 = task(TaskObj, Task, A, F),
         add_task(TaskId, Task, Task0, State)
     catch Class:Error ->
-        lager:error(
+        ?LOG_ERROR(
             "Unexpected error with ~s [~p]: ~p",
             [id2bin(TaskId), Class, Error]),
         State
@@ -357,7 +359,7 @@ task(TaskObj, Task, Agents, Frameworks) ->
         try Fun(TaskObj, Acc) of Value ->
             mput(Key, Value, Acc)
         catch Class:Error ->
-            lager:error(
+            ?LOG_ERROR(
                 "Unexpected error with ~p [~p]: ~p",
                 [Key, Class, Error]),
             Acc
@@ -370,7 +372,7 @@ add_task(TaskId, TaskPrev, TaskNew, State) ->
         MDiff when map_size(MDiff) =:= 0 ->
             State;
         MDiff ->
-            lager:notice("Task ~s updated with ~p", [id2bin(TaskId), MDiff]),
+            ?LOG_NOTICE("Task ~s updated with ~p", [id2bin(TaskId), MDiff]),
             add_task(TaskId, TaskNew, State)
     end.
 
@@ -405,7 +407,7 @@ handle_waiting_tasks(Key, Id, Value, #state{waiting_tasks=TW}=State) ->
         Task = maps:get(TaskId, T),
         case maps:get(Key, Task) of
             {id, Id} ->
-                lager:notice(
+                ?LOG_NOTICE(
                     "Task ~s updated with ~p",
                     [id2bin(TaskId), #{Key => Value}]),
                 add_task(TaskId, mput(Key, Value, Task), Acc);
@@ -469,7 +471,7 @@ handle_task_runtime(TaskObj, Task) ->
         <<"DOCKER">> ->
             docker;
         Type ->
-            lager:warning("Received an unknown container runtime
+            ?LOG_WARNING("Received an unknown container runtime
                 ~p for task ~p", [Type, Task]),
             unknown
     catch error:{badkey, _} ->
@@ -536,7 +538,7 @@ handle_protocol(Obj) ->
         <<"tcp">> -> tcp;
         <<"udp">> -> udp;
         _Protocol ->
-            lager:warning("Unexpected protocol type: ~p", [Obj]),
+            ?LOG_WARNING("Unexpected protocol type: ~p", [Obj]),
             throw(unexpected_protocol)
     end.
 
@@ -799,7 +801,7 @@ from_state_imp(TaskObjs, Agents, Frameworks) ->
             Task ->
                 mput(TaskId, Task, Acc)
         catch Class:Error ->
-            lager:error(
+            ?LOG_ERROR(
                 "Unexpected error with ~s [~p]: ~p",
                 [id2bin(TaskId), Class, Error]),
             Acc
@@ -941,7 +943,7 @@ handle_init(State0) ->
             erlang:send_after(Timeout, self(), init),
             State0;
         {error, Error} ->
-            lager:error("Couldn't connect to mesos: ~p", [Error]),
+            ?LOG_ERROR("Couldn't connect to mesos: ~p", [Error]),
             prometheus_counter:inc(mesos_listener, failures_total, [], 1),
             erlang:send_after(Timeout, self(), init),
             State0
@@ -978,7 +980,7 @@ handle_stream(Data, State) ->
             handle_metrics(State1),
             handle_stream(<<>>, State1);
         {error, Error} ->
-            lager:error("Mesos protocol error: ~p", [Error]),
+            ?LOG_ERROR("Mesos protocol error: ~p", [Error]),
             {stop, Error, State}
     end.
 

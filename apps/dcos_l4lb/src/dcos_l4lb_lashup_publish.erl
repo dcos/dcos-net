@@ -23,6 +23,7 @@
 -record(state, {lashup_gm_monitor = erlang:error() :: reference()}).
 
 -include("dcos_l4lb_lashup.hrl").
+-include_lib("kernel/include/logger.hrl").
 -include_lib("kernel/include/inet.hrl").
 
 %%%===================================================================
@@ -67,7 +68,7 @@ check_metadata() ->
   NodeMetadata = lashup_kv:value(?NODEMETADATA_KEY),
   NodeMetadataDict = orddict:from_list(NodeMetadata),
   Ops = check_ip(NodeMetadataDict, []),
-  lager:debug("Performing ops: ~p", [Ops]),
+  ?LOG_DEBUG("Performing ops: ~p", [Ops]),
   perform_ops(Ops).
 
 perform_ops([]) ->

@@ -2,7 +2,9 @@
 
 -module(dcos_l4lb_mesos_poller).
 -behaviour(gen_server).
+
 -include("dcos_l4lb.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -85,11 +87,11 @@ handle_poll(false) ->
 handle_poll(true) ->
     try dcos_net_mesos_listener:poll() of
         {error, Error} ->
-            lager:warning("Unable to poll mesos agent: ~p", [Error]);
+            ?LOG_WARNING("Unable to poll mesos agent: ~p", [Error]);
         {ok, Tasks} ->
             handle_poll_state(Tasks)
     catch error:bad_agent_id ->
-        lager:warning("Mesos agent is not ready")
+        ?LOG_WARNING("Mesos agent is not ready")
     end.
 
 -spec(handle_poll_state(#{task_id() => task()}) -> ok).
@@ -159,8 +161,8 @@ collect_vips(TaskId, Task, Port, VIPLabel, VIPs) ->
         Value = backends(Key, Task, Port),
         mappend(Key, Value, VIPs)
     catch Class:Error ->
-        lager:error("Unexpected error with ~s [~p]: ~p",
-                    [TaskId, Class, Error]),
+        ?LOG_ERROR("Unexpected error with ~s [~p]: ~p",
+                   [TaskId, Class, Error]),
         VIPs
     end.
 
@@ -293,16 +295,16 @@ log_update_ops(Key, {update, Ops}) ->
     end, Ops);
 log_update_ops(Key, {add_all, Backends}) ->
     lists:foreach(fun ({_AgentIP, Backend}) ->
-        lager:notice("VIP updated: ~p, added: ~p", [Key, Backend])
+        ?LOG_NOTICE("VIP updated: ~p, added: ~p", [Key, Backend])
     end, Backends);
 log_update_ops(Key, {remove_all, Backends}) ->
     lists:foreach(fun ({_AgentIP, Backend}) ->
-        lager:notice("VIP updated: ~p, removed: ~p", [Key, Backend])
+        ?LOG_NOTICE("VIP updated: ~p, removed: ~p", [Key, Backend])
     end, Backends).
 
 -spec(log_remove_op(key()) -> ok).
 log_remove_op(Key) ->
-    lager:notice("VIP removed: ~p", [Key]).
+    ?LOG_NOTICE("VIP removed: ~p", [Key]).
 
 
 %%%===================================================================

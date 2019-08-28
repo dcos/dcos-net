@@ -9,7 +9,6 @@
         lashup,
         jsx,
         cowboy,
-        lager,
         lashup,
         prometheus
     ]},
