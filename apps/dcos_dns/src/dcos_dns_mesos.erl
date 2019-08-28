@@ -13,17 +13,17 @@
 
 %% gen_server callbacks
 -export([init/1, handle_call/3,
-    handle_cast/2, handle_info/2]).
+    handle_cast/2, handle_info/2, handle_continue/2]).
 
 -type task() :: dcos_net_mesos_listener:task().
 -type task_id() :: dcos_net_mesos_listener:task_id().
 
 -record(state, {
-    ref :: reference(),
-    tasks :: #{task_id() => [dns:dns_rr()]},
-    records :: #{dns:dns_rr() => pos_integer()},
-    records_by_name :: #{dns:dname() => [dns:dns_rr()]},
-    masters_ref :: reference(),
+    ref = undefined :: undefined | reference(),
+    tasks = #{} :: #{task_id() => [dns:dns_rr()]},
+    records = #{} :: #{dns:dns_rr() => pos_integer()},
+    records_by_name = #{} :: #{dns:dname() => [dns:dns_rr()]},
+    masters_ref = undefined :: undefined | reference(),
     masters = [] :: [dns:dns_rr()],
     ops_ref = undefined :: reference() | undefined,
     ops = [] :: [riak_dt_orswot:orswot_op()]
@@ -39,67 +39,89 @@ start_link() ->
 %%%===================================================================
 
 init([]) ->
-    self() ! init,
-    {ok, []}.
+    {ok, #state{}, {continue, init}}.
 
-handle_call(_Request, _From, State) ->
+handle_call(Request, _From, State) ->
+    ?LOG_WARNING("Unexpected request: ~p", [Request]),
     {reply, ok, State}.
 
-handle_cast(_Request, State) ->
+handle_cast(Request, State) ->
+    ?LOG_WARNING("Unexpected request: ~p", [Request]),
     {noreply, State}.
 
-handle_info(init, State) ->
-    State0 = handle_init(State),
-    {noreply, State0};
-handle_info({task_updated, Ref, TaskId, Task}, #state{ref=Ref}=State) ->
+handle_info({{tasks, MTasks}, Ref}, #state{ref = Ref} = State0) ->
+    {noreply, handle_tasks(MTasks, State0)};
+handle_info({{task_updated, TaskId, Task}, Ref}, #state{ref = Ref} = State) ->
     ok = dcos_net_mesos_listener:next(Ref),
     {noreply, handle_task_updated(TaskId, Task, State)};
-handle_info({'DOWN', Ref, process, _Pid, Info}, #state{ref=Ref}=State) ->
+handle_info({eos, Ref}, #state{ref = Ref} = State) ->
+    {noreply, reset_state(State)};
+handle_info({'DOWN', Ref, process, _Pid, Info}, #state{ref = Ref} = State) ->
     {stop, Info, State};
-handle_info({timeout, Ref, masters}, #state{masters_ref=Ref}=State) ->
+handle_info({timeout, _Ref, init}, #state{ref = undefined} = State) ->
+    {noreply, State, {continue, init}};
+handle_info({timeout, Ref, masters}, #state{masters_ref = Ref} = State) ->
     {noreply, handle_masters(State)};
-handle_info({timeout, Ref, push_ops}, #state{ops_ref=Ref}=State) ->
+handle_info({timeout, Ref, push_ops}, #state{ops_ref = Ref} = State) ->
     {noreply, handle_push_ops(State), hibernate};
-handle_info(_Info, State) ->
+handle_info(Info, State) ->
+    ?LOG_WARNING("Unexpected info: ~p", [Info]),
+    {noreply, State}.
+
+handle_continue(init, State) ->
+    case dcos_net_mesos_listener:subscribe() of
+        {ok, Ref} ->
+            {noreply, State#state{ref = Ref}};
+        {error, timeout} ->
+            exit(timeout);
+        {error, subscribed} ->
+            exit(subscribed);
+        {error, _Error} ->
+            timer:sleep(100),
+            {noreply, State, {continue, init}}
+    end;
+handle_continue(Request, State) ->
+    ?LOG_WARNING("Unexpected request: ~p", [Request]),
     {noreply, State}.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
--spec(handle_init(State) -> State when State :: state() | []).
-handle_init(State) ->
-    case dcos_net_mesos_listener:subscribe() of
-        {ok, Ref, MTasks} ->
-            MRef = start_masters_timer(),
-            {Tasks, Records, RecordsByName} = task_records(MTasks),
-            ok = push_zone(?DCOS_DOMAIN, RecordsByName),
-            ?LOG_NOTICE("DC/OS DNS Sync: ~p records", [maps:size(Records)]),
-            #state{ref=Ref, tasks=Tasks, records=Records,
-                   records_by_name=RecordsByName, masters_ref=MRef};
-        {error, timeout} ->
-            exit(timeout);
-        {error, subscribed} ->
-            exit(subscribed);
-        {error, _Error} ->
-            self() ! init,
-            timer:sleep(100),
-            State
-    end.
+-spec(reset_state(state()) -> state()).
+reset_state(#state{ref = Ref, masters_ref = MastersRef, ops_ref = OpsRef}) ->
+    case MastersRef of
+        undefined -> ok;
+        _ -> erlang:cancel_timer(MastersRef)
+    end,
+    case OpsRef of
+        undefined-> ok;
+        _ -> erlang:cancel_timer(OpsRef)
+    end,
+    #state{ref = Ref}.
 
 %%%===================================================================
 %%% Tasks functions
 %%%===================================================================
 
+-spec(handle_tasks(#{task_id => task()}, state()) -> state()).
+handle_tasks(MTasks, State) ->
+    MRef = start_masters_timer(),
+    {Tasks, Records, RecordsByName} = task_records(MTasks),
+    ok = push_zone(?DCOS_DOMAIN, RecordsByName),
+    ?LOG_NOTICE("DC/OS DNS Sync: ~p records", [maps:size(Records)]),
+    State#state{tasks = Tasks, records = Records,
+        records_by_name = RecordsByName, masters_ref = MRef}.
+
 -spec(handle_task_updated(task_id(), task(), state()) -> state()).
 handle_task_updated(TaskId, Task, #state{
-        tasks=Tasks, records=Records,
-        records_by_name=RecordsByName}=State) ->
+        tasks = Tasks, records = Records,
+        records_by_name = RecordsByName} = State) ->
     {Tasks0, Records0, RecordsByName0, Ops} =
         task_updated(TaskId, Task, Tasks, Records, RecordsByName),
     handle_push_ops(Ops, State#state{
-        tasks=Tasks0, records=Records0,
-        records_by_name=RecordsByName0}).
+        tasks = Tasks0, records = Records0,
+        records_by_name = RecordsByName0}).
 
 -spec(task_updated(task_id(), task(), Tasks, Records, RecordsByName) ->
     {Tasks, Records, RecordsByName, Ops}
@@ -244,7 +266,7 @@ update_record(Record, Incr, RRs) ->
 add_to_index([], RecordsByName) ->
     RecordsByName;
 add_to_index(RRs, RecordsByName) ->
-    lists:foldl(fun (#dns_rr{name=Name}=RR, Acc) ->
+    lists:foldl(fun (#dns_rr{name = Name} = RR, Acc) ->
         Acc#{Name => [RR | maps:get(Name, Acc, [])]}
     end, RecordsByName, RRs).
 
@@ -253,7 +275,7 @@ add_to_index(RRs, RecordsByName) ->
 remove_from_index([], RecordsByName) ->
     RecordsByName;
 remove_from_index(RRs, RecordsByName) ->
-    lists:foldl(fun (#dns_rr{name=Name}=RR, Acc) ->
+    lists:foldl(fun (#dns_rr{name = Name} = RR, Acc) ->
         Acc#{Name => lists:delete(RR, maps:get(Name, Acc))}
     end, RecordsByName, RRs).
 
@@ -262,24 +284,25 @@ remove_from_index(RRs, RecordsByName) ->
 %%%===================================================================
 
 -spec(handle_masters(state()) -> state()).
-handle_masters(#state{masters=MRRs, records_by_name=RecordsByName}=State) ->
+handle_masters(#state{
+    masters = MRRs, records_by_name = RecordsByName} = State) ->
     ZoneName = ?DCOS_DOMAIN,
     MRRs0 = master_records(ZoneName),
 
     {NewRRs, OldRRs} = dcos_net_utils:complement(MRRs0, MRRs),
-    lists:foreach(fun (#dns_rr{data=#dns_rrdata_a{ip = IP}}) ->
+    lists:foreach(fun (#dns_rr{data = #dns_rrdata_a{ip = IP}}) ->
         ?LOG_NOTICE("DNS records: master ~p was added", [IP])
     end, NewRRs),
-    lists:foreach(fun (#dns_rr{data=#dns_rrdata_a{ip = IP}}) ->
+    lists:foreach(fun (#dns_rr{data = #dns_rrdata_a{ip = IP}}) ->
         ?LOG_NOTICE("DNS records: master ~p was removed", [IP])
     end, OldRRs),
 
     RecordsByName0 = add_to_index(NewRRs, RecordsByName),
     RecordsByName1 = remove_from_index(OldRRs, RecordsByName0),
     State0 = State#state{
-        masters=MRRs0,
-        masters_ref=start_masters_timer(),
-        records_by_name=RecordsByName1},
+        masters = MRRs0,
+        masters_ref = start_masters_timer(),
+        records_by_name = RecordsByName1},
     Ops = [{add_all, NewRRs} || NewRRs =/= []] ++
           [{remove_all, OldRRs} || OldRRs =/= []],
     handle_push_ops(Ops, State0).
@@ -370,21 +393,21 @@ push_set_ops(ZoneName, Ops) ->
 -spec(handle_push_ops([riak_dt_orswot:orswot_op()], state()) -> state()).
 handle_push_ops([], State) ->
     State;
-handle_push_ops(Ops, #state{ops=[], ops_ref=undefined}=State) ->
+handle_push_ops(Ops, #state{ops = [], ops_ref = undefined}=State) ->
     % NOTE: push data to lashup 1 time per second
     State0 = handle_push_zone_ops(Ops, State),
-    State0#state{ops_ref=start_push_ops_timer()};
-handle_push_ops(Ops, #state{ops=Buf}=State) ->
-    State#state{ops=Buf ++ Ops}.
+    State0#state{ops_ref = start_push_ops_timer()};
+handle_push_ops(Ops, #state{ops = Buf} = State) ->
+    State#state{ops = Buf ++ Ops}.
 
 -spec(handle_push_ops(state()) -> state()).
-handle_push_ops(#state{ops=Ops}=State) ->
+handle_push_ops(#state{ops = Ops} = State) ->
     State0 = handle_push_zone_ops(Ops, State),
-    State0#state{ops=[], ops_ref=undefined}.
+    State0#state{ops = [], ops_ref = undefined}.
 
 -spec(handle_push_zone_ops([Op], state()) -> state()
     when Op :: riak_dt_orswot:orswot_op()).
-handle_push_zone_ops(Ops, #state{records_by_name=RecordsByName}=State) ->
+handle_push_zone_ops(Ops, #state{records_by_name = RecordsByName} = State) ->
     ZoneName = ?DCOS_DOMAIN,
     Modes = dcos_dns_config:store_modes(),
     [ ok = push_lww_zone(ZoneName, RecordsByName) || lists:member(lww, Modes) ],

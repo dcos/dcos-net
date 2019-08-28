@@ -18,6 +18,7 @@
     handle_call/3,
     handle_cast/2,
     handle_info/2,
+    handle_continue/2,
     terminate/2,
     code_change/3]).
 
@@ -26,8 +27,10 @@
 -endif.
 
 -define(SERVER, ?MODULE).
--define(MIN_POLL_PERIOD, 30000). %% 30 secs
+
+-define(MIN_POLL_PERIOD, 30000).  %% 30  secs
 -define(MAX_POLL_PERIOD, 120000). %% 120 secs
+
 -define(VXLAN_UDP_PORT, 64000).
 
 -include_lib("kernel/include/logger.hrl").
@@ -39,7 +42,8 @@
 -record(state, {
     known_overlays = ordsets:new(),
     ip = undefined :: undefined | inet:ip4_address(),
-    poll_period = ?MIN_POLL_PERIOD :: integer(),
+    backoff :: non_neg_integer(),
+    timer_ref = make_ref() :: reference(),
     netlink :: undefined | pid()
 }).
 
@@ -64,8 +68,7 @@ start_link() ->
 %%%===================================================================
 
 init([]) ->
-    self() ! init,
-    {ok, []}.
+    {ok, [], {continue, init}}.
 
 handle_call(ip, _From, State = #state{ip = IP}) ->
     {reply, IP, State};
@@ -75,38 +78,22 @@ handle_call(Request, _From, State) ->
     ?LOG_WARNING("Unexpected request: ~p", [Request]),
     {reply, ok, State}.
 
-handle_cast(_Request, State) ->
+handle_cast(Request, State) ->
+    ?LOG_WARNING("Unexpected request: ~p", [Request]),
     {noreply, State}.
 
-handle_info(init, []) ->
-    {ok, Pid} = gen_netlink_client:start_link(?NETLINK_ROUTE),
-    timer:send_after(0, poll),
-    {noreply, #state{netlink = Pid}};
-handle_info(poll, #state{netlink = Pid, poll_period = PollPeriod,
-                         known_overlays = Overlays} = State0) ->
-    State =
-        case poll() of
-            {error, _Error} ->
-                State0#state{poll_period = ?MIN_POLL_PERIOD};
-            {ok, AgentInfo} ->
-                NewPollPeriod = update_poll_period(PollPeriod),
-                case parse_response(Pid, Overlays, AgentInfo) of
-                    {ok, NewOverlays, AgentIP} ->
-                        State0#state{
-                            ip = AgentIP,
-                            poll_period = NewPollPeriod,
-                            known_overlays = NewOverlays};
-                    {error, Error} ->
-                        ?LOG_ERROR(
-                            "Failed to parse overlay response due to ~p",
-                            [Error]),
-                        exit(Error)
-                end
-        end,
-    timer:send_after(State#state.poll_period, poll),
-    {noreply, State, hibernate};
-handle_info(_Info, State) ->
+handle_info({timeout, TimerRef, poll}, #state{timer_ref = TimerRef} = State) ->
+    {noreply, State, {continue, poll}};
+handle_info(Info, State) ->
+    ?LOG_WARNING("Unexpected info: ~p", [Info]),
     {noreply, State}.
+
+handle_continue(init, []) ->
+    State = handle_init(),
+    {noreply, State, {continue, poll}};
+handle_continue(poll, State0) ->
+    State = handle_poll(State0),
+    {noreply, State, hibernate}.
 
 terminate(_Reason, _State) ->
     ok.
@@ -118,10 +105,39 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-update_poll_period(OldPollPeriod) when OldPollPeriod*2 =< ?MAX_POLL_PERIOD ->
-    OldPollPeriod * 2;
-update_poll_period(_) ->
-    ?MAX_POLL_PERIOD.
+handle_init() ->
+    {ok, Pid} = gen_netlink_client:start_link(?NETLINK_ROUTE),
+    #state{backoff = ?MIN_POLL_PERIOD, netlink = Pid}.
+
+handle_poll(#state{netlink = Pid, known_overlays = Overlays,
+        backoff = Backoff0} = State) ->
+    case poll() of
+        {error, _Error} ->
+            TimerRef = backoff_fire(Backoff0),
+            Backoff = backoff_reset(),
+            State#state{backoff = Backoff, timer_ref = TimerRef};
+        {ok, AgentInfo} ->
+            case parse_response(Pid, Overlays, AgentInfo) of
+                {ok, NewOverlays, AgentIP} ->
+                    TimerRef = backoff_fire(Backoff0),
+                    Backoff = backoff_bump(Backoff0),
+                    State#state{ip = AgentIP, backoff = Backoff,
+                        known_overlays = NewOverlays, timer_ref = TimerRef};
+                {error, Error} ->
+                    ?LOG_ERROR(
+                      "Failed to parse overlay response due to ~p", [Error]),
+                    exit(Error)
+            end
+    end.
+
+backoff_reset() ->
+    ?MIN_POLL_PERIOD.
+
+backoff_bump(Backoff) ->
+    min(?MAX_POLL_PERIOD, 2 * Backoff).
+
+backoff_fire(Backoff) ->
+    erlang:start_timer(Backoff, self(), poll).
 
 poll() ->
     Begin = erlang:monotonic_time(),

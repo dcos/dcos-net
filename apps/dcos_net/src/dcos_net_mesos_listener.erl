@@ -13,7 +13,7 @@
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2,
-    handle_info/2, terminate/2, code_change/3]).
+    handle_info/2, handle_continue/2, terminate/2, code_change/3]).
 
 -export_type([task_id/0, task/0, task_state/0, task_port/0, runtime/0]).
 
@@ -42,8 +42,8 @@
 }.
 
 -record(state, {
-    pid :: pid(),
-    ref :: reference(),
+    pid = undefined :: pid() | undefined,
+    ref = undefined :: reference() | undefined,
     size = undefined :: pos_integer() | undefined,
     buf = <<>> :: binary(),
     timeout = 15000 :: timeout(),
@@ -52,7 +52,9 @@
     frameworks = #{} :: #{framework_id() => binary()},
     tasks = #{} :: #{task_id() => task()},
     waiting_tasks = #{} :: #{task_id() => true},
-    subs = undefined :: #{pid() => reference()} | undefined
+    subs = #{} :: #{pid() => reference()},
+    backoff :: backoff:backoff(),
+    backoff_timer_ref = make_ref() :: reference()
 }).
 
 -type state() :: #state{}.
@@ -61,8 +63,7 @@
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
--spec(subscribe() -> {ok, MonRef, Tasks} | {error, atom()}
-    when MonRef :: reference(), Tasks :: #{task_id() => task()}).
+-spec(subscribe() -> {ok, MonRef} | {error, atom()} when MonRef :: reference()).
 subscribe() ->
     case whereis(?MODULE) of
         undefined ->
@@ -102,39 +103,48 @@ from_state(Data) ->
 %%%===================================================================
 
 init([]) ->
-    self() ! init,
-    {ok, []}.
+    Interval = application:get_env(dcos_net, mesos_reconnect_timeout, 2000),
+    MaxInterval = application:get_env(
+        dcos_net, mesos_reconnect_max_timeout, 30000),
+    Backoff0 = backoff:init(Interval, MaxInterval, self(), init),
+    Backoff = backoff:type(Backoff0, jitter),
+    {ok, #state{backoff = Backoff}, {continue, init}}.
 
 handle_call(is_leader, _From, State) ->
     % There is no state if it's not connected
     IsLeader = is_record(State, state),
     {reply, IsLeader, State};
-handle_call(_Request, _From, State) ->
+handle_call(Request, _From, State) ->
+    ?LOG_WARNING("Unexpected request: ~p", [Request]),
     {noreply, State}.
 
-handle_cast(_Request, State) ->
+handle_cast(Request, State) ->
+    ?LOG_WARNING("Unexpected request: ~p", [Request]),
     {noreply, State}.
 
-handle_info(init, []) ->
-    {noreply, handle_init([])};
+handle_info({timeout, TRef, init}, #state{backoff_timer_ref = TRef} = State) ->
+    {noreply, State, {continue, init}};
 handle_info({subscribe, Pid, Ref}, State) ->
     {noreply, handle_subscribe(Pid, Ref, State)};
-handle_info({http, {Ref, stream, Data}}, #state{ref=Ref}=State) ->
+handle_info({http, {Ref, stream, Data}}, #state{ref = Ref} = State) ->
     handle_stream(Data, State);
-handle_info({timeout, TRef, httpc}, #state{ref=Ref, timeout_ref=TRef}=State) ->
-    ok = httpc:cancel_request(Ref),
+handle_info({timeout, TRef, httpc}, #state{timeout_ref = TRef} = State) ->
     ?LOG_ERROR("Mesos timeout"),
-    {stop, {httpc, timeout}, State};
-handle_info({http, {Ref, {error, Error}}}, #state{ref=Ref}=State) ->
+    {noreply, handle_failure(State), {continue, init}};
+handle_info({http, {Ref, {error, Error}}}, #state{ref = Ref} = State) ->
     ?LOG_ERROR("Mesos connection terminated: ~p", [Error]),
-    {stop, Error, State};
-handle_info({'DOWN', _MonRef, process, Pid, Info}, #state{pid=Pid}=State) ->
-    ?LOG_ERROR("Mesos http client: ~p", [Info]),
-    {stop, Info, State};
+    {noreply, handle_failure(State), {continue, init}};
+handle_info({'DOWN', _MonRef, process, Pid, Info}, #state{pid = Pid} = State) ->
+    ?LOG_ERROR("Mesos http client is down: ~p", [Info]),
+    {noreply, handle_failure(State), {continue, init}};
 handle_info({'DOWN', _MonRef, process, Pid, _Info}, State) ->
     {noreply, handle_unsubscribe(Pid, State)};
-handle_info(_Info, State) ->
+handle_info(Info, State) ->
+    ?LOG_WARNING("Unexpected info: ~p", [Info]),
     {noreply, State}.
+
+handle_continue(init, State) ->
+    {noreply, handle_init(State)}.
 
 terminate(normal, _State) ->
     ok;
@@ -143,6 +153,55 @@ terminate(_Reason, _State) ->
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+-spec(reset_state(state()) -> state()).
+reset_state(#state{ref = Ref, timeout_ref = TRef, subs = Subscribers,
+        backoff = Backoff, backoff_timer_ref = BackoffTRef}) ->
+    case Ref of
+        undefined -> ok;
+        _ -> ok = httpc:cancel_request(Ref)
+    end,
+    _ = erlang:cancel_timer(TRef),
+    _ = erlang:cancel_timer(BackoffTRef),
+    #state{subs = Subscribers, backoff = Backoff}.
+
+-spec(handle_init(state()) -> state()).
+handle_init(#state{backoff = Backoff0} = State0) ->
+    case start_stream(State0) of
+        {ok, State} ->
+            {_, Backoff} = backoff:succeed(Backoff0),
+            State#state{backoff = Backoff};
+        {error, redirect} ->
+            % It's not a leader, don't log anything
+            {_, Backoff} = backoff:succeed(Backoff0),
+            BackoffTimerRef = backoff:fire(Backoff),
+            State0#state{backoff = Backoff,
+                 backoff_timer_ref = BackoffTimerRef};
+        {error, Error} ->
+            ?LOG_ERROR("Couldn't connect to mesos: ~p", [Error]),
+            prometheus_counter:inc(mesos_listener, failures_total, [], 1),
+            BackoffTimerRef = backoff:fire(Backoff0),
+            {_, Backoff} = backoff:fail(Backoff0),
+            State0#state{backoff = Backoff, backoff_timer_ref = BackoffTimerRef}
+    end.
+
+-spec(handle_failure(state()) -> state()).
+handle_failure(#state{backoff = Backoff0, subs = Subscribers} = State) ->
+    %% eos stands for End Of Stream
+    ok = notify_subscribers(Subscribers, eos),
+    BackoffTimerRef = backoff:fire(Backoff0),
+    {_, Backoff} = backoff:fail(Backoff0),
+    reset_state(State#state{backoff = Backoff,
+        backoff_timer_ref = BackoffTimerRef}).
+
+-spec(notify_subscribers(#{pid() => reference()}, term()) -> ok).
+notify_subscribers(Subscribers, Message) ->
+    lists:foreach(fun({Pid, MonRef}) -> Pid ! {Message, MonRef} end,
+        maps:to_list(Subscribers)).
 
 %%%===================================================================
 %%% Handle functions
@@ -180,12 +239,13 @@ handle(Obj, State) ->
     State.
 
 -spec(handle_subscribed(jiffy:object(), state()) -> state()).
-handle_subscribed(Obj, State) ->
+handle_subscribed(Obj, #state{subs = Subscribers} = State) ->
     Timeout = mget(<<"heartbeat_interval_seconds">>, Obj),
     Timeout0 = erlang:trunc(Timeout * 1000),
     State0 = State#state{timeout = Timeout0},
 
     MState = mget(<<"get_state">>, Obj, #{}),
+    ok = notify_subscribers(Subscribers, {tasks, #{}}),
 
     Agents = mget([<<"get_agents">>, <<"agents">>], MState, []),
     State1 =
@@ -199,22 +259,20 @@ handle_subscribed(Obj, State) ->
             handle_framework_updated(#{<<"framework">> => Framework}, St)
         end, State1, Frameworks),
 
-    Tasks = mget([<<"get_tasks">>, <<"tasks">>], MState, []),
+    MTasks = mget([<<"get_tasks">>, <<"tasks">>], MState, []),
     State3 =
         lists:foldl(fun (Task, St) ->
             handle_task(Task, St)
-        end, State2, Tasks),
-
-    State4 = State3#state{subs=#{}},
+        end, State2, MTasks),
 
     erlang:garbage_collect(),
-    handle_heartbeat(State4).
+    handle_heartbeat(State3).
 
 -spec(handle_heartbeat(state()) -> state()).
-handle_heartbeat(#state{timeout = T, timeout_ref = TRef}=State) ->
+handle_heartbeat(#state{timeout = T, timeout_ref = TRef} = State) ->
     TRef0 = erlang:start_timer(3 * T, self(), httpc),
     _ = erlang:cancel_timer(TRef),
-    State#state{timeout_ref=TRef0}.
+    State#state{timeout_ref = TRef0}.
 
 -spec(handle_task_added(jiffy:object(), state()) -> state()).
 handle_task_added(Obj, State) ->
@@ -239,19 +297,18 @@ handle_framework_added(Obj, State) ->
     handle_framework_updated(Obj, State).
 
 -spec(handle_framework_updated(jiffy:object(), state()) -> state()).
-handle_framework_updated(Obj, #state{frameworks=F}=State) ->
+handle_framework_updated(Obj, #state{frameworks = F} = State) ->
     FObj = mget(<<"framework">>, Obj),
     #{id := Id, name := Name} = handle_framework(FObj),
-
     ?LOG_NOTICE("Framework ~s added, ~s", [Id, Name]),
-    State0 = State#state{frameworks=mput(Id, Name, F)},
+    State0 = State#state{frameworks = mput(Id, Name, F)},
     handle_waiting_tasks(framework, Id, Name, State0).
 
 -spec(handle_framework_removed(jiffy:object(), state()) -> state()).
-handle_framework_removed(Obj, #state{frameworks=F}=State) ->
+handle_framework_removed(Obj, #state{frameworks = F} = State) ->
     #{id := Id} = handle_framework(Obj),
     ?LOG_NOTICE("Framework ~s removed", [Id]),
-    State#state{frameworks=mremove(Id, F)}.
+    State#state{frameworks = mremove(Id, F)}.
 
 -spec(handle_framework(jiffy:object()) ->
     #{id => binary(), name => binary() | undefined}).
@@ -262,18 +319,18 @@ handle_framework(Obj) ->
     #{id => Id, name => Name}.
 
 -spec(handle_agent_added(jiffy:object(), state()) -> state()).
-handle_agent_added(Obj, #state{agents=A}=State) ->
+handle_agent_added(Obj, #state{agents = A}=State) ->
     AObj = mget(<<"agent">>, Obj),
     #{id := Id, ip := IP} = handle_agent(AObj),
     ?LOG_NOTICE("Agent ~s added, ~p", [Id, IP]),
-    State0 = State#state{agents=mput(Id, IP, A)},
+    State0 = State#state{agents = mput(Id, IP, A)},
     handle_waiting_tasks(agent_ip, Id, IP, State0).
 
 -spec(handle_agent_removed(jiffy:object(), state()) -> state()).
-handle_agent_removed(Obj, #state{agents=A}=State) ->
+handle_agent_removed(Obj, #state{agents = A} = State) ->
     Id = mget([<<"agent_id">>, <<"value">>], Obj),
     ?LOG_NOTICE("Agent ~s removed", [Id]),
-    State#state{agents=mremove(Id, A)}.
+    State#state{agents = mremove(Id, A)}.
 
 -spec(handle_agent(jiffy:object()) ->
     #{id => binary(), ip => inet:ip4_address() | undefined}).
@@ -313,7 +370,7 @@ handle_agent_hostname(Hostname) ->
 %%%===================================================================
 
 -spec(handle_task(jiffy:object(), state()) -> state()).
-handle_task(TaskObj, #state{tasks=T}=State) ->
+handle_task(TaskObj, #state{tasks = T} = State) ->
     FrameworkId = mget([<<"framework_id">>, <<"value">>], TaskObj),
     TaskId = {FrameworkId, mget([<<"task_id">>, <<"value">>], TaskObj)},
     Task = maps:get(TaskId, T, #{}),
@@ -323,7 +380,7 @@ handle_task(TaskObj, #state{tasks=T}=State) ->
     task_id(), jiffy:object(),
     task(), state()) -> state()).
 handle_task(TaskId, TaskObj, Task,
-            State=#state{agents=A, frameworks=F}) ->
+            State = #state{agents = A, frameworks = F}) ->
     try
         Task0 = task(TaskObj, Task, A, F),
         add_task(TaskId, Task, Task0, State)
@@ -378,12 +435,12 @@ add_task(TaskId, TaskPrev, TaskNew, State) ->
 
 -spec(add_task(task_id(), task(), state()) -> state()).
 add_task(TaskId, #{state := terminal} = Task, #state{
-        tasks=T, waiting_tasks=TW}=State) ->
+        tasks = T, waiting_tasks = TW} = State) ->
     State0 = notify(TaskId, Task, State),
     State0#state{
-        tasks=mremove(TaskId, T),
-        waiting_tasks=mremove(TaskId, TW)};
-add_task(TaskId, Task, #state{tasks=T, waiting_tasks=TW}=State) ->
+        tasks = mremove(TaskId, T),
+        waiting_tasks = mremove(TaskId, TW)};
+add_task(TaskId, Task, #state{tasks = T, waiting_tasks = TW} = State) ->
     % NOTE: you can get task info before you get agent or framework
     {TW0, State0} =
         case Task of
@@ -396,14 +453,14 @@ add_task(TaskId, Task, #state{tasks=T, waiting_tasks=TW}=State) ->
                 {mremove(TaskId, TW), St}
         end,
     State0#state{
-        tasks=mput(TaskId, Task, T),
-        waiting_tasks=TW0}.
+        tasks = mput(TaskId, Task, T),
+        waiting_tasks = TW0}.
 
 -spec(handle_waiting_tasks(
     agent_ip | framework, binary(),
     term(), state()) -> state()).
-handle_waiting_tasks(Key, Id, Value, #state{waiting_tasks=TW}=State) ->
-    maps:fold(fun(TaskId, true, #state{tasks=T}=Acc) ->
+handle_waiting_tasks(Key, Id, Value, #state{waiting_tasks = TW} = State) ->
+    maps:fold(fun(TaskId, true, #state{tasks = T} = Acc) ->
         Task = maps:get(TaskId, T),
         case maps:get(Key, Task) of
             {id, Id} ->
@@ -812,8 +869,8 @@ from_state_imp(TaskObjs, Agents, Frameworks) ->
 %%% Subscribe Functions
 %%%===================================================================
 
--spec(subscribe(pid()) -> {ok, MonRef, Tasks} | {error, atom()}
-    when MonRef :: reference(), Tasks :: #{task_id() => task()}).
+-spec(subscribe(pid()) -> {ok, MonRef} | {error, atom()}
+    when MonRef :: reference()).
 subscribe(Pid) ->
     MonRef = erlang:monitor(process, Pid),
     Pid ! {subscribe, self(), MonRef},
@@ -823,8 +880,8 @@ subscribe(Pid) ->
         {error, MonRef, Reason} ->
             erlang:demonitor(MonRef, [flush]),
             {error, Reason};
-        {ok, MonRef, Tasks} ->
-            {ok, MonRef, Tasks}
+        {ok, MonRef} ->
+            {ok, MonRef}
     after 5000 ->
         erlang:demonitor(MonRef, [flush]),
         {error, timeout}
@@ -833,37 +890,30 @@ subscribe(Pid) ->
 -spec(handle_subscribe(pid(), reference(), state()) -> state()).
 handle_subscribe(Pid, Ref, State) ->
     case State of
-        [] ->
-            Pid ! {error, Ref, init},
-            State;
-        #state{subs=undefined} ->
-            Pid ! {error, Ref, wait},
-            State;
-        #state{subs=#{Pid := _}} ->
+        #state{subs = #{Pid := _}} ->
             Pid ! {error, Ref, subscribed},
             State;
-        #state{subs=Subs, tasks=T, waiting_tasks=TW} ->
-            T0 = maps:without(maps:keys(TW), T),
-            Pid ! {ok, Ref, T0},
+        #state{ref = undefined, subs = Subs} ->
+            Pid ! {ok, Ref},
             _MonRef = erlang:monitor(process, Pid),
-            State#state{subs=maps:put(Pid, Ref, Subs)}
+            State#state{subs = maps:put(Pid, Ref, Subs)};
+        #state{subs = Subs, tasks = T, waiting_tasks = TW} ->
+            T0 = maps:without(maps:keys(TW), T),
+            Pid ! {ok, Ref},
+            Pid ! {{tasks, T0}, Ref},
+            _MonRef = erlang:monitor(process, Pid),
+            State#state{subs = maps:put(Pid, Ref, Subs)}
     end.
 
 -spec(handle_unsubscribe(pid(), state()) -> state()).
-handle_unsubscribe(Pid, #state{subs=Subs}=State) ->
-    State#state{subs=maps:remove(Pid, Subs)}.
+handle_unsubscribe(Pid, #state{subs = Subs} = State) ->
+    State#state{subs = maps:remove(Pid, Subs)}.
 
 -spec(notify(task_id(), task(), state()) -> state()).
-notify(_TaskId, _Task, #state{subs=undefined}=State) ->
-    State;
-notify(TaskId, Task, #state{subs=Subs, timeout=Timeout}=State) ->
+notify(TaskId, Task, #state{subs = Subs, timeout = Timeout} = State) ->
     Begin = erlang:monotonic_time(),
     try
-        maps:fold(fun (Pid, Ref, ok) ->
-            Pid ! {task_updated, Ref, TaskId, Task},
-            ok
-        end, ok, Subs),
-
+        ok = notify_subscribers(Subs, {task_updated, TaskId, Task}),
         maps:fold(fun (Pid, Ref, St) ->
             receive
                 {next, Ref} ->
@@ -932,25 +982,8 @@ mdiff(A, B) ->
 %%% Mesos Operator API Client
 %%%===================================================================
 
--spec(handle_init([]) -> state() | []).
-handle_init(State0) ->
-    Timeout = application:get_env(dcos_net, mesos_reconnect_timeout, 2000),
-    case start_stream() of
-        {ok, State} ->
-            State;
-        {error, redirect} ->
-            % It's not a leader, don't log anything
-            erlang:send_after(Timeout, self(), init),
-            State0;
-        {error, Error} ->
-            ?LOG_ERROR("Couldn't connect to mesos: ~p", [Error]),
-            prometheus_counter:inc(mesos_listener, failures_total, [], 1),
-            erlang:send_after(Timeout, self(), init),
-            State0
-    end.
-
--spec(start_stream() -> {ok, state()} | {error, term()}).
-start_stream() ->
+-spec(start_stream(state()) -> {ok, state()} | {error, term()}).
+start_stream(State0) ->
     prometheus_boolean:set(mesos_listener, is_leader, [], false),
     Opts = [{stream, {self, once}}],
     Request = #{type => <<"SUBSCRIBE">>},
@@ -959,7 +992,7 @@ start_stream() ->
             prometheus_boolean:set(mesos_listener, is_leader, [], true),
             httpc:stream_next(Pid),
             erlang:monitor(process, Pid),
-            State = #state{pid=Pid, ref=Ref},
+            State = State0#state{pid = Pid, ref = Ref},
             {ok, handle_heartbeat(State)};
         {error, {http_status, {_HTTPVersion, 307, _StatusStr}, _Data}} ->
             {error, redirect};
@@ -967,8 +1000,7 @@ start_stream() ->
             {error, Error}
     end.
 
--spec(handle_stream(binary(), state()) ->
-    {noreply, state()} | {stop, term(), state()}).
+-spec(handle_stream(binary(), state()) -> {noreply, state()}).
 handle_stream(Data, State) ->
     Size = byte_size(Data),
     prometheus_counter:inc(mesos_listener, bytes_total, [], Size),
@@ -981,33 +1013,33 @@ handle_stream(Data, State) ->
             handle_stream(<<>>, State1);
         {error, Error} ->
             ?LOG_ERROR("Mesos protocol error: ~p", [Error]),
-            {stop, Error, State}
+            {noreply, handle_failure(State)}
     end.
 
 -spec(stream(binary(), State) -> {error, term()} |
     {next, State} | {next, jiffy:object(), State}
         when State :: state()).
-stream(Data, #state{pid=Pid, size=undefined, buf=Buf}=State) ->
+stream(Data, #state{pid = Pid, size = undefined, buf = Buf} = State) ->
     Buf0 = <<Buf/binary, Data/binary>>,
     case binary:split(Buf0, <<"\n">>) of
         [SizeBin, Tail] ->
             Size = binary_to_integer(SizeBin),
-            State0 = State#state{size=Size, buf= <<>>},
+            State0 = State#state{size = Size, buf = <<>>},
             stream(Tail, State0);
         [Buf0] when byte_size(Buf0) > 12 ->
             {error, {bad_format, Buf0}};
         [Buf0] ->
             httpc:stream_next(Pid),
-            {next, State#state{buf=Buf0}}
+            {next, State#state{buf = Buf0}}
     end;
-stream(Data, #state{pid=Pid, size=Size, buf=Buf}=State) ->
+stream(Data, #state{pid = Pid, size = Size, buf = Buf} = State) ->
     Buf0 = <<Buf/binary, Data/binary>>,
     case byte_size(Buf0) of
         BufSize when BufSize >= Size ->
             stream_decode(Buf0, Size, State);
         _BufSize ->
             httpc:stream_next(Pid),
-            {next, State#state{buf=Buf0}}
+            {next, State#state{buf = Buf0}}
     end.
 
 -spec(stream_decode(binary(), integer(), State) -> {error, term()} |
@@ -1015,7 +1047,7 @@ stream(Data, #state{pid=Pid, size=Size, buf=Buf}=State) ->
          when State :: state()).
 stream_decode(Buf, Size, State) ->
     <<Head:Size/binary, Tail/binary>> = Buf,
-    State0 = State#state{size=undefined, buf=Tail},
+    State0 = State#state{size = undefined, buf = Tail},
     prometheus_counter:inc(mesos_listener, messages_total, [], 1),
     try jiffy:decode(Head, [return_maps]) of Obj ->
         {next, Obj, State0}
@@ -1076,8 +1108,8 @@ init_metrics_mesos_state() ->
         {help, "Total number of tasks with no agent/framework information."}]).
 
 -spec(handle_metrics(state()) -> state()).
-handle_metrics(#state{agents=A, frameworks=F,
-        tasks=T, waiting_tasks=WT}=State) ->
+handle_metrics(#state{agents = A, frameworks = F,
+        tasks = T, waiting_tasks = WT} = State) ->
     prometheus_gauge:set(
         mesos_listener, tasks_total, [],
         maps:size(T)),
