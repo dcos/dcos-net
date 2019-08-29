@@ -12,7 +12,8 @@
         ssl,
         erldns,
         telemetry,
-        prometheus
+        prometheus,
+        backoff
     ]},
     {env,[]},
     {modules, []},
