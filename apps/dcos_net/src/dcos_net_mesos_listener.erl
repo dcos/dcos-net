@@ -110,9 +110,10 @@ init([]) ->
     Backoff = backoff:type(Backoff0, jitter),
     {ok, #state{backoff = Backoff}, {continue, init}}.
 
-handle_call(is_leader, _From, State) ->
-    % There is no state if it's not connected
-    IsLeader = is_record(State, state),
+handle_call(is_leader, _From, #state{ref = Ref} = State) ->
+    %% if there is no HTTP connection reference, it means this
+    %% listener is surely not a leader
+    IsLeader = Ref =/= undefined,
     {reply, IsLeader, State};
 handle_call(Request, _From, State) ->
     ?LOG_WARNING("Unexpected request: ~p", [Request]),
