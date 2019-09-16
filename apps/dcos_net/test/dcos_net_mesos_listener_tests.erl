@@ -6,6 +6,7 @@
     basic_setup/0,
     hello_overlay_setup/0,
     pod_tasks_setup/0,
+    recovered_agents_setup/0,
     cleanup/1
 ]).
 
@@ -47,6 +48,11 @@ hello_overlay_test_() ->
 pod_tasks_test_() ->
     {setup, fun pod_tasks_setup/0, fun cleanup/1, {with, [
         fun pod_tasks/1
+    ]}}.
+
+recovered_agents_test_() ->
+    {setup, fun recovered_agents_setup/0, fun cleanup/1, {with, [
+        fun recovered_agents/1
     ]}}.
 
 vip_labels_test() ->
@@ -427,6 +433,32 @@ pod_tasks(Tasks) ->
     }, Tasks).
 
 %%%===================================================================
+%%% Recovered Agents Tests
+%%%===================================================================
+
+recovered_agents(Tasks) ->
+    TaskId = <<"web.instance-8b38cc52-c951-11e9-8d5b-70b3d5800001._app.2">>,
+    Framework = <<"65fccc5d-35a8-4cae-9eb2-05922043018e-0001">>,
+    Task = #{
+        agent_ip => {172, 17, 0, 4},
+        framework => <<"marathon">>,
+        name => <<"web">>,
+        ports => [#{
+            host_port => 16424,
+            name => <<"default">>,
+            port => 10080,
+            protocol => tcp,
+            vip => [<<"/web:10080">>]
+        }],
+        runtime => mesos,
+        state => running,
+        task_ip => [{172, 31, 254, 10}]
+    },
+    ?assertEqual(#{
+        {Framework, TaskId} => Task
+    }, Tasks).
+
+%%%===================================================================
 %%% From State Tests
 %%%===================================================================
 
@@ -533,11 +565,21 @@ hello_overlay_setup() ->
 pod_tasks_setup() ->
     setup("pod-tasks.json").
 
+recovered_agents_setup() ->
+    setup("recovered-agents.json").
+
+setenv() ->
+    application:set_env(dcos_net, is_master, true),
+    application:set_env(dcos_net, mesos_agents_readiness_timeout,
+        timer:seconds(1)),
+    application:set_env(dcos_net, mesos_tasks_readiness_timeout,
+        timer:seconds(1)).
+
 setup(FileName) ->
     Lines = read_lines(FileName),
 
     application:load(dcos_net),
-    application:set_env(dcos_net, is_master, true),
+    setenv(),
 
     meck:new(httpc),
     meck:expect(httpc, request,
@@ -596,7 +638,9 @@ stream_wait() ->
 
 wait_for_tasks(Ref) ->
     receive
-        {{tasks, Tasks}, Ref} -> Tasks
+        {{tasks, Tasks}, Ref} ->
+            ok = dcos_net_mesos_listener:next(Ref),
+            Tasks
     after 5000 ->
         error(timeout)
     end.
