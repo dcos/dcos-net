@@ -32,7 +32,7 @@
  {<<"jsx">>,{pkg,<<"jsx">>,<<"2.10.0">>},0},
  {<<"lashup">>,
   {git,"https://github.com/dcos/lashup.git",
-       {ref,"1959ea391dfcf8a04a53a062291378f9cb993737"}},
+       {ref,"a0661006c38237147252ebe0b98cc2c29352c976"}},
   0},
  {<<"mesos_state">>,
   {git,"https://github.com/dcos/mesos_state.git",
