@@ -383,8 +383,6 @@ push_set_diff(ZoneName, New, Old) ->
     end.
 
 -spec(push_set_ops(dns:dname(), [riak_dt_orswot:orswot_op()]) -> ok).
-push_set_ops(_ZoneName, []) ->
-    ok;
 push_set_ops(ZoneName, Ops) ->
     Key = ?LASHUP_SET_KEY(ZoneName),
     Updates = [{update, ?RECORDS_SET_FIELD, Op} || Op <- Ops],
@@ -404,11 +402,13 @@ handle_push_ops(Ops, #state{ops = Buf} = State) ->
 
 -spec(handle_push_ops(state()) -> state()).
 handle_push_ops(#state{ops = Ops} = State) ->
-    State0 = handle_push_zone_ops(Ops, State),
-    State0#state{ops = [], ops_ref = undefined}.
+    State0 = handle_push_zone_ops(Ops, State#state{ops = []}),
+    State0#state{ops_ref = undefined}.
 
 -spec(handle_push_zone_ops([Op], state()) -> state()
     when Op :: riak_dt_orswot:orswot_op()).
+handle_push_zone_ops([], State) ->
+    State;
 handle_push_zone_ops(Ops, #state{records_by_name = RecordsByName} = State) ->
     ZoneName = ?DCOS_DOMAIN,
     Modes = dcos_dns_config:store_modes(),
