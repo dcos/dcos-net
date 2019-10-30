@@ -313,22 +313,16 @@ check_subnet(VTEPIPStr, VTEPMac, AgentSubnet, LashupValue,
 
     ParsedSubnet = parse_subnet(AgentSubnet),
     ParsedVTEPMac = parse_vtep_mac(VTEPMac),
-
     ParsedVTEPIP = parse_subnet(VTEPIPStr),
-    case lists:keyfind({ParsedVTEPIP, riak_dt_map}, 1, LashupValue) of
-        {{ParsedVTEPIP, riak_dt_map}, _Value} ->
-            ok;
+
+    Changed = overlay_changed(
+        ParsedVTEPIP, ParsedVTEPMac, AgentIP, ParsedSubnet, LashupValue),
+    case Changed of
+        true ->
+            update_overlay_op(
+                ParsedVTEPIP, ParsedVTEPMac, AgentIP, ParsedSubnet);
         false ->
-            Now = erlang:system_time(nano_seconds),
-            {update,
-                {ParsedVTEPIP, riak_dt_map},
-                {update, [
-                    {update, {mac, riak_dt_lwwreg}, {assign, ParsedVTEPMac, Now}},
-                    {update, {agent_ip, riak_dt_lwwreg}, {assign, AgentIP, Now}},
-                    {update, {subnet, riak_dt_lwwreg}, {assign, ParsedSubnet, Now}}
-                    ]
-                }
-            }
+            ok
     end.
 
 parse_vtep_mac(MAC) ->
@@ -338,6 +332,33 @@ parse_vtep_mac(MAC) ->
             binary_to_integer(Component, 16)
         end,
         MACComponents).
+
+overlay_changed(VTEPIP, VTEPMac, AgentIP, Subnet, LashupValue) ->
+    case lists:keyfind({VTEPIP, riak_dt_map}, 1, LashupValue) of
+        {{VTEPIP, riak_dt_map}, Value} ->
+            ExpectedValue = [
+                {{agent_ip, riak_dt_lwwreg}, AgentIP},
+                {{mac, riak_dt_lwwreg}, VTEPMac},
+                {{subnet, riak_dt_lwwreg}, Subnet}
+            ],
+            case lists:sort(Value) of
+                ExpectedValue -> false;
+                _ -> true
+            end;
+        false -> true
+    end.
+
+update_overlay_op(VTEPIP, VTEPMac, AgentIP, Subnet) ->
+    Now = erlang:system_time(nano_seconds),
+    {update,
+        {VTEPIP, riak_dt_map},
+        {update, [
+            {update, {mac, riak_dt_lwwreg}, {assign, VTEPMac, Now}},
+            {update, {agent_ip, riak_dt_lwwreg}, {assign, AgentIP, Now}},
+            {update, {subnet, riak_dt_lwwreg}, {assign, Subnet, Now}}
+            ]
+        }
+    }.
 
 -ifdef(TEST).
 
@@ -360,5 +381,48 @@ match_vtep_link_test() ->
 
     VXLan2 = VXLan#{<<"vtep_mac">> := VTEPMAC2},
     ?assertEqual(false, match_vtep_link(VXLan2, LinkInfo)).
+
+overlay_changed_test() ->
+    VTEPIP = {{44, 128, 0, 1}, 20},
+    VTEPMac = [112, 179, 213, 128, 0, 1],
+    AgentIP = {172, 17, 0, 2},
+    Subnet = {{9, 0, 0, 0}, 24},
+    LashupValue = [],
+    ?assert(overlay_changed(VTEPIP, VTEPMac, AgentIP, Subnet, LashupValue)),
+    LashupValue2 = [
+         {{{{44, 128, 0, 1}, 20}, riak_dt_map},
+             [{{subnet, riak_dt_lwwreg}, {{9, 0, 0, 0}, 24}},
+              {{mac, riak_dt_lwwreg}, [112, 179, 213, 128, 0, 1]},
+              {{agent_ip, riak_dt_lwwreg}, {172, 17, 0, 2}}]}
+    ],
+    ?assertNot(overlay_changed(VTEPIP, VTEPMac, AgentIP, Subnet, LashupValue2)),
+    LashupValue3 = [
+         {{{{44, 128, 0, 1}, 20}, riak_dt_map},
+             [{{subnet, riak_dt_lwwreg}, {{9, 0, 1, 0}, 24}},
+              {{mac, riak_dt_lwwreg}, [112, 179, 213, 128, 0, 1]},
+              {{agent_ip, riak_dt_lwwreg}, {172, 17, 0, 2}}]}
+    ],
+    ?assert(overlay_changed(VTEPIP, VTEPMac, AgentIP, Subnet, LashupValue3)),
+    LashupValue4 = [
+         {{{{44, 128, 0, 1}, 20}, riak_dt_map},
+             [{{subnet, riak_dt_lwwreg}, {{9, 0, 0, 0}, 24}},
+              {{mac, riak_dt_lwwreg}, [112, 179, 213, 128, 0, 2]},
+              {{agent_ip, riak_dt_lwwreg}, {172, 17, 0, 2}}]}
+    ],
+    ?assert(overlay_changed(VTEPIP, VTEPMac, AgentIP, Subnet, LashupValue4)),
+    LashupValue5 = [
+         {{{{44, 128, 0, 1}, 20}, riak_dt_map},
+             [{{subnet, riak_dt_lwwreg}, {{9, 0, 0, 0}, 24}},
+              {{mac, riak_dt_lwwreg}, [112, 179, 213, 128, 0, 1]},
+              {{agent_ip, riak_dt_lwwreg}, {172, 17, 0, 3}}]}
+    ],
+    ?assert(overlay_changed(VTEPIP, VTEPMac, AgentIP, Subnet, LashupValue5)),
+    LashupValue6 = [
+         {{{{44, 128, 0, 2}, 20}, riak_dt_map},
+             [{{subnet, riak_dt_lwwreg}, {{9, 0, 0, 0}, 24}},
+              {{mac, riak_dt_lwwreg}, [112, 179, 213, 128, 0, 1]},
+              {{agent_ip, riak_dt_lwwreg}, {172, 17, 0, 2}}]}
+    ],
+    ?assert(overlay_changed(VTEPIP, VTEPMac, AgentIP, Subnet, LashupValue6)).
 
 -endif.
