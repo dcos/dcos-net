@@ -414,31 +414,10 @@ value(?LASHUP_LWW_KEY(ZoneName)) ->
             [{?RECORDS_LWW_FIELD, Records}];
         {error, zone_not_found} ->
             [{?RECORDS_LWW_FIELD, []}]
-    end;
-value(?LASHUP_SET_KEY(ZoneName)) ->
-    case erldns_zone_cache:get_zone_with_records(ZoneName) of
-        {ok, #zone{records_by_name = RecordsByName}} ->
-            Records = lists:append(maps:values(RecordsByName)),
-            [{?RECORDS_SET_FIELD, Records}];
-        {error, zone_not_found} ->
-            [{?RECORDS_SET_FIELD, []}]
     end.
 
 request_op(LKey = ?LASHUP_LWW_KEY(ZoneName), {update, Updates}) ->
     [{update, ?RECORDS_LWW_FIELD, Op}] = Updates,
     {assign, Records, _Timestamp} = Op,
     _Result = dcos_dns:push_prepared_zone(ZoneName, Records),
-    {ok, value(LKey)};
-request_op(LKey = ?LASHUP_SET_KEY(ZoneName), {update, Updates}) ->
-    [{?RECORDS_SET_FIELD, Records}] = lashup_kv:value(LKey),
-    Records0 = apply_op(Records, Updates),
-    _Result = dcos_dns:push_prepared_zone(ZoneName, Records0),
     {ok, value(LKey)}.
-
-apply_op(List, Updates) ->
-    lists:foldl(
-        fun ({update, ?RECORDS_SET_FIELD, {remove_all, RList}}, Acc) ->
-                Acc -- RList;
-            ({update, ?RECORDS_SET_FIELD, {add_all, AList}}, Acc) ->
-                Acc ++ AList
-        end, List, Updates).
