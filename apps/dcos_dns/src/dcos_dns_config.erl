@@ -21,8 +21,7 @@
     forward_zones/0,
     handler_limit/0,
     mesos_resolvers/0, mesos_resolvers/1,
-    loadbalance/0,
-    store_modes/0
+    loadbalance/0
 ]).
 
 exhibitor_timeout() ->
@@ -107,7 +106,3 @@ mesos_resolvers(Upstreams) ->
 -spec(loadbalance() -> atom()).
 loadbalance() ->
     application:get_env(?APP, loadbalance, round_robin).
-
--spec(store_modes() -> [lww | set]).
-store_modes() ->
-    application:get_env(?APP, store_modes, [lww, set]).

@@ -27,13 +27,7 @@ init([]) ->
     {ok, {}, {continue, {}}}.
 
 handle_continue({}, {}) ->
-    MatchSpec =
-        case dcos_dns_config:store_modes() of
-            [lww | _Modes] ->
-                ets:fun2ms(fun ({?LASHUP_LWW_KEY('_')}) -> true end);
-            [set | _Modes] ->
-                ets:fun2ms(fun ({?LASHUP_SET_KEY('_')}) -> true end)
-        end,
+    MatchSpec = ets:fun2ms(fun ({?LASHUP_LWW_KEY('_')}) -> true end),
     {ok, Ref} = lashup_kv:subscribe(MatchSpec),
     {noreply, #state{ref = Ref}}.
 
@@ -56,9 +50,6 @@ handle_info(_Info, State) ->
 %%%===================================================================
 
 -spec(handle_event(Key :: term(), Value :: term()) -> ok | {error, term()}).
-handle_event(?LASHUP_SET_KEY(ZoneName), Value) ->
-    {?RECORDS_SET_FIELD, Records} = lists:keyfind(?RECORDS_SET_FIELD, 1, Value),
-    dcos_dns:push_prepared_zone(ZoneName, Records);
 handle_event(?LASHUP_LWW_KEY(ZoneName), Value) ->
     {?RECORDS_LWW_FIELD, Records} = lists:keyfind(?RECORDS_LWW_FIELD, 1, Value),
     dcos_dns:push_prepared_zone(ZoneName, Records).

@@ -8,8 +8,6 @@
 
 -type upstream() :: {inet:ip4_address(), inet:port_number()}.
 
--define(LASHUP_SET_KEY(ZoneName), [navstar, dns, zones, ZoneName]).
--define(RECORDS_SET_FIELD, {records, riak_dt_orswot}).
 -define(LASHUP_LWW_KEY(ZoneName), [dns, zones, ZoneName]).
 -define(RECORDS_LWW_FIELD, {records, riak_dt_lwwreg}).
 -define(DCOS_DIRECTORY(Prefix), <<Prefix, ".thisdcos.directory">>).
