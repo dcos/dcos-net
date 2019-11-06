@@ -57,6 +57,7 @@ node_ip() ->
 
 ensure_l4lb_started() ->
     {ok, _} = application:ensure_all_started(dcos_l4lb),
+    {ok, _} = lashup_kv:request_op(?VIPS_KEY2, {update, []}),
     meck:wait(dcos_net_mesos_listener, poll, '_', 5000),
     meck:wait(dcos_l4lb_mgr, local_port_mappings, '_', 100),
     timer:sleep(100).
