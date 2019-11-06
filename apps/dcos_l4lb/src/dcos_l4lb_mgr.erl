@@ -22,6 +22,8 @@
 -export([init/1, handle_continue/2,
     handle_call/3, handle_cast/2, handle_info/2]).
 
+-export_type([protocol/0, vip/0, key/0, ipport/0, namespace/0]).
+
 -record(state, {
     % pids and refs
     ipvs_mgr :: pid(),
@@ -36,17 +38,16 @@
 }).
 -type state() :: #state{}.
 
--type key() :: dcos_l4lb_mesos_poller:key().
--type backend() :: dcos_l4lb_mesos_poller:backend().
+-type protocol() :: tcp | udp.
+-type vip() :: inet:ip_address() | {VIPLabel :: binary(), Framework :: binary()}.
+-type key() :: {protocol(), vip(), inet:port_number()}.
 -type ipport() :: {inet:ip_address(), inet:port_number()}.
 -type namespace() :: term().
 
 -define(GM_EVENTS(R, T), {lashup_gm_route_events, #{ref := R, tree := T}}).
 
 
--spec(push_vips(VIPs :: [{Key, [Backend]}]) -> ok
-    when Key :: dcos_l4lb_mesos_poller:key(),
-         Backend :: dcos_l4lb_mesos_poller:backend()).
+-spec(push_vips(VIPs :: [{key(), [ipport()]}]) -> ok).
 push_vips(VIPs) ->
     Begin = erlang:monotonic_time(),
     try
@@ -155,11 +156,10 @@ start_reconcile_timer() ->
 %%% Internal functions
 %%%===================================================================
 
--spec(handle_reconcile([{key(), [backend()]}], state()) -> state()).
+-spec(handle_reconcile([{key(), [ipport()]}], state()) -> state()).
 handle_reconcile(VIPs, #state{namespaces=Namespaces, route_mgr=RouteMgr,
         ipvs_mgr=IPVSMgr, ipset_mgr=IPSetMgr}=State) ->
     % If everything is ok this function is silent and changes nothing.
-    VIPsP = prepare_vips(VIPs),
     Routes = get_vip_routes(VIPs),
     Diffs =
         lists:map(fun (Namespace) ->
@@ -170,7 +170,7 @@ handle_reconcile(VIPs, #state{namespaces=Namespaces, route_mgr=RouteMgr,
             DiffRoutes = dcos_net_utils:complement(Routes, PrevRoutes),
 
             PrevVIPsP = get_vips(IPVSMgr, Namespace),
-            DiffVIPs = diff(PrevVIPsP, VIPsP),
+            DiffVIPs = diff(PrevVIPsP, VIPs),
 
             {Namespace, LogPrefix, DiffRoutes, DiffVIPs}
         end, Namespaces),
@@ -214,9 +214,9 @@ handle_reconcile_apply(
     end, Diffs),
     State.
 
--spec(handle_vips([{key(), [backend()]}], state()) -> state()).
+-spec(handle_vips([{key(), [ipport()]}], state()) -> state()).
 handle_vips(VIPs, #state{vips=PrevVIPs}=State) ->
-    DiffVIPs = diff(prepare_vips(PrevVIPs), prepare_vips(VIPs)),
+    DiffVIPs = diff(PrevVIPs, VIPs),
 
     Routes = get_vip_routes(VIPs),
     PrevRoutes = get_vip_routes(PrevVIPs),
@@ -272,7 +272,7 @@ handle_vips_apply(
 get_routes(RouteMgr, Namespace) ->
     dcos_l4lb_route_mgr:get_routes(RouteMgr, Namespace).
 
--spec(get_vip_routes(VIPs :: [{key(), [backend()]}]) -> [inet:ip_address()]).
+-spec(get_vip_routes(VIPs :: [{key(), [ipport()]}]) -> [inet:ip_address()]).
 get_vip_routes(VIPs) ->
     lists:usort([IP || {{_Proto, IP, _Port}, _Backends} <- VIPs]).
 
@@ -290,7 +290,7 @@ remove_routes(RouteMgr, Routes, Namespace) ->
 
 -type diff_keys() :: {[key()], [key()]}.
 
--spec(get_vip_keys(VIPs :: [{key(), [backend()]}]) -> [key()]).
+-spec(get_vip_keys(VIPs :: [{key(), [ipport()]}]) -> [key()]).
 get_vip_keys(VIPs) ->
     [ VIPKey || {VIPKey, _Backends} <- VIPs].
 
@@ -309,12 +309,6 @@ remove_ipset_entries(IPSetMgr, KeysToDel) ->
 %%%===================================================================
 %%% IPVS functions
 %%%===================================================================
-
--spec(prepare_vips([{key(), [backend()]}]) -> [{key(), [ipport()]}]).
-prepare_vips(VIPs) ->
-    lists:map(fun ({VIP, BEs}) ->
-        {VIP, [BE || {_AgentIP, BE} <- BEs]}
-    end, VIPs).
 
 -spec(get_vips(pid(), namespace()) -> [{key(), [ipport()]}]).
 get_vips(IPVSMgr, Namespace) ->

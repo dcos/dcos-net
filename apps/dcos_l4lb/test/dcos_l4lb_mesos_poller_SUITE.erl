@@ -32,8 +32,6 @@ init_per_testcase(_, Config) ->
     meck:new(dcos_net_dist, [no_link, passthrough]),
     meck:expect(dcos_net_dist, nodeip, fun () -> node_ip() end),
     meck:new(dcos_net_mesos_listener, [no_link, passthrough]),
-    meck:new(dcos_l4lb_mgr, [no_link, passthrough]),
-    meck:expect(dcos_l4lb_mgr, push_vips, fun (_) -> ok end),
     Config.
 
 end_per_testcase(_, _Config) ->
@@ -43,7 +41,6 @@ end_per_testcase(_, _Config) ->
     end || {App, _, _} <- application:which_applications(),
     not lists:member(App, [stdlib, kernel]) ],
     os:cmd("rm -rf Mnesia.*"),
-    meck:unload(dcos_l4lb_mgr),
     meck:unload(dcos_net_mesos_listener),
     meck:unload(dcos_net_dist),
     dcos_l4lb_ipset_mgr:cleanup(),

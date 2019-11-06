@@ -21,9 +21,6 @@
 -export([init/1, handle_call/3,
     handle_cast/2, handle_info/2, handle_continue/2]).
 
--export_type([named_vip/0, vip/0, protocol/0,
-    key/0, lkey/0, backend/0]).
-
 -record(state, {
     backoff :: backoff:backoff(),
     timer_ref = make_ref() :: reference(),
