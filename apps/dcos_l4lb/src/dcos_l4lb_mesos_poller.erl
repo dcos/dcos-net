@@ -134,9 +134,6 @@ handle_poll(true, Backoff0) ->
 handle_poll_state(Tasks) ->
     HealthyTasks = maps:filter(fun is_healthy/2, Tasks),
 
-    PortMappings = collect_port_mappings(HealthyTasks),
-    dcos_l4lb_mgr:local_port_mappings(PortMappings),
-
     VIPs = collect_vips(HealthyTasks),
     ok = push_vips(VIPs),
 
@@ -161,20 +158,6 @@ is_healthy(_Task) ->
 %%%===================================================================
 %%% Collect functions
 %%%===================================================================
-
--spec(collect_port_mappings(#{task_id() => task()}) -> #{Host => Container}
-    when Host :: {protocol(), inet:port_number()},
-         Container :: {inet:ip_address(), inet:port_number()}).
-collect_port_mappings(Tasks) ->
-    maps:fold(fun (_TaskId, Task, Acc) ->
-        Runtime = maps:get(runtime, Task),
-        [TaskIP | _TaskIPs] = maps:get(task_ip, Task),
-        PMs = [{{Protocol, Host}, {TaskIP, Port}}
-              || #{host_port := Host, protocol := Protocol,
-                   port := Port} <- maps:get(ports, Task, []),
-                 Runtime =/= docker],
-        PMs ++ Acc
-    end, [], Tasks).
 
 -spec(collect_vips(#{task_id() => task()}) -> #{key() => [backend()]}).
 collect_vips(Tasks) ->

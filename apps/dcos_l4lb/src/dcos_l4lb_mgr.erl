@@ -13,7 +13,6 @@
 -export([
     push_vips/1,
     push_netns/2,
-    local_port_mappings/1,
     init_metrics/0
 ]).
 
@@ -33,8 +32,7 @@
     % data
     namespaces = [host] :: [namespace()],
     % vips
-    vips = [] :: [{key(), [backend()]}],
-    prev_vips = [] :: [{key(), [ipport()]}]
+    vips = [] :: [{key(), [ipport()]}]
 }).
 -type state() :: #state{}.
 
@@ -68,7 +66,6 @@ push_netns(EventType, EventContent) ->
 -spec(start_link() ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link() ->
-    init_local_port_mappings(),
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 %%%===================================================================
@@ -162,9 +159,8 @@ start_reconcile_timer() ->
 handle_reconcile(VIPs, #state{namespaces=Namespaces, route_mgr=RouteMgr,
         ipvs_mgr=IPVSMgr, ipset_mgr=IPSetMgr}=State) ->
     % If everything is ok this function is silent and changes nothing.
-    VIPs0 = vips_port_mappings(VIPs),
-    VIPsP = prepare_vips(VIPs0),
-    Routes = get_vip_routes(VIPs0),
+    VIPsP = prepare_vips(VIPs),
+    Routes = get_vip_routes(VIPs),
     Diffs =
         lists:map(fun (Namespace) ->
             NamespaceBin = namespace2bin(Namespace),
@@ -179,13 +175,11 @@ handle_reconcile(VIPs, #state{namespaces=Namespaces, route_mgr=RouteMgr,
             {Namespace, LogPrefix, DiffRoutes, DiffVIPs}
         end, Namespaces),
 
-    Keys = get_vip_keys(VIPs0),
+    Keys = get_vip_keys(VIPs),
     PrevKeys = get_ipset_entries(IPSetMgr),
     DiffKeys = dcos_net_utils:complement(Keys, PrevKeys),
 
-    State0 = handle_reconcile_apply(Diffs, DiffKeys, State),
-
-    State0#state{prev_vips=VIPs0}.
+    handle_reconcile_apply(Diffs, DiffKeys, State).
 
 -spec(handle_reconcile_apply([Diff], diff_keys(), state()) -> state()
     when Diff :: {namespace(), binary(), diff_vips(), diff_routes()}).
@@ -221,23 +215,22 @@ handle_reconcile_apply(
     State.
 
 -spec(handle_vips([{key(), [backend()]}], state()) -> state()).
-handle_vips(VIPs, #state{prev_vips=PrevVIPs}=State) ->
-    VIPs0 = vips_port_mappings(VIPs),
-    DiffVIPs = diff(prepare_vips(PrevVIPs), prepare_vips(VIPs0)),
+handle_vips(VIPs, #state{vips=PrevVIPs}=State) ->
+    DiffVIPs = diff(prepare_vips(PrevVIPs), prepare_vips(VIPs)),
 
-    Routes = get_vip_routes(VIPs0),
+    Routes = get_vip_routes(VIPs),
     PrevRoutes = get_vip_routes(PrevVIPs),
     DiffRoutes = dcos_net_utils:complement(Routes, PrevRoutes),
 
-    Keys = get_vip_keys(VIPs0),
+    Keys = get_vip_keys(VIPs),
     PrevKeys = get_vip_keys(PrevVIPs),
     DiffKeys = dcos_net_utils:complement(Keys, PrevKeys),
 
     State0 = handle_vips_apply(DiffVIPs, DiffRoutes, DiffKeys, State),
 
-    update_gauge(vips, length(VIPs0)),
-    update_gauge(backends, lists:sum([length(B) || {_K, B} <- VIPs0])),
-    State0#state{vips=VIPs, prev_vips=VIPs0}.
+    update_gauge(vips, length(VIPs)),
+    update_gauge(backends, lists:sum([length(B) || {_K, B} <- VIPs])),
+    State0#state{vips=VIPs}.
 
 -spec(handle_vips_apply(DiffVIPs, DiffRoutes, DiffKeys, State) -> State
     when DiffVIPs :: diff_vips(), DiffRoutes :: diff_routes(),
@@ -531,37 +524,6 @@ handle_netns_event(reconcile_netns, Namespaces, State) ->
     handle_netns_event(add_netns, Namespaces, State).
 
 %%%===================================================================
-%%% Local Port Mappings functions
-%%%===================================================================
-
--spec(vips_port_mappings(VIPs) -> VIPs
-    when VIPs :: [{key(), [backend()]}]).
-vips_port_mappings(VIPs) ->
-    PMs = local_port_mappings(),
-    AgentIP = dcos_net_dist:nodeip(),
-    % Remove port mappings for local backends.
-    lists:map(fun ({{Protocol, VIP, VIPPort}, BEs}) ->
-        BEs0 = bes_port_mappings(PMs, Protocol, AgentIP, BEs),
-        {{Protocol, VIP, VIPPort}, BEs0}
-    end, VIPs).
-
--spec(bes_port_mappings(PMs, tcp | udp, AgentIP, [backend()]) -> [backend()]
-    when PMs :: #{Host => Container},
-         AgentIP :: inet:ip4_address(),
-         Host :: {tcp | udp, inet:port_number()},
-         Container :: {inet:ip_address(), inet:port_number()}).
-bes_port_mappings(PMs, Protocol, AgentIP, BEs) ->
-    lists:map(
-        fun ({BEAgentIP, {BEIP, BEPort}}) when BEIP =:= AgentIP ->
-                case maps:find({Protocol, BEPort}, PMs) of
-                    {ok, {IP, Port}} -> {BEAgentIP, {IP, Port}};
-                    error -> {BEAgentIP, {BEIP, BEPort}}
-                end;
-            ({BEAgentIP, {BEIP, BEPort}}) ->
-                {BEAgentIP, {BEIP, BEPort}}
-        end, BEs).
-
-%%%===================================================================
 %%% GC funtions
 %%%===================================================================
 
@@ -573,44 +535,6 @@ handle_gc(#state{ipvs_mgr=IPVSMgr, route_mgr=RouteMgr,
     true = erlang:garbage_collect(IPSetMgr),
     true = erlang:garbage_collect(NetNSMgr),
     State.
-
-%%%===================================================================
-%%% Local Port Mappings API functions
-%%%===================================================================
-
--spec(init_local_port_mappings() -> local_port_mappings).
-init_local_port_mappings() ->
-    try
-        ets:new(local_port_mappings, [public, named_table])
-    catch error:badarg ->
-        local_port_mappings
-    end.
-
--spec(local_port_mappings([{Host, Container}] | #{Host => Container}) -> true
-    when Host :: {tcp | udp, inet:port_number()},
-         Container :: {inet:ip_address(), inet:port_number()}).
-local_port_mappings(PortMappings) when is_list(PortMappings) ->
-    PortMappings0 = maps:from_list(PortMappings),
-    local_port_mappings(PortMappings0);
-local_port_mappings(PortMappings) ->
-    try
-        true = ets:insert(local_port_mappings, {pm, PortMappings})
-    catch error:badarg ->
-        true
-    end.
-
--spec(local_port_mappings() -> #{Host => Container}
-    when Host :: {tcp | udp, inet:port_number()},
-         Container :: {inet:ip_address(), inet:port_number()}).
-local_port_mappings() ->
-    try ets:lookup(local_port_mappings, pm) of
-        [{pm, PortMappings}] ->
-            PortMappings;
-        [] ->
-            #{}
-    catch error:badarg ->
-        #{}
-    end.
 
 %%%===================================================================
 %%% Metrics functions
