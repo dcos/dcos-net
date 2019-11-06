@@ -3,7 +3,6 @@
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
--include("dcos_l4lb_lashup.hrl").
 -include("dcos_l4lb.hrl").
 
 -ifdef(TEST).
@@ -30,12 +29,8 @@
     route_mgr :: pid(),
     ipset_mgr :: pid(),
     netns_mgr :: pid(),
-    route_ref :: reference(),
-    nodes_ref :: reference(),
     recon_ref :: reference(),
     % data
-    tree = #{} :: lashup_gm_route:tree(),
-    nodes = #{} :: #{inet:ip4_address() => node()},
     namespaces = [host] :: [namespace()],
     % vips
     vips = [] :: [{key(), [backend()]}],
@@ -96,10 +91,6 @@ handle_cast({netns, Event}, State) ->
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-handle_info(?GM_EVENTS(_R, _T)=Event, State) ->
-    {noreply, handle_gm_event(Event, State)};
-handle_info({lashup_kv_event, Ref, Key}, State) ->
-    {noreply, handle_kv_event(Ref, Key, State)};
 handle_info({timeout, _Ref, reconcile}, State) ->
     State0 = handle_reconcile(State),
     State1 = handle_gc(State0),
@@ -128,34 +119,10 @@ handle_init() ->
     {ok, RouteMgr} = dcos_l4lb_route_mgr:start_link(),
     {ok, IPSetMgr} = dcos_l4lb_ipset_mgr:start_link(),
     {ok, NetNSMgr} = dcos_l4lb_netns_watcher:start_link(),
-
-    MatchSpec = ets:fun2ms(fun ({?NODEMETADATA_KEY}) -> true end),
-    {ok, NodesRef} = lashup_kv:subscribe(MatchSpec),
-    {ok, RouteRef} = lashup_gm_route_events:subscribe(),
     ReconRef = start_reconcile_timer(),
-
     #state{ipvs_mgr=IPVSMgr, route_mgr=RouteMgr,
            ipset_mgr=IPSetMgr, netns_mgr=NetNSMgr,
-           route_ref=RouteRef, nodes_ref=NodesRef,
            recon_ref=ReconRef}.
-
--spec(handle_gm_event(?GM_EVENTS(Ref, Tree), state()) -> state()
-    when Ref :: reference(), Tree :: lashup_gm_route:tree()).
-handle_gm_event(?GM_EVENTS(Ref, Tree), #state{route_ref=Ref}=State) ->
-    Tree0 = ?SKIP(?GM_EVENTS(Ref, T), T, Tree),
-    State#state{tree=Tree0};
-handle_gm_event(_Event, State) ->
-    State.
-
--spec(handle_kv_event(Ref, Key, state()) -> state()
-    when Ref :: reference(), Key :: term()).
-handle_kv_event(Ref, Key, #state{nodes_ref=Ref}=State) ->
-    ok = lashup_kv:flush(Ref, Key),
-    Value = lashup_kv:value(Key),
-    Nodes = [{IP, Node} || {?LWW_REG(IP), Node} <- Value],
-    State#state{nodes=maps:from_list(Nodes)};
-handle_kv_event(_Ref, _Key, State) ->
-    State.
 
 -spec(handle_netns_event({pid(), EventType, [netns()]}, state()) -> state()
     when EventType :: add_netns | remove_netns | reconcile_netns).
@@ -192,13 +159,12 @@ start_reconcile_timer() ->
 %%%===================================================================
 
 -spec(handle_reconcile([{key(), [backend()]}], state()) -> state()).
-handle_reconcile(VIPs, #state{tree=Tree, nodes=Nodes, namespaces=Namespaces,
-        route_mgr=RouteMgr, ipvs_mgr=IPVSMgr, ipset_mgr=IPSetMgr}=State) ->
+handle_reconcile(VIPs, #state{namespaces=Namespaces, route_mgr=RouteMgr,
+        ipvs_mgr=IPVSMgr, ipset_mgr=IPSetMgr}=State) ->
     % If everything is ok this function is silent and changes nothing.
     VIPs0 = vips_port_mappings(VIPs),
-    VIPs1 = healthy_vips(VIPs0, Nodes, Tree),
-    VIPsP = prepare_vips(VIPs1),
-    Routes = get_vip_routes(VIPs),
+    VIPsP = prepare_vips(VIPs0),
+    Routes = get_vip_routes(VIPs0),
     Diffs =
         lists:map(fun (Namespace) ->
             NamespaceBin = namespace2bin(Namespace),
@@ -213,13 +179,13 @@ handle_reconcile(VIPs, #state{tree=Tree, nodes=Nodes, namespaces=Namespaces,
             {Namespace, LogPrefix, DiffRoutes, DiffVIPs}
         end, Namespaces),
 
-    Keys = get_vip_keys(VIPs1),
+    Keys = get_vip_keys(VIPs0),
     PrevKeys = get_ipset_entries(IPSetMgr),
     DiffKeys = dcos_net_utils:complement(Keys, PrevKeys),
 
     State0 = handle_reconcile_apply(Diffs, DiffKeys, State),
 
-    State0#state{prev_vips=VIPs1}.
+    State0#state{prev_vips=VIPs0}.
 
 -spec(handle_reconcile_apply([Diff], diff_keys(), state()) -> state()
     when Diff :: {namespace(), binary(), diff_vips(), diff_routes()}).
@@ -255,23 +221,23 @@ handle_reconcile_apply(
     State.
 
 -spec(handle_vips([{key(), [backend()]}], state()) -> state()).
-handle_vips(VIPs, #state{tree=Tree, nodes=Nodes, prev_vips=PrevVIPs}=State) ->
+handle_vips(VIPs, #state{prev_vips=PrevVIPs}=State) ->
     VIPs0 = vips_port_mappings(VIPs),
-    VIPs1 = healthy_vips(VIPs0, Nodes, Tree),
-    DiffVIPs = diff(prepare_vips(PrevVIPs), prepare_vips(VIPs1)),
+    DiffVIPs = diff(prepare_vips(PrevVIPs), prepare_vips(VIPs0)),
 
-    Routes = get_vip_routes(VIPs1),
+    Routes = get_vip_routes(VIPs0),
     PrevRoutes = get_vip_routes(PrevVIPs),
     DiffRoutes = dcos_net_utils:complement(Routes, PrevRoutes),
 
-    Keys = get_vip_keys(VIPs1),
+    Keys = get_vip_keys(VIPs0),
     PrevKeys = get_vip_keys(PrevVIPs),
     DiffKeys = dcos_net_utils:complement(Keys, PrevKeys),
 
     State0 = handle_vips_apply(DiffVIPs, DiffRoutes, DiffKeys, State),
 
-    update_gauge(vips, length(VIPs)),
-    State0#state{vips=VIPs, prev_vips=VIPs1}.
+    update_gauge(vips, length(VIPs0)),
+    update_gauge(backends, lists:sum([length(B) || {_K, B} <- VIPs0])),
+    State0#state{vips=VIPs, prev_vips=VIPs0}.
 
 -spec(handle_vips_apply(DiffVIPs, DiffRoutes, DiffKeys, State) -> State
     when DiffVIPs :: diff_vips(), DiffRoutes :: diff_routes(),
@@ -465,74 +431,6 @@ diff([], ListB, Acc, Bcc, Mcc) ->
     {ListB ++ Acc, Bcc, Mcc};
 diff(ListA, [], Acc, Bcc, Mcc) ->
     {Acc, ListA ++ Bcc, Mcc}.
-
-%%%===================================================================
-%%% Reachability functions
-%%%===================================================================
-
--spec(healthy_vips(VIPs, Nodes, Tree) -> VIPs
-    when VIPs :: [{key(), [backend()]}],
-         Nodes :: #{inet:ip4_address() => node()},
-         Tree :: lashup_gm_route:tree()).
-healthy_vips(VIPs, Nodes, Tree)
-        when map_size(Tree) =:= 0;
-             map_size(Nodes) =:= 0 ->
-    VIPs;
-healthy_vips(VIPs, Nodes, Tree) ->
-    Agents = agents(VIPs, Nodes, Tree),
-
-    Result =
-        lists:map(fun ({VIP, BEs}) ->
-            {Healthy, BEs0} = healthy_backends(BEs, Agents),
-            {{VIP, BEs0}, {length(BEs), Healthy}}
-        end, VIPs),
-    {VIPs0, Stat} = lists:unzip(Result),
-
-    % Stat :: [{AllBackends, HealthyBackends}]
-    update_gauge(backends, lists:sum([B || {B, _H} <- Stat])),
-    update_gauge(unreachable_backends, lists:sum([B - H || {B, H} <- Stat])),
-    update_gauge(unreachable_vips, length([B || {B, 0} <- Stat, B =/= 0])),
-
-    VIPs0.
-
--spec(agents(VIPs, Nodes, Tree) -> #{inet:ip4_address() => boolean()}
-    when VIPs :: [{key(), [backend()]}],
-         Nodes :: #{inet:ip4_address() => node()},
-         Tree :: lashup_gm_route:tree()).
-agents(VIPs, Nodes, Tree) ->
-    AgentIPs =
-        lists:flatmap(fun ({_VIP, BEs}) ->
-            [AgentIP || {AgentIP, _BE} <- BEs]
-        end, VIPs),
-    AgentIPs0 = lists:usort(AgentIPs),
-    Result = [{IP, is_reachable(IP, Nodes, Tree)} || IP <- AgentIPs0],
-    Unreachable = [IP || {IP, false} <- Result],
-    [ ?LOG_WARNING(
-        "L4LB unreachable agent nodes, size: ~p, ~p",
-        [length(Unreachable), Unreachable])
-    || Unreachable =/= [] ],
-    update_gauge(unreachable_nodes, length(Unreachable)),
-    maps:from_list(Result).
-
--spec(healthy_backends([backend()], Agents) -> {non_neg_integer(), [backend()]}
-    when Agents :: #{inet:ip4_address() => boolean()}).
-healthy_backends(BEs, Agents) ->
-    case [BE || BE={IP, _BE} <- BEs, maps:get(IP, Agents)] of
-        [] -> {0, BEs};
-        BEs0 -> {length(BEs0), BEs0}
-    end.
-
--spec(is_reachable(inet:ip4_address(), Nodes, Tree) -> boolean()
-    when Nodes :: #{inet:ip4_address() => node()},
-         Tree :: lashup_gm_route:tree()).
-is_reachable(AgentIP, Nodes, Tree) ->
-    case maps:find(AgentIP, Nodes) of
-        {ok, Node} ->
-            Distance = lashup_gm_route:distance(Node, Tree),
-            Distance =/= infinity;
-        error ->
-            false
-    end.
 
 %%%===================================================================
 %%% Logging functions
@@ -736,8 +634,7 @@ init_metrics() ->
     ok = dcos_l4lb_route_mgr:init_metrics(),
     ok = dcos_l4lb_ipset_mgr:init_metrics(),
     init_vips_metrics(),
-    init_reconciled_metrics(),
-    init_unreachable_metrics().
+    init_reconciled_metrics().
 
 -spec(init_vips_metrics() -> ok).
 init_vips_metrics() ->
@@ -772,21 +669,6 @@ init_reconciled_metrics() ->
         {registry, l4lb},
         {name, reconciled_ipset_entries_total},
         {help, "Total number of reconciled IPSet entries."}]).
-
--spec(init_unreachable_metrics() -> ok).
-init_unreachable_metrics() ->
-    prometheus_gauge:new([
-        {registry, l4lb},
-        {name, unreachable_backends},
-        {help, "The number of unreachable VIP backends."}]),
-    prometheus_gauge:new([
-        {registry, l4lb},
-        {name, unreachable_vips},
-        {help, "The number of unreachable VIPs."}]),
-    prometheus_gauge:new([
-        {registry, l4lb},
-        {name, unreachable_nodes},
-        {help, "The number of unreachable nodes."}]).
 
 %%%===================================================================
 %%% Test functions
