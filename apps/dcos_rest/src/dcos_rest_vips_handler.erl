@@ -21,26 +21,32 @@ content_types_provided(Req, State) ->
     ], Req, State}.
 
 process(Req, State) ->
-    {Value, VClock} = lashup_kv:value2(?VIPS_KEY2),
+    {Value, VClock} = lashup_kv:value2(?VIPS_KEY3),
+    VIPs =
+        case lists:keyfind(?VIPS_FIELD, 1, Value) of
+            false -> #{};
+            {?VIPS_FIELD, V} -> V
+        end,
     VClockHash = base64:encode(crypto:hash(sha, term_to_binary(VClock))),
     Req0 = cowboy_req:set_resp_header(<<"ETag">>, VClockHash, Req),
-    {to_json(Value), Req0, State}.
+    {to_json(VIPs), Req0, State}.
 
 to_json(VIPs) ->
-    Data = lists:map(fun vip_to_json_term/1, VIPs),
-    jsx:encode(Data).
+    Data = maps:fold(fun to_json_fold/3, [], VIPs),
+    jiffy:encode(Data).
 
-vip_to_json_term({VIP, Backend}) ->
+to_json_fold(VIP, Backends, Acc) ->
+    [vip_to_json_term(VIP, Backends) | Acc].
+
+vip_to_json_term(VIP, Backends) ->
     {Name, Protocol} = vip(VIP),
     #{
         vip => Name,
         protocol => Protocol,
-        backend => lists:map(fun backend/1, Backend)
+        backend => lists:flatmap(fun backends/1, Backends)
     }.
 
-vip({{Protocol, VIP, Port}, riak_dt_orswot}) ->
-    vip({Protocol, VIP, Port});
-vip({Protocol, {name, {Id, Framework}}, Port}) ->
+vip({Protocol, {Id, Framework}, Port}) ->
     List = [Id, Framework | ?L4LB_ZONE_NAME],
     FullName = dcos_l4lb_lashup_vip_listener:to_name(List),
     vip(Protocol, FullName, Port);
@@ -51,11 +57,10 @@ vip(Protocol, FullName, Port) ->
     PortBin = integer_to_binary(Port),
     {<<FullName/binary, ":", PortBin/binary>>, Protocol}.
 
-backend({_AgentIP, {IP, Port}}) ->
-    #{
-        ip => ip(IP),
-        port => Port
-    }.
+backends(#{host_port := HostPort, agent_ip := AgentIP}) ->
+    [#{ip => ip(AgentIP), port => HostPort}];
+backends(#{port := Port, task_ip := TaskIPs}) ->
+    [#{ip => ip(IP), port => Port} || IP <- TaskIPs].
 
 ip(IP) ->
     list_to_binary(lists:flatten(inet:ntoa(IP))).

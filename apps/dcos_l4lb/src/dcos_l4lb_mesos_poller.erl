@@ -5,6 +5,7 @@
 
 -include("dcos_l4lb.hrl").
 -include_lib("kernel/include/logger.hrl").
+-include_lib("stdlib/include/ms_transform.hrl").
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -20,12 +21,10 @@
 -export([init/1, handle_call/3,
     handle_cast/2, handle_info/2, handle_continue/2]).
 
--export_type([named_vip/0, vip/0, protocol/0,
-    key/0, lkey/0, backend/0]).
-
 -record(state, {
     backoff :: backoff:backoff(),
-    timer_ref = make_ref() :: reference()
+    timer_ref = make_ref() :: reference(),
+    wait_ref :: reference() | undefined
 }).
 
 -type task() :: dcos_net_mesos_listener:task().
@@ -56,7 +55,7 @@ init([]) ->
     PollMaxInterval = dcos_l4lb_config:agent_poll_max_interval(),
     Backoff0 = backoff:init(PollInterval, PollMaxInterval, self(), poll),
     Backoff = backoff:type(Backoff0, jitter),
-    {ok, #state{backoff = Backoff}, {continue, poll}}.
+    {ok, #state{backoff = Backoff}, {continue, wait}}.
 
 handle_call(Request, _From, State) ->
     ?LOG_WARNING("Unexpected request: ~p", [Request]),
@@ -66,12 +65,27 @@ handle_cast(Request, State) ->
     ?LOG_WARNING("Unexpected request: ~p", [Request]),
     {noreply, State}.
 
+handle_info({lashup_kv_event, WRef, ?VIPS_KEY2}, State) ->
+    ok = lashup_kv:flush(WRef, ?VIPS_KEY2),
+    case lashup_kv:raw_value(?VIPS_KEY2) of
+        false ->
+            % ?VIPS_KEY2 doesn't exist
+            {noreply, State};
+        _Value ->
+            ok = lashup_kv:unsubscribe(WRef),
+            {noreply, State#state{wait_ref = undefined}, {continue, poll}}
+    end;
 handle_info({timeout, TRef, poll}, #state{timer_ref = TRef} = State) ->
     {noreply, State, {continue, poll}};
 handle_info(Info, State) ->
     ?LOG_WARNING("Unexpected info: ~p", [Info]),
     {noreply, State}.
 
+handle_continue(wait, State) ->
+    % Wait for ?VIPS_KEY2 and start polling only if it exists.
+    MatchSpec = ets:fun2ms(fun ({?VIPS_KEY2}) -> true end),
+    {ok, WRef} = lashup_kv:subscribe(MatchSpec),
+    {noreply, State#state{wait_ref=WRef}};
 handle_continue(poll, #state{backoff = Backoff0} = State) ->
     {Backoff, TimerRef} = handle_poll(Backoff0),
     {noreply, State#state{backoff = Backoff, timer_ref = TimerRef}, hibernate};
@@ -117,9 +131,6 @@ handle_poll(true, Backoff0) ->
 handle_poll_state(Tasks) ->
     HealthyTasks = maps:filter(fun is_healthy/2, Tasks),
 
-    PortMappings = collect_port_mappings(HealthyTasks),
-    dcos_l4lb_mgr:local_port_mappings(PortMappings),
-
     VIPs = collect_vips(HealthyTasks),
     ok = push_vips(VIPs),
 
@@ -144,20 +155,6 @@ is_healthy(_Task) ->
 %%%===================================================================
 %%% Collect functions
 %%%===================================================================
-
--spec(collect_port_mappings(#{task_id() => task()}) -> #{Host => Container}
-    when Host :: {protocol(), inet:port_number()},
-         Container :: {inet:ip_address(), inet:port_number()}).
-collect_port_mappings(Tasks) ->
-    maps:fold(fun (_TaskId, Task, Acc) ->
-        Runtime = maps:get(runtime, Task),
-        [TaskIP | _TaskIPs] = maps:get(task_ip, Task),
-        PMs = [{{Protocol, Host}, {TaskIP, Port}}
-              || #{host_port := Host, protocol := Protocol,
-                   port := Port} <- maps:get(ports, Task, []),
-                 Runtime =/= docker],
-        PMs ++ Acc
-    end, [], Tasks).
 
 -spec(collect_vips(#{task_id() => task()}) -> #{key() => [backend()]}).
 collect_vips(Tasks) ->

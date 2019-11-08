@@ -45,41 +45,53 @@ end_per_testcase(_, _Config) ->
     dcos_l4lb_ipset_mgr:cleanup(),
     ok.
 
--define(LKEY(K), {{tcp, K, 80}, riak_dt_orswot}).
--define(LKEY(L, F), ?LKEY({name, {L, F}})).
--define(BE4, {{1, 2, 3, 4}, {{1, 2, 3, 4}, 80}}).
--define(BE6, {{1, 2, 3, 4}, {{1, 0, 0, 0, 0, 0, 0, 1}, 80}}).
+-define(KEY(K), {tcp, K, 80}).
+-define(BE4, #{
+    task_id => make_ref(),
+    agent_ip => {1, 2, 3, 4},
+    task_ip => [{1, 2, 3, 4}],
+    port => 80,
+    runtime => mesos
+}).
+-define(BE6, #{
+    task_id => make_ref(),
+    agent_ip => {1, 2, 3, 4},
+    task_ip => [{1, 0, 0, 0, 0, 0, 0, 1}],
+    port => 80,
+    runtime => mesos
+}).
 
 lookup_vips(_Config) ->
-    lashup_kv:request_op(?VIPS_KEY2, {update, [
-        {update, ?LKEY({1, 2, 3, 4}), {add, ?BE4}},
-        {update, ?LKEY(<<"/foo">>, <<"bar">>), {add, ?BE4}},
-        {update, ?LKEY(<<"/baz">>, <<"qux">>), {add, ?BE4}},
-        {update, ?LKEY(<<"/qux">>, <<"ipv6">>), {add, ?BE6}}
-    ]}),
+    VIPs = #{
+        ?KEY({1, 2, 3, 4}) => [?BE4],
+        ?KEY({<<"/foo">>, <<"bar">>}) => [?BE4],
+        ?KEY({<<"/baz">>, <<"qux">>}) => [?BE4],
+        ?KEY({<<"/qux">>, <<"ipv6">>}) => [?BE6]
+    },
+    push_vips(VIPs),
     timer:sleep(100),
     {11, 0, 0, 37} = name2ip(<<"foo.bar">>),
     {11, 0, 0, 39} = IP4 = name2ip(<<"baz.qux">>),
     {16#fd01, 16#c, 0, 0, 16#6d6d, 16#9c64, 16#fd19, 16#f251} = IP6 =
         name2ip(?DNS_TYPE_AAAA, <<"qux.ipv6">>),
 
-    lashup_kv:request_op(?VIPS_KEY2, {update, [
-        {update, ?LKEY(<<"/foo">>, <<"bar">>), {remove, ?BE4}}
-    ]}),
+    VIPs0 = maps:remove(?KEY({<<"/foo">>, <<"bar">>}), VIPs),
+    push_vips(VIPs0),
     timer:sleep(100),
     false = name2ip(<<"foo.bar">>),
     IP4 = name2ip(<<"baz.qux">>),
     IP6 = name2ip(?DNS_TYPE_AAAA, <<"qux.ipv6">>),
 
-    lashup_kv:request_op(?VIPS_KEY2, {update, [
-        {update, ?LKEY({1, 2, 3, 4}), {remove, ?BE4}},
-        {update, ?LKEY(<<"/baz">>, <<"qux">>), {remove, ?BE4}},
-        {update, ?LKEY(<<"/qux">>, <<"ipv6">>), {remove, ?BE6}}
-    ]}),
+    push_vips(#{}),
     timer:sleep(100),
     false = name2ip(<<"foo.bar">>),
     false = name2ip(<<"baz.qux">>),
     false = name2ip(?DNS_TYPE_AAAA, <<"qux.ipv6">>).
+
+push_vips(VIPs) ->
+    Op = {assign, VIPs, erlang:system_time(millisecond)},
+    {ok, _Info} = lashup_kv:request_op(
+        ?VIPS_KEY3, {update, [{update, ?VIPS_FIELD, Op}]}).
 
 -define(LOCALHOST, {127, 0, 0, 1}).
 resolve(DType, DName) ->
