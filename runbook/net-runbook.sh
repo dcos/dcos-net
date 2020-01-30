@@ -399,20 +399,24 @@ dns-data() {
 
 # dig <yourapp>.<yourframework>.mesos @127.0.0.1 -p 61053
 
-mkdir "$DATA_DIR"
+main() {
+  mkdir "$DATA_DIR"
 
-dcos-version
-os-data
-docker-version
-logs
-dcos-configs
-sockets
-mesos-state
-l4lb-data
-overlay-data
-docker-networks
-dns-data
+  dcos-version
+  os-data
+  docker-version
+  logs
+  dcos-configs
+  sockets
+  mesos-state
+  l4lb-data
+  overlay-data
+  docker-networks
+  dns-data
 
-chmod 644 "$DATA_DIR"/*
-tar czf "$DATA_DIR.tar.gz" "$DATA_DIR"
-rm -Rf "$DATA_DIR"
+  chmod 644 "$DATA_DIR"/*
+  tar czf "$DATA_DIR.tar.gz" "$DATA_DIR"
+  rm -Rf "$DATA_DIR"
+}
+
+main
