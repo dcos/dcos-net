@@ -76,24 +76,35 @@ if [ "$USE_NET_TOOLBOX" == "true" ]; then
   fi
 fi
 
-wrap-curl() {
-  curl --insecure --silent "$@"
-}
+wrap-toolbox() {
+  cmd=$1
+  shift
 
-wrap-ipvsadm() {
   if [ "${USE_NET_TOOLBOX}" == "false" ]; then
-    if type ipvsadm &> /dev/null; then
-      ipvsadm "$@"
+    if type "$cmd" &> /dev/null; then
+      "$cmd" "$@"
     else
-      echo "ipvsadm is not available"
+      echo "$cmd is not available"
     fi
   else
     docker run \
            --rm \
            --net=host \
            --privileged \
-           mesosphere/net-toolbox:latest ipvsadm "$@"
+           mesosphere/net-toolbox:latest "$cmd" "$@"
   fi
+}
+
+wrap-curl() {
+  curl --insecure --silent "$@"
+}
+
+wrap-dig() {
+  wrap-toolbox dig "$@"
+}
+
+wrap-ipvsadm() {
+  wrap-toolbox ipvsadm "$@"
 }
 
 wrap-net-eval() {
@@ -352,13 +363,13 @@ dns-data() {
   cat /etc/resolv.conf > "$DATA_DIR/resolv.conf"
 
   echo "Resovling ready.spartan ..."
-  dig ready.spartan > "$DATA_DIR/dig-ready.spartan.txt"
+  wrap-dig ready.spartan > "$DATA_DIR/dig-ready.spartan.txt"
   echo "Resovling ready.spartan through 198.51.100.1 ..."
-  dig ready.spartan @198.51.100.1 > "$DATA_DIR/dig-ready.spartan-at-198.51.100.1.txt"
+  wrap-dig ready.spartan @198.51.100.1 > "$DATA_DIR/dig-ready.spartan-at-198.51.100.1.txt"
   echo "Resovling leader.mesos through 198.51.100.1 ..."
-  dig leader.mesos @198.51.100.1 > "$DATA_DIR/dig-leader.mesos-at-198.51.100.1.txt"
+  wrap-dig leader.mesos @198.51.100.1 > "$DATA_DIR/dig-leader.mesos-at-198.51.100.1.txt"
   echo "Resovling dcos.io through 198.51.100.1 ..."
-  dig dcos.io @198.51.100.1 > "$DATA_DIR/dig-dcos.io-at-198.51.100.1.txt"
+  wrap-dig dcos.io @198.51.100.1 > "$DATA_DIR/dig-dcos.io-at-198.51.100.1.txt"
 
   echo "Resolving dcos.io through upstream servers..."
   (
@@ -366,7 +377,7 @@ dns-data() {
     source /opt/mesosphere/etc/dns_config;
     for server in $(echo "$RESOLVERS" | tr ',' '\n'); do
       echo "===    Upstream DNS server: $server ===";
-      dig dcos.io @"$server";
+      wrap-dig dcos.io @"$server";
     done
   ) > "$DATA_DIR/dig-dcos.io-at-upstream-servers.txt"
 
