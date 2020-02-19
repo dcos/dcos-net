@@ -114,6 +114,11 @@ is_healthy(_TaskId, Task) ->
 -spec(is_healthy(task()) -> boolean()).
 is_healthy(#{healthy := IsHealthy, state := running}) ->
     IsHealthy;
+% NOTE(jkoelker): when the state is `killing` we specifically ignore health
+%                 checks, since mesos stops checking when the task transitions
+%                 to `killing`.
+is_healthy(#{state := killing}) ->
+    true;
 is_healthy(#{state := running}) ->
     true;
 is_healthy(_Task) ->
