@@ -32,7 +32,7 @@
     ports => [task_port()]
 }.
 -type runtime() :: docker | mesos | unknown.
--type task_state() :: preparing | running | terminal.
+-type task_state() :: preparing | running | killing | terminal.
 -type task_port() :: #{
     name => binary(),
     host_port => inet:port_number(),
@@ -536,6 +536,8 @@ handle_task_state(TaskObj, _Task) ->
             terminal;
         <<"TASK_RUNNING">> ->
             running;
+        <<"TASK_KILLING">> ->
+            killing;
         _TaskState ->
             preparing
     end.
