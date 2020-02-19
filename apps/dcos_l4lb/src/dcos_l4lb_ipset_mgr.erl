@@ -22,7 +22,7 @@
 
 -export_type([entry/0]).
 
--type entry() :: dcos_l4lb_mgr:key().
+-type entry() :: dcos_l4lb_mesos_poller:key().
 
 -record(state, {
     netlink :: pid()

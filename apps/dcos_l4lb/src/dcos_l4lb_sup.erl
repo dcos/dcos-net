@@ -12,10 +12,9 @@ init([false]) ->
     {ok, {#{}, []}};
 init([true]) ->
     dcos_l4lb_mesos_poller:init_metrics(),
-    MChildren = [?CHILD(dcos_l4lb_mesos) || dcos_net_app:is_master()],
-    Children = [
+    {ok, {#{intensity => 10000, period => 1}, [
         ?CHILD(dcos_l4lb_network_sup, #{type => supervisor}),
         ?CHILD(dcos_l4lb_mesos_poller),
-        ?CHILD(dcos_l4lb_metrics)
-    ],
-    {ok, {#{intensity => 10000, period => 1}, MChildren ++ Children}}.
+        ?CHILD(dcos_l4lb_metrics),
+        ?CHILD(dcos_l4lb_lashup_publish)
+    ]}}.
