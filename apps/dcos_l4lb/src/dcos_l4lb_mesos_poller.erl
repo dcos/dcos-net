@@ -18,7 +18,7 @@
     handle_info/2, terminate/2, code_change/3]).
 
 -export_type([named_vip/0, vip/0, protocol/0,
-    key/0, lkey/0, backend/0]).
+    key/0, lkey/0, backend/0, backend_weight/0]).
 
 -record(state, {
     timer_ref :: reference()
@@ -35,8 +35,11 @@
 -type lkey() :: {key(), riak_dt_orswot}.
 -type backend() :: {
     AgentIP :: inet:ip4_address(),
-    {BackendIP :: inet:ip_address(), BackendPort :: inet:port_number() }
+    {BackendIP :: inet:ip_address(),
+     BackendPort :: inet:port_number(),
+     BackendWeight :: backend_weight() }
 }.
+-type backend_weight() :: 0..65535.
 
 -spec(start_link() ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
@@ -188,15 +191,24 @@ key(Task, PortObj, VIPLabel) ->
 backends(Key, Task, PortObj) ->
     IsIPv6Enabled = dcos_l4lb_config:ipv6_enabled(),
     AgentIP = maps:get(agent_ip, Task),
+    Weight = get_weight(Task),
     case maps:find(host_port, PortObj) of
         error ->
             Port = maps:get(port, PortObj),
-            [ {AgentIP, {TaskIP, Port}}
+            [ {AgentIP, {TaskIP, Port, Weight}}
             || TaskIP <- maps:get(task_ip, Task),
                validate_backend_ip(IsIPv6Enabled, Key, TaskIP) ];
         {ok, HostPort} ->
-            [{AgentIP, {AgentIP, HostPort}}]
+            [{AgentIP, {AgentIP, HostPort, Weight}}]
     end.
+
+-spec(get_weight(task()) -> backend_weight()).
+get_weight(#{state := killing}) ->
+    0;
+get_weight(#{state := running}) ->
+    1;
+get_weight(_Task) ->
+    0.
 
 -spec(validate_backend_ip(boolean(), key(), inet:ip_address()) -> boolean()).
 validate_backend_ip(true, {_Protocol, {name, _Name}, _VIPPort}, _TaskIP) ->
