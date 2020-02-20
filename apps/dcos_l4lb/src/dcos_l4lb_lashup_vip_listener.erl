@@ -116,7 +116,7 @@ process_vip(Key, BEs) ->
 
 -spec(categorize_backends([backend()]) -> [{family(), [backend()]}]).
 categorize_backends(BEs) ->
-    lists:foldl(fun ({_AgentIP, {IP, _Port}}=BE, Acc) ->
+    lists:foldl(fun ({_AgentIP, {IP, _Port, _Weight}}=BE, Acc) ->
         Family = dcos_l4lb_app:family(IP),
         orddict:append(Family, BE, Acc)
     end, orddict:new(), BEs).

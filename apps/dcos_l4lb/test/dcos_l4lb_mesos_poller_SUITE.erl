@@ -13,7 +13,8 @@
 -export([
     test_lashup/1,
     test_mesos_portmapping/1,
-    test_app_restart/1
+    test_app_restart/1,
+    test_task_killing/1
 ]).
 
 
@@ -21,7 +22,8 @@
 all() -> [
     test_lashup,
     test_mesos_portmapping,
-    test_app_restart
+    test_app_restart,
+    test_task_killing
 ].
 
 init_per_suite(Config) ->
@@ -80,6 +82,22 @@ meck_mesos_poll_app_task() ->
         }
     }}.
 
+meck_mesos_poll_app_task_killing() ->
+    {ok, #{
+        <<"app.22a97c91-8a25-43ed-8195-e20938687ec3">> => #{
+            name => <<"app">>,
+            runtime => mesos,
+            framework => <<"marathon">>,
+            agent_ip => node_ip(),
+            task_ip => [{9, 0, 1, 29}],
+            ports => [
+                #{name => <<"http">>, protocol => tcp, host_port => 12049,
+                  port => 80, vip => [<<"merp:5000">>]}
+            ],
+            state => killing
+        }
+    }}.
+
 meck_mesos_poll_app_task_after_restart() ->
     {ok, #{
         <<"app.b35733e8-8336-4d21-ae60-f3bc4384a93a">> => #{
@@ -101,7 +119,7 @@ test_lashup(_Config) ->
     ensure_l4lb_started(),
     Actual = lashup_kv:value(?VIPS_KEY2),
     ?assertMatch(
-        [{_, [{{10, 0, 0, 243}, {{10, 0, 0, 243}, 12049}}]}],
+        [{_, [{{10, 0, 0, 243}, {{10, 0, 0, 243}, 12049, 1}}]}],
         Actual).
 
 test_mesos_portmapping(_Config) ->
@@ -118,7 +136,7 @@ test_app_restart(_Config) ->
     {ActualPortMappings, ActualVIPs} = retrieve_data(),
     ?assertMatch([{{tcp, 12049}, {{9, 0, 1, 29}, 80}}],
         ActualPortMappings),
-    ?assertMatch([{_, [{{10, 0, 0, 243}, {{10, 0, 0, 243}, 12049}}]}],
+    ?assertMatch([{_, [{{10, 0, 0, 243}, {{10, 0, 0, 243}, 12049, 1}}]}],
         ActualVIPs),
 
     meck:expect(dcos_net_mesos_listener, poll, fun meck_mesos_poll_no_tasks/0),
@@ -131,8 +149,16 @@ test_app_restart(_Config) ->
     {ActualPortMappings3, ActualVIPs3} = retrieve_data(),
     ?assertMatch([{{tcp, 23176}, {{9, 0, 1, 30}, 80}}],
         ActualPortMappings3),
-    ?assertMatch([{_, [{{10, 0, 0, 243}, {{10, 0, 0, 243}, 23176}}]}],
+    ?assertMatch([{_, [{{10, 0, 0, 243}, {{10, 0, 0, 243}, 23176, 1}}]}],
         ActualVIPs3).
+
+test_task_killing(_Config) ->
+    meck:expect(dcos_net_mesos_listener, poll, fun meck_mesos_poll_app_task_killing/0),
+    ensure_l4lb_started(),
+    Actual = lashup_kv:value(?VIPS_KEY2),
+    ?assertMatch(
+        [{_, [{{10, 0, 0, 243}, {{10, 0, 0, 243}, 12049, 0}}]}],
+        Actual).
 
 retrieve_data() ->
     meck:reset(dcos_net_mesos_listener),
