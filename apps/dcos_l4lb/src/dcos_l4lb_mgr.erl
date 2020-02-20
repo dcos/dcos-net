@@ -403,11 +403,11 @@ apply_vips_diff(IPVSMgr, Namespace, {ToAdd, ToDel, ToMod}) ->
 -spec(vip_add(pid(), namespace(), {key(), [ipport()]}) -> ok).
 vip_add(IPVSMgr, Namespace, {{Protocol, IP, Port}, BEs}) ->
     dcos_l4lb_ipvs_mgr:add_service(IPVSMgr, IP, Port, Protocol, Namespace),
-    lists:foreach(fun ({BEIP, BEPort}) ->
+    lists:foreach(fun ({BEIP, BEPort, BEWeight}) ->
         dcos_l4lb_ipvs_mgr:add_dest(
             IPVSMgr, IP, Port,
             BEIP, BEPort,
-            Protocol, Namespace)
+            Protocol, Namespace, BEWeight)
     end, BEs).
 
 -spec(vip_del(pid(), namespace(), {key(), [ipport()]}) -> ok).
@@ -416,13 +416,13 @@ vip_del(IPVSMgr, Namespace, {{Protocol, IP, Port}, _BEs}) ->
 
 -spec(vip_mod(pid(), namespace(), {key(), [ipport()], [ipport()]}) -> ok).
 vip_mod(IPVSMgr, Namespace, {{Protocol, IP, Port}, ToAdd, ToDel}) ->
-    lists:foreach(fun ({BEIP, BEPort}) ->
+    lists:foreach(fun ({BEIP, BEPort, BEWeight}) ->
         dcos_l4lb_ipvs_mgr:add_dest(
             IPVSMgr, IP, Port,
             BEIP, BEPort,
-            Protocol, Namespace)
+            Protocol, Namespace, BEWeight)
     end, ToAdd),
-    lists:foreach(fun ({BEIP, BEPort}) ->
+    lists:foreach(fun ({BEIP, BEPort, _BEWeight}) ->
         dcos_l4lb_ipvs_mgr:remove_dest(
             IPVSMgr, IP, Port,
             BEIP, BEPort,
@@ -654,13 +654,13 @@ vips_port_mappings(VIPs) ->
          Container :: {inet:ip_address(), inet:port_number()}).
 bes_port_mappings(PMs, Protocol, AgentIP, BEs) ->
     lists:map(
-        fun ({BEAgentIP, {BEIP, BEPort}}) when BEIP =:= AgentIP ->
+        fun ({BEAgentIP, {BEIP, BEPort, Weight}}) when BEIP =:= AgentIP ->
                 case maps:find({Protocol, BEPort}, PMs) of
-                    {ok, {IP, Port}} -> {BEAgentIP, {IP, Port}};
-                    error -> {BEAgentIP, {BEIP, BEPort}}
+                    {ok, {IP, Port}} -> {BEAgentIP, {IP, Port, Weight}};
+                    error -> {BEAgentIP, {BEIP, BEPort, Weight}}
                 end;
-            ({BEAgentIP, {BEIP, BEPort}}) ->
-                {BEAgentIP, {BEIP, BEPort}}
+            ({BEAgentIP, {BEIP, BEPort, Weight}}) ->
+                {BEAgentIP, {BEIP, BEPort, Weight}}
         end, BEs).
 
 %%%===================================================================
