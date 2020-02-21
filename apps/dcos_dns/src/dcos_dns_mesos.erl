@@ -1,5 +1,5 @@
 -module(dcos_dns_mesos).
--behavior(dcos_net_gen_mesos_listener).
+-behavior(gen_server).
 
 -include("dcos_dns.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -11,76 +11,121 @@
     push_zone/2
 ]).
 
-%% dcos_net_gen_mesos_listener callbacks
--export([handle_info/2, handle_reset/1, handle_push/1,
-    handle_tasks/1, handle_task_updated/3]).
+%% gen_server callbacks
+-export([init/1, handle_call/3,
+    handle_cast/2, handle_info/2, handle_continue/2]).
 
 -type task() :: dcos_net_mesos_listener:task().
 -type task_id() :: dcos_net_mesos_listener:task_id().
 
 -record(state, {
+    ref = undefined :: undefined | reference(),
     tasks = #{} :: #{task_id() => [dns:dns_rr()]},
     records = #{} :: #{dns:dns_rr() => pos_integer()},
     records_by_name = #{} :: #{dns:dname() => [dns:dns_rr()]},
     masters_ref = undefined :: undefined | reference(),
-    masters = [] :: [dns:dns_rr()]
+    masters = [] :: [dns:dns_rr()],
+    push_zone_ref = undefined :: reference() | undefined,
+    push_zone_rev = 0 :: non_neg_integer()
 }).
 -type state() :: #state{}.
 
 -spec(start_link() -> {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link() ->
-    dcos_net_gen_mesos_listener:start_link({local, ?MODULE}, ?MODULE).
-
--spec(push_zone(dns:dname(), #{dns:dname() => [dns:dns_rr()]}) -> ok).
-push_zone(ZoneName, RecordsByName) when is_map(RecordsByName) ->
-    Op = {assign, RecordsByName, erlang:system_time(millisecond)},
-    {ok, _Info} = lashup_kv:request_op(
-        ?LASHUP_LWW_KEY(ZoneName),
-        {update, [{update, ?RECORDS_LWW_FIELD, Op}]}),
-    ok.
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 %%%===================================================================
-%%% dcos_net_gen_mesos_listener callbacks
+%%% gen_server callbacks
 %%%===================================================================
 
+init([]) ->
+    {ok, #state{}, {continue, init}}.
+
+handle_call(Request, _From, State) ->
+    ?LOG_WARNING("Unexpected request: ~p", [Request]),
+    {reply, ok, State}.
+
+handle_cast(Request, State) ->
+    ?LOG_WARNING("Unexpected request: ~p", [Request]),
+    {noreply, State}.
+
+handle_info({{tasks, MTasks}, Ref}, #state{ref = Ref} = State0) ->
+    ok = dcos_net_mesos_listener:next(Ref),
+    {noreply, handle_tasks(MTasks, State0)};
+handle_info({{task_updated, TaskId, Task}, Ref}, #state{ref = Ref} = State) ->
+    ok = dcos_net_mesos_listener:next(Ref),
+    {noreply, handle_task_updated(TaskId, Task, State)};
+handle_info({eos, Ref}, #state{ref = Ref} = State) ->
+    ok = dcos_net_mesos_listener:next(Ref),
+    {noreply, reset_state(State)};
+handle_info({'DOWN', Ref, process, _Pid, Info}, #state{ref = Ref} = State) ->
+    {stop, Info, State};
+handle_info({timeout, _Ref, init}, #state{ref = undefined} = State) ->
+    {noreply, State, {continue, init}};
 handle_info({timeout, Ref, masters}, #state{masters_ref = Ref} = State) ->
-    {Updated, State0} = handle_masters(State),
-    {noreply, State0, Updated};
+    {noreply, handle_masters(State)};
+handle_info({timeout, Ref, {push_zone, Rev}},
+        #state{push_zone_ref = Ref} = State) ->
+    {noreply, handle_push_zone(Rev, State), hibernate};
 handle_info(Info, State) ->
     ?LOG_WARNING("Unexpected info: ~p", [Info]),
     {noreply, State}.
 
-handle_reset(#state{masters_ref = undefined}) ->
-    ok;
-handle_reset(#state{masters_ref = MRef}) ->
-    _ = erlang:cancel_timer(MRef),
-    ok.
+handle_continue(init, State) ->
+    case dcos_net_mesos_listener:subscribe() of
+        {ok, Ref} ->
+            {noreply, State#state{ref = Ref}};
+        {error, timeout} ->
+            exit(timeout);
+        {error, subscribed} ->
+            exit(subscribed);
+        {error, _Error} ->
+            timer:sleep(100),
+            {noreply, State, {continue, init}}
+    end;
+handle_continue(Request, State) ->
+    ?LOG_WARNING("Unexpected request: ~p", [Request]),
+    {noreply, State}.
 
-handle_push(#state{records_by_name = RecordsByName}) ->
-    ok = push_zone(?DCOS_DOMAIN, RecordsByName).
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
 
-handle_tasks(MTasks) ->
+-spec(reset_state(state()) -> state()).
+reset_state(#state{ref = Ref, masters_ref = MastersRef,
+        push_zone_ref = PushZoneRef}) ->
+    case MastersRef of
+        undefined -> ok;
+        _ -> erlang:cancel_timer(MastersRef)
+    end,
+    case PushZoneRef of
+        undefined-> ok;
+        _ -> erlang:cancel_timer(PushZoneRef)
+    end,
+    #state{ref = Ref}.
+
+%%%===================================================================
+%%% Tasks functions
+%%%===================================================================
+
+-spec(handle_tasks(#{task_id => task()}, state()) -> state()).
+handle_tasks(MTasks, State) ->
     MRef = start_masters_timer(),
     {Tasks, Records, RecordsByName} = task_records(MTasks),
+    ok = push_zone(?DCOS_DOMAIN, RecordsByName),
     ?LOG_NOTICE("DC/OS DNS Sync: ~p records", [maps:size(Records)]),
-    #state{
-        tasks = Tasks, records = Records,
-        records_by_name = RecordsByName,
-        masters_ref = MRef}.
+    State#state{tasks = Tasks, records = Records,
+        records_by_name = RecordsByName, masters_ref = MRef}.
 
+-spec(handle_task_updated(task_id(), task(), state()) -> state()).
 handle_task_updated(TaskId, Task, #state{
         tasks = Tasks, records = Records,
         records_by_name = RecordsByName} = State) ->
     {Tasks0, Records0, RecordsByName0, Updated} =
         task_updated(TaskId, Task, Tasks, Records, RecordsByName),
-    State0 = State#state{
+    maybe_handle_push_zone(Updated, State#state{
         tasks = Tasks0, records = Records0,
-        records_by_name = RecordsByName0},
-    {Updated, State0}.
-
-%%%===================================================================
-%%% Tasks functions
-%%%===================================================================
+        records_by_name = RecordsByName0}).
 
 -spec(task_updated(task_id(), task(), Tasks, Records, RecordsByName) ->
     {Tasks, Records, RecordsByName, Updated}
@@ -243,7 +288,7 @@ remove_from_index(RRs, RecordsByName) ->
 %%% Masters functions
 %%%===================================================================
 
--spec(handle_masters(state()) -> {Updated :: boolean(), state()}).
+-spec(handle_masters(state()) -> state()).
 handle_masters(#state{
     masters = MRRs, records_by_name = RecordsByName} = State) ->
     ZoneName = ?DCOS_DOMAIN,
@@ -263,7 +308,7 @@ handle_masters(#state{
         masters = MRRs0,
         masters_ref = start_masters_timer(),
         records_by_name = RecordsByName1},
-    {Added orelse Removed, State0}.
+    maybe_handle_push_zone(Added orelse Removed, State0).
 
 -spec(master_records(dns:dname()) -> [dns:dns_rr()]).
 master_records(ZoneName) ->
@@ -293,3 +338,41 @@ format_name(ListOfNames, Postfix) ->
     ListOfNames2 = lists:map(fun list_to_binary/1, ListOfNames1),
     Prefix = dcos_net_utils:join(ListOfNames2, <<".">>),
     <<Prefix/binary, ".", Postfix/binary>>.
+
+%%%===================================================================
+%%% Lashup functions
+%%%===================================================================
+
+-spec(push_zone(dns:dname(), #{dns:dname() => [dns:dns_rr()]}) -> ok).
+push_zone(ZoneName, RecordsByName) when is_map(RecordsByName) ->
+    Op = {assign, RecordsByName, erlang:system_time(millisecond)},
+    {ok, _Info} = lashup_kv:request_op(
+        ?LASHUP_LWW_KEY(ZoneName),
+        {update, [{update, ?RECORDS_LWW_FIELD, Op}]}),
+    ok.
+
+-spec(maybe_handle_push_zone(boolean(), state()) -> state()).
+maybe_handle_push_zone(false, State) ->
+    State;
+maybe_handle_push_zone(true, State) ->
+    handle_push_zone(State).
+
+-spec(handle_push_zone(non_neg_integer(), state()) -> state()).
+handle_push_zone(RevA, #state{push_zone_rev = RevB} = State) ->
+    maybe_handle_push_zone(RevA < RevB, State#state{push_zone_ref=undefined}).
+
+-spec(handle_push_zone(state()) -> state()).
+handle_push_zone(#state{push_zone_ref = undefined, push_zone_rev = Rev,
+        records_by_name = RecordsByName} = State) ->
+    % NOTE: push data to lashup 1 time per second
+    ok = push_zone(?DCOS_DOMAIN, RecordsByName),
+    Rev0 = Rev + 1,
+    Ref0 = start_push_zone_timer(Rev0),
+    State#state{push_zone_ref = Ref0, push_zone_rev = Rev0};
+handle_push_zone(#state{push_zone_rev = Rev} = State) ->
+    State#state{push_zone_rev = Rev + 1}.
+
+-spec(start_push_zone_timer(Rev :: non_neg_integer()) -> reference()).
+start_push_zone_timer(Rev) ->
+    Timeout = application:get_env(dcos_dns, push_zone_timeout, 1000),
+    erlang:start_timer(Timeout, self(), {push_zone, Rev}).

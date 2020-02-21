@@ -90,18 +90,19 @@ webserver(Pid, AgentIP) ->
     Info = httpd:info(Pid),
     Port = proplists:get_value(port, Info),
     IP = proplists:get_value(bind_address, Info),
-    #{
-        task_id => make_ref(),
-        agent_ip => AgentIP,
-        task_ip => [IP],
-        port => Port,
-        runtime => mesos
-    }.
+    {AgentIP, {IP, Port}}.
 
-push_vips(VIPs) ->
-    Op = {assign, VIPs, erlang:system_time(millisecond)},
-    {ok, _Info} = lashup_kv:request_op(
-        ?VIPS_KEY3, {update, [{update, ?VIPS_FIELD, Op}]}).
+add_webserver(VIP, WebServer) ->
+    % inject an update for this vip
+    {ok, _} = lashup_kv:request_op(?VIPS_KEY2, {update, [{update, {VIP, riak_dt_orswot}, {add, WebServer}}]}).
+
+remove_webserver(VIP, WebServer) ->
+    % inject an update for this vip
+    {ok, _} = lashup_kv:request_op(?VIPS_KEY2, {update, [{update, {VIP, riak_dt_orswot}, {remove, WebServer}}]}).
+
+remove_vip(VIP) ->
+    {ok, _} = lashup_kv:request_op(?VIPS_KEY2, {update, [{remove, {VIP, riak_dt_orswot}}]}).
+
 
 test_vip(Family, VIP) ->
     %% Wait for lashup state to take effect
@@ -132,15 +133,15 @@ test_v4(Config) ->
     W1 = make_v4_webserver(1),
     W2 = make_v4_webserver(2),
     VIP = {tcp, {11, 0, 0, 1}, 8080},
-    push_vips(#{VIP => [webserver(W1, AgentIP)]}),
+    add_webserver(VIP, webserver(W1, AgentIP)),
     ok = test_vip(Family, VIP),
-    push_vips(#{VIP => []}),
+    remove_webserver(VIP, webserver(W1, AgentIP)),
     inets:stop(stand_alone, W1),
-    push_vips(#{VIP => [webserver(W2, AgentIP)]}),
+    add_webserver(VIP, webserver(W2, AgentIP)),
     ok = test_vip(Family, VIP),
-    push_vips(#{VIP => []}),
+    remove_webserver(VIP, webserver(W2, AgentIP)),
     error = test_vip(Family, VIP),
-    push_vips(#{}),
+    remove_vip(VIP),
     error = test_vip(Family, VIP).
 
 test_v6(Config) ->
@@ -148,11 +149,11 @@ test_v6(Config) ->
     Family = inet6,
     W = make_v6_webserver(),
     VIP = {tcp, {16#fd01, 16#0, 16#0, 16#0, 16#0, 16#0, 16#0, 16#1}, 8080},
-    push_vips(#{VIP => [webserver(W, AgentIP)]}),
+    add_webserver(VIP, webserver(W, AgentIP)),
     ok = test_vip(Family, VIP),
-    push_vips(#{VIP => []}),
+    remove_webserver(VIP, webserver(W, AgentIP)),
     error = test_vip(Family, VIP),
-    push_vips(#{}),
+    remove_vip(VIP),
     error = test_vip(Family, VIP).
 
 test_normalize(_Config) ->

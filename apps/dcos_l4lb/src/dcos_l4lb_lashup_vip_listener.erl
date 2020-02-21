@@ -22,10 +22,9 @@
 -type state() :: #state{}.
 
 -type family() :: inet | inet6.
--type key() :: dcos_l4lb_mgr:key().
--type vip() :: dcos_l4lb_mgr:vip().
--type ipport() :: dcos_l4lb_mgr:ipport().
--type backend() :: dcos_l4lb_mesos:backend().
+-type lkey() :: dcos_l4lb_mesos_poller:lkey().
+-type key() :: dcos_l4lb_mesos_poller:key().
+-type backend() :: dcos_l4lb_mesos_poller:backend().
 
 -define(NAME2IP, dcos_l4lb_name_to_ip).
 -define(IP2NAME, dcos_l4lb_ip_to_name).
@@ -56,7 +55,7 @@ init([]) ->
     {ok, {}, {continue, {}}}.
 
 handle_continue({}, {}) ->
-    MatchSpec = ets:fun2ms(fun ({?VIPS_KEY3}) -> true end),
+    MatchSpec = ets:fun2ms(fun ({?VIPS_KEY2}) -> true end),
     {ok, Ref} = lashup_kv:subscribe(MatchSpec),
     {noreply, #state{ref = Ref}}.
 
@@ -69,8 +68,7 @@ handle_cast(_Request, State) ->
 handle_info({lashup_kv_event, Ref, Key}, #state{ref=Ref}=State) ->
     ok = lashup_kv:flush(Ref, Key),
     Value = lashup_kv:value(Key),
-    {?VIPS_FIELD, RawVIPs} = lists:keyfind(?VIPS_FIELD, 1, Value),
-    ok = handle_event(RawVIPs),
+    ok = handle_event(Value),
     {noreply, start_gc_timer(State)};
 handle_info({timeout, GCRef, gc}, #state{gc_ref=GCRef}=State) ->
     {noreply, State#state{gc_ref=undefined}, hibernate};
@@ -89,74 +87,54 @@ start_gc_timer(#state{gc_ref = undefined} = State) ->
 start_gc_timer(State) ->
     State.
 
--spec(handle_event(#{key() => [backend()]}) -> ok).
+-spec(handle_event([{lkey(), [backend()]}]) -> ok).
 handle_event(RawVIPs) ->
     VIPs = process_vips(RawVIPs),
     ok = cleanup_mappings(VIPs),
     ok = dcos_l4lb_mgr:push_vips(VIPs),
     ok = push_dns_zone().
 
--spec(process_vips(#{key() => [backend()]}) -> [{key(), [backend()]}]).
-process_vips(RawVIPs) ->
-    VIPs = maps:fold(fun process_vip/3, [], RawVIPs),
-    lists:append(VIPs).
+-spec(process_vips([{lkey(), [backend()]}]) -> [{key(), [backend()]}]).
+process_vips(VIPs) ->
+    lists:flatmap(fun process_vip/1, VIPs).
 
--spec(process_vip(key(), [backend()], [Acc]) -> [Acc]
-    when Acc :: [{key(), [backend()]}]).
-process_vip(Key, Backends, Acc) ->
-    [process_vip(Key, Backends) | Acc].
+-spec(process_vip({lkey(), [backend()]}) -> [{key(), [backend()]}]).
+process_vip({{Key, riak_dt_orswot}, Value}) ->
+    process_vip(Key, Value).
 
 -spec(process_vip(key(), [backend()]) -> [{key(), [backend()]}]).
-process_vip({Protocol, VIP, Port}, Backends) ->
-    CategorizedIPPorts = get_categorized_ipports(Backends),
-    lists:map(fun ({Family, IPPorts}) ->
-        IP = maybe_add_mapping(Family, VIP),
-        {{Protocol, IP, Port}, IPPorts}
-    end, CategorizedIPPorts).
+process_vip({Protocol, {name, {Label, FwName}}, Port}, AllBEs) ->
+    CategorizedBEs = categorize_backends(AllBEs),
+    lists:map(fun ({Family, BEs}) ->
+        IP = maybe_add_mapping(Family, FwName, Label),
+        {{Protocol, IP, Port}, BEs}
+    end, CategorizedBEs);
+process_vip(_Key, []) ->
+    [];
+process_vip(Key, BEs) ->
+    [{Key, BEs}].
 
--spec(get_categorized_ipports([backend()]) -> [{family(), [ipport()]}]).
-get_categorized_ipports(Backends) ->
-    IPPorts = get_ipports(Backends),
-    lists:foldl(fun ({IP, Port}, Acc) ->
+-spec(categorize_backends([backend()]) -> [{family(), [backend()]}]).
+categorize_backends(BEs) ->
+    lists:foldl(fun ({_AgentIP, {IP, _Port}}=BE, Acc) ->
         Family = dcos_l4lb_app:family(IP),
-        orddict:append(Family, {IP, Port}, Acc)
-    end, orddict:new(), IPPorts).
-
--spec(get_ipports([backend()]) -> [ipport()]).
-get_ipports(Backends) ->
-    LocalAgentIP = dcos_net_dist:nodeip(),
-    lists:foldl(fun (Backend, Acc) ->
-        IPPorts = get_ipports(LocalAgentIP, Backend),
-        IPPorts ++ Acc
-    end, [], Backends).
-
--spec(get_ipports(inet:ip4_address(), backend()) -> [ipport()]).
-get_ipports(LocalAgentIP, #{agent_ip := LocalAgentIP,
-        host_port := _HostPort, port := Port,
-        task_ip := TaskIPs, runtime := Runtime}) when Runtime =/= docker ->
-    % Ignore port mapping for non-docker runtime on local agents
-    [{IP, Port} || IP <- TaskIPs];
-get_ipports(_LocalAgentIP, #{host_port := HostPort, agent_ip := AgentIP}) ->
-    [{AgentIP, HostPort}];
-get_ipports(_LocalAgentIP, #{port := Port, task_ip := TaskIPs}) ->
-    [{IP, Port} || IP <- TaskIPs].
+        orddict:append(Family, BE, Acc)
+    end, orddict:new(), BEs).
 
 %%%===================================================================
 %%% Mapping functions
 %%%===================================================================
 
--spec(maybe_add_mapping(family(), vip()) -> inet:ip_address()).
-maybe_add_mapping(Family, {Label, Framework}) ->
-    case ets:lookup(?NAME2IP, {Family, Framework, Label}) of
+-spec(maybe_add_mapping(family(), binary(), binary()) -> inet:ip_address()).
+maybe_add_mapping(Family, FwName, Label) ->
+    case ets:lookup(?NAME2IP, {Family, FwName, Label}) of
         [{_Key, IP}] -> IP;
         [] ->
-            IP = add_mapping(Family, Framework, Label),
+            IP = add_mapping(Family, FwName, Label),
             ?LOG_NOTICE("VIP mapping was added: ~p -> ~p",
-                        [{Label, Framework}, IP]),
+                        [{Label, FwName}, IP]),
             IP
-    end;
-maybe_add_mapping(_Family, IP) ->
-    IP.
+    end.
 
 -spec(add_mapping(family(), binary(), binary()) -> inet:ip_address()).
 add_mapping(Family, FwName, Label) ->
@@ -181,7 +159,7 @@ add_mapping(Family, FwName, Label, MinMaxIP, IP, Qtty) ->
             add_mapping(Family, FwName, Label, MinMaxIP, NextIP, Qtty - 1)
     end.
 
--spec(cleanup_mappings([{key(), [ipport()]}]) -> ok).
+-spec(cleanup_mappings([{key(), [backend()]}]) -> ok).
 cleanup_mappings(VIPs) ->
     AllIPs = ets:select(?IP2NAME, [{{'$1', '_'}, [], ['$1']}]),
     NewIPs = maps:from_list([{IP, true} || {{_, IP, _}, _} <- VIPs]),

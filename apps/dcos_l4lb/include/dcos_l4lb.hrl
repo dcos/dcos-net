@@ -1,6 +1,4 @@
 -define(VIPS_KEY2, [minuteman, vips2]).
--define(VIPS_KEY3, [l4lb, vips]).
--define(VIPS_FIELD, {vips, riak_dt_lwwreg}).
 
 -record(netns, {id :: undefined | term(),
                 ns :: undefined | binary()}).

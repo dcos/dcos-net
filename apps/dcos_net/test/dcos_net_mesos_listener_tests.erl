@@ -7,8 +7,7 @@
     hello_overlay_setup/0,
     pod_tasks_setup/0,
     recovered_agents_setup/0,
-    cleanup/1,
-    from_state/1
+    cleanup/1
 ]).
 
 %%%===================================================================
@@ -463,13 +462,10 @@ recovered_agents(Tasks) ->
 %%% From State Tests
 %%%===================================================================
 
-from_state(FileName) ->
+from_state(FileName, ExpectedTasks) ->
     Lines = read_lines(FileName),
     State = from_state_merge(Lines),
-    dcos_net_mesos_listener:from_state(State).
-
-from_state(FileName, ExpectedTasks) ->
-    Tasks = from_state(FileName),
+    Tasks = dcos_net_mesos_listener:from_state(State),
     ?assertEqual(ExpectedTasks, Tasks).
 
 -define(FPATH, [<<"get_state">>, <<"get_frameworks">>, <<"frameworks">>]).
@@ -481,8 +477,6 @@ from_state_merge(Lines) ->
         from_state_merge(Obj, Acc)
     end, #{<<"type">> => <<"GET_STATE">>}, Lines).
 
-from_state_merge(#{<<"type">> := <<"GET_STATE">>} = State, _Acc) ->
-    State;
 from_state_merge(#{<<"type">> := <<"SUBSCRIBED">>,
                   <<"subscribed">> := #{<<"get_state">> := State}}, Acc) ->
     Acc#{<<"get_state">> => State};
