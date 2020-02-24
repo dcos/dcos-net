@@ -1,5 +1,5 @@
-# -*- mode: shell-script; sh-basic-offset: 2 -*-
 #!/bin/bash
+# -*- mode: shell-script; sh-basic-offset: 2 -*-
 
 set -uo pipefail
 
@@ -76,28 +76,39 @@ if [ "$USE_NET_TOOLBOX" == "true" ]; then
   fi
 fi
 
-wrap-curl() {
-  curl --insecure --silent "$@"
-}
+wrap-toolbox() {
+  cmd=$1
+  shift
 
-wrap-ipvsadm() {
   if [ "${USE_NET_TOOLBOX}" == "false" ]; then
-    if type ipvsadm &> /dev/null; then
-      ipvsadm "$@"
+    if type "$cmd" &> /dev/null; then
+      "$cmd" "$@"
     else
-      echo "ipvsadm is not available"
+      echo "$cmd is not available"
     fi
   else
     docker run \
            --rm \
            --net=host \
            --privileged \
-           mesosphere/net-toolbox:latest ipvsadm "$@"
+           mesosphere/net-toolbox:latest "$cmd" "$@"
   fi
 }
 
+wrap-curl() {
+  curl --insecure --silent "$@"
+}
+
+wrap-dig() {
+  wrap-toolbox dig "$@"
+}
+
+wrap-ipvsadm() {
+  wrap-toolbox ipvsadm "$@"
+}
+
 wrap-net-eval() {
-  if [ "$MAJOR_VERSION" -lt 2 -a "$MINOR_VERSION" -lt "11" ]; then
+  if [ "$MAJOR_VERSION" -lt 2 ] && [ "$MINOR_VERSION" -lt "11" ]; then
     /opt/mesosphere/active/navstar/navstar/bin/navstar-env eval "$@"
   else
     /opt/mesosphere/bin/dcos-net-env eval "$@"
@@ -116,7 +127,7 @@ dcos-version() {
   echo "======================================================================"
   (
     echo "DC/OS $DCOS_VERSION";
-    if [ ! -z "${DCOS_VARIANT+x}" ]; then
+    if [ -n "${DCOS_VARIANT}" ]; then
       echo "Variant: $DCOS_VARIANT";
     fi
     echo "Image commit: $DCOS_IMAGE_COMMIT"
@@ -129,7 +140,7 @@ os-data() {
   echo "Capturing OS release and version..."
 
   for f in /etc/*-release; do
-    cp "$f" "$DATA_DIR/$(basename $f).txt"
+    cp "$f" "$DATA_DIR/$(basename "$f").txt"
   done
   uname -a > "$DATA_DIR/uname.txt"
 
@@ -161,7 +172,7 @@ logs() {
     journalctl -u dcos-mesos-slave.service > "$DATA_DIR/dcos-mesos-slave-logs.txt"
   fi
 
-  if [ "$MAJOR_VERSION" -lt 2 -a "$MINOR_VERSION" -lt "11" ]; then
+  if [ "$MAJOR_VERSION" -lt 2 ] && [ "$MINOR_VERSION" -lt "11" ]; then
     echo "Capturing dcos-navstar logs..."
     journalctl -u dcos-navstar.service > "$DATA_DIR/dcos-navstar-logs.txt"
     if [ -f /opt/mesosphere/active/navstar/navstar/erl_crash.dump ]; then
@@ -210,9 +221,9 @@ mesos-master-state() {
 }
 
 mesos-agent-state() {
-  if [ "$MAJOR_VERSION" -lt 2 -a "$MINOR_VERSION" -lt "11" ]; then
+  if [ "$MAJOR_VERSION" -lt 2 ] && [ "$MINOR_VERSION" -lt "11" ]; then
     wrap-net-eval 'mesos_state_client:poll(mesos_state:ip(), 5051).'
-  elif [ "$MAJOR_VERSION" -lt 2 -a "$MINOR_VERSION" -lt "12" ]; then
+  elif [ "$MAJOR_VERSION" -lt 2 ] && [ "$MINOR_VERSION" -lt "12" ]; then
     wrap-net-eval 'false = dcos_dns:is_master(), dcos_net_mesos:poll("/state").'
   else
     wrap-curl \
@@ -352,26 +363,26 @@ dns-data() {
   cat /etc/resolv.conf > "$DATA_DIR/resolv.conf"
 
   echo "Resovling ready.spartan ..."
-  dig ready.spartan > "$DATA_DIR/dig-ready.spartan.txt"
+  wrap-dig ready.spartan > "$DATA_DIR/dig-ready.spartan.txt"
   echo "Resovling ready.spartan through 198.51.100.1 ..."
-  dig ready.spartan @198.51.100.1 > "$DATA_DIR/dig-ready.spartan-at-198.51.100.1.txt"
+  wrap-dig ready.spartan @198.51.100.1 > "$DATA_DIR/dig-ready.spartan-at-198.51.100.1.txt"
   echo "Resovling leader.mesos through 198.51.100.1 ..."
-  dig leader.mesos @198.51.100.1 > "$DATA_DIR/dig-leader.mesos-at-198.51.100.1.txt"
+  wrap-dig leader.mesos @198.51.100.1 > "$DATA_DIR/dig-leader.mesos-at-198.51.100.1.txt"
   echo "Resovling dcos.io through 198.51.100.1 ..."
-  dig dcos.io @198.51.100.1 > "$DATA_DIR/dig-dcos.io-at-198.51.100.1.txt"
+  wrap-dig dcos.io @198.51.100.1 > "$DATA_DIR/dig-dcos.io-at-198.51.100.1.txt"
 
   echo "Resolving dcos.io through upstream servers..."
   (
+    # shellcheck disable=SC1091
     source /opt/mesosphere/etc/dns_config;
-    for server in $(echo $RESOLVERS | tr ',' '\n'); do
+    for server in $(echo "$RESOLVERS" | tr ',' '\n'); do
       echo "===    Upstream DNS server: $server ===";
-      dig dcos.io @$server;
+      wrap-dig dcos.io @"$server";
     done
   ) > "$DATA_DIR/dig-dcos.io-at-upstream-servers.txt"
 
   echo "Copying Mesos DNS configuration..."
-  cat /opt/mesosphere/etc/mesos-dns.json \
-    | maybe-pprint-json > "$DATA_DIR/mesos-dns-config.json"
+  maybe-pprint-json < /opt/mesosphere/etc/mesos-dns.json > "$DATA_DIR/mesos-dns-config.json"
   echo "Fetching Mesos DNS records..."
   if [ "$RUNNING_ON_MASTER" == "yes" ]; then
     wrap-curl http://localhost:8123/v1/enumerate \
@@ -388,20 +399,24 @@ dns-data() {
 
 # dig <yourapp>.<yourframework>.mesos @127.0.0.1 -p 61053
 
-mkdir "$DATA_DIR"
+main() {
+  mkdir "$DATA_DIR"
 
-dcos-version
-os-data
-docker-version
-logs
-dcos-configs
-sockets
-mesos-state
-l4lb-data
-overlay-data
-docker-networks
-dns-data
+  dcos-version
+  os-data
+  docker-version
+  logs
+  dcos-configs
+  sockets
+  mesos-state
+  l4lb-data
+  overlay-data
+  docker-networks
+  dns-data
 
-chmod 644 "$DATA_DIR"/*
-tar czf "$DATA_DIR.tar.gz" "$DATA_DIR"
-rm -Rf "$DATA_DIR"
+  chmod 644 "$DATA_DIR"/*
+  tar czf "$DATA_DIR.tar.gz" "$DATA_DIR"
+  rm -Rf "$DATA_DIR"
+}
+
+main
