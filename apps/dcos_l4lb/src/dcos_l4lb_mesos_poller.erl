@@ -118,35 +118,32 @@ handle_poll(true, Backoff0) ->
 
 -spec(handle_poll_state(#{task_id() => task()}) -> ok).
 handle_poll_state(Tasks) ->
-    HealthyTasks = maps:filter(fun is_healthy/2, Tasks),
+    RunningTasks = maps:filter(fun is_running/2, Tasks),
 
-    PortMappings = collect_port_mappings(HealthyTasks),
+    PortMappings = collect_port_mappings(RunningTasks),
     dcos_l4lb_mgr:local_port_mappings(PortMappings),
 
-    VIPs = collect_vips(HealthyTasks),
+    VIPs = collect_vips(RunningTasks),
     ok = push_vips(VIPs),
 
     LocalBackends = lists:sum([length(BEs) || BEs <- maps:values(VIPs)]),
     prometheus_gauge:set(l4lb, local_tasks, [], maps:size(Tasks)),
-    prometheus_gauge:set(l4lb, local_healthy_tasks, [], maps:size(HealthyTasks)),
+    prometheus_gauge:set(l4lb, local_running_tasks, [], maps:size(RunningTasks)),
     prometheus_gauge:set(l4lb, local_vips, [], maps:size(VIPs)),
     prometheus_gauge:set(l4lb, local_backends, [], LocalBackends).
 
--spec(is_healthy(task_id(), task()) -> boolean()).
-is_healthy(_TaskId, Task) ->
-    is_healthy(Task).
+-spec(is_running(task_id(), task()) -> boolean()).
+is_running(_TaskId, Task) ->
+    is_running(Task).
 
--spec(is_healthy(task()) -> boolean()).
-is_healthy(#{healthy := IsHealthy, state := running}) ->
-    IsHealthy;
-% NOTE(jkoelker): when the state is `killing` we specifically ignore health
-%                 checks, since mesos stops checking when the task transitions
-%                 to `killing`.
-is_healthy(#{state := killing}) ->
+-spec(is_running(task()) -> boolean()).
+% NOTE(jkoelker): when the state is `killing` we consider it running so the
+%                 weight of the backend will goto 0.
+is_running(#{state := killing}) ->
     true;
-is_healthy(#{state := running}) ->
+is_running(#{state := running}) ->
     true;
-is_healthy(_Task) ->
+is_running(_Task) ->
     false.
 
 %%%===================================================================
@@ -225,7 +222,9 @@ backends(Key, Task, PortObj) ->
     end.
 
 -spec(get_weight(task()) -> backend_weight()).
-get_weight(#{state := killing}) ->
+% NOTE(jkoelker) an unhealthy task should not get new connecitons, but should
+%                still be available for existing connecitons.
+get_weight(#{healthy := false, state := running}) ->
     0;
 get_weight(#{state := running}) ->
     1;
