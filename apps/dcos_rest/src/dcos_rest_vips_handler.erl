@@ -51,7 +51,7 @@ vip(Protocol, FullName, Port) ->
     PortBin = integer_to_binary(Port),
     {<<FullName/binary, ":", PortBin/binary>>, Protocol}.
 
-backend({_AgentIP, {IP, Port}}) ->
+backend({_AgentIP, {IP, Port, _Weight}}) ->
     #{
         ip => ip(IP),
         port => Port
