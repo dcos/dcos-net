@@ -90,7 +90,7 @@ webserver(Pid, AgentIP) ->
     Info = httpd:info(Pid),
     Port = proplists:get_value(port, Info),
     IP = proplists:get_value(bind_address, Info),
-    {AgentIP, {IP, Port}}.
+    {AgentIP, {IP, Port, 1}}.
 
 add_webserver(VIP, WebServer) ->
     % inject an update for this vip

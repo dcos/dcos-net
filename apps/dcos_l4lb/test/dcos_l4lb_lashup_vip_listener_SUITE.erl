@@ -47,8 +47,8 @@ end_per_testcase(_, _Config) ->
 
 -define(LKEY(K), {{tcp, K, 80}, riak_dt_orswot}).
 -define(LKEY(L, F), ?LKEY({name, {L, F}})).
--define(BE4, {{1, 2, 3, 4}, {{1, 2, 3, 4}, 80}}).
--define(BE6, {{1, 2, 3, 4}, {{1, 0, 0, 0, 0, 0, 0, 1}, 80}}).
+-define(BE4, {{1, 2, 3, 4}, {{1, 2, 3, 4}, 80, 1}}).
+-define(BE6, {{1, 2, 3, 4}, {{1, 0, 0, 0, 0, 0, 0, 1}, 80, 1}}).
 
 lookup_vips(_Config) ->
     lashup_kv:request_op(?VIPS_KEY2, {update, [
