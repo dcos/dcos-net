@@ -358,8 +358,8 @@ init_metrics() ->
         {help, "The number of local tasks."}]),
     prometheus_gauge:new([
         {registry, l4lb},
-        {name, local_healthy_tasks},
-        {help, "The number of local healthy tasks."}]),
+        {name, local_running_tasks},
+        {help, "The number of local running tasks."}]),
     prometheus_gauge:new([
         {registry, l4lb},
         {name, local_backends},
