@@ -39,7 +39,7 @@
     namespaces = [host] :: [namespace()],
     % vips
     vips = [] :: [{key(), [backend()]}],
-    prev_vips = [] :: [{key(), [ipport()]}]
+    prev_vips = [] :: [{key(), [backend()]}]
 }).
 -type state() :: #state{}.
 
@@ -193,11 +193,10 @@ start_reconcile_timer() ->
 
 -spec(handle_reconcile([{key(), [backend()]}], state()) -> state()).
 handle_reconcile(VIPs, #state{tree=Tree, nodes=Nodes, namespaces=Namespaces,
-        route_mgr=RouteMgr, ipvs_mgr=IPVSMgr, ipset_mgr=IPSetMgr}=State) ->
+        route_mgr=RouteMgr, ipset_mgr=IPSetMgr, prev_vips=PrevVIPs}=State) ->
     % If everything is ok this function is silent and changes nothing.
     VIPs0 = vips_port_mappings(VIPs),
     VIPs1 = healthy_vips(VIPs0, Nodes, Tree),
-    VIPsP = prepare_vips(VIPs1),
     Routes = get_vip_routes(VIPs),
     Diffs =
         lists:map(fun (Namespace) ->
@@ -207,8 +206,7 @@ handle_reconcile(VIPs, #state{tree=Tree, nodes=Nodes, namespaces=Namespaces,
             PrevRoutes = get_routes(RouteMgr, Namespace),
             DiffRoutes = dcos_net_utils:complement(Routes, PrevRoutes),
 
-            PrevVIPsP = get_vips(IPVSMgr, Namespace),
-            DiffVIPs = diff(PrevVIPsP, VIPsP),
+            DiffVIPs = diff(prepare_vips(PrevVIPs), prepare_vips(VIPs1)),
 
             {Namespace, LogPrefix, DiffRoutes, DiffVIPs}
         end, Namespaces),
@@ -356,29 +354,6 @@ prepare_vips(VIPs) ->
     lists:map(fun ({VIP, BEs}) ->
         {VIP, [BE || {_AgentIP, BE} <- BEs]}
     end, VIPs).
-
--spec(get_vips(pid(), namespace()) -> [{key(), [ipport()]}]).
-get_vips(IPVSMgr, Namespace) ->
-    Services = get_vip_services(IPVSMgr, Namespace),
-    lists:map(fun (S) -> get_vip(IPVSMgr, Namespace, S) end, Services).
-
--spec(get_vip_services(pid(), namespace()) -> [Service]
-    when Service :: dcos_l4lb_ipvs_mgr:service()).
-get_vip_services(IPVSMgr, Namespace) ->
-    Services = dcos_l4lb_ipvs_mgr:get_services(IPVSMgr, Namespace),
-    FVIPs = lists:map(fun dcos_l4lb_ipvs_mgr:service_address/1, Services),
-    maps:values(maps:from_list(lists:zip(FVIPs, Services))).
-
--spec(get_vip(pid(), namespace(), Service) -> {key(), [ipport()]}
-    when Service :: dcos_l4lb_ipvs_mgr:service()).
-get_vip(IPVSMgr, Namespace, Service) ->
-    {Family, VIP} = dcos_l4lb_ipvs_mgr:service_address(Service),
-    Dests = dcos_l4lb_ipvs_mgr:get_dests(IPVSMgr, Service, Namespace),
-    Backends =
-        lists:map(fun (Dest) ->
-            dcos_l4lb_ipvs_mgr:destination_address(Family, Dest)
-        end, Dests),
-    {VIP, lists:usort(Backends)}.
 
 %%%===================================================================
 %%% IPVS Apply functions
