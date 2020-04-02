@@ -282,7 +282,7 @@ handle_add_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol,
 handle_add_dest(Pid, Service, IP, Port, Family, Weight) ->
     Base = [{fwd_method, ?IP_VS_CONN_F_MASQ}, {weight, Weight}, {u_threshold, 0}, {l_threshold, 0}],
     Dest = [{port, Port}] ++ Base ++ ip_to_address(IP),
-    lager:info("Adding backend ~p to service ~p~n", [{IP, Port}, Service]),
+    lager:info("Adding backend ~p to service ~p~n", [{IP, Port, Weight}, Service]),
     Msg = #new_dest{request = [{dest, Dest}, {service, Service}]},
     case gen_netlink_client:request(Pid, Family, ipvs, [], Msg) of
         {ok, _} -> ok;
