@@ -45,7 +45,8 @@
 
 -type key() :: dcos_l4lb_mesos_poller:key().
 -type backend() :: dcos_l4lb_mesos_poller:backend().
--type ipport() :: {inet:ip_address(), inet:port_number()}.
+-type ipportweight() :: {{inet:ip_address(), inet:port_number()},
+                         dcos_l4lb_mesos_poller:backend_weight()}.
 -type namespace() :: term().
 
 -define(GM_EVENTS(R, T), {lashup_gm_route_events, #{ref := R, tree := T}}).
@@ -349,19 +350,22 @@ remove_ipset_entries(IPSetMgr, KeysToDel) ->
 %%% IPVS functions
 %%%===================================================================
 
--spec(prepare_vips([{key(), [backend()]}]) -> [{key(), [ipport()]}]).
+-spec(prepare_vips([{key(), [backend()]}]) -> [{key(), [ipportweight()]}]).
 prepare_vips(VIPs) ->
     lists:map(fun ({VIP, BEs}) ->
-        {VIP, [BE || {_AgentIP, BE} <- BEs]}
+        {VIP, [{{BackendIP, BackendPort},
+                BackendWeight} || {_AgentIP, {BackendIP,
+                                              BackendPort,
+                                              BackendWeight}} <- BEs]}
     end, VIPs).
 
 %%%===================================================================
 %%% IPVS Apply functions
 %%%===================================================================
 
--type diff_vips() :: {ToAdd :: [{key(), [ipport()]}],
-                      ToDel :: [{key(), [ipport()]}],
-                      ToMod :: [{key(), [ipport()], [ipport()]}]}.
+-type diff_vips() :: {ToAdd :: [{key(), [ipportweight()]}],
+                      ToDel :: [{key(), [ipportweight()]}],
+                      ToMod :: [{key(), [ipportweight()], [ipportweight()]}]}.
 
 -spec(apply_vips_diff(pid(), namespace(), diff_vips()) -> ok).
 apply_vips_diff(IPVSMgr, Namespace, {ToAdd, ToDel, ToMod}) ->
@@ -375,34 +379,50 @@ apply_vips_diff(IPVSMgr, Namespace, {ToAdd, ToDel, ToMod}) ->
         vip_mod(IPVSMgr, Namespace, VIP)
     end, ToMod).
 
--spec(vip_add(pid(), namespace(), {key(), [ipport()]}) -> ok).
+-spec(vip_add(pid(), namespace(), {key(), [ipportweight()]}) -> ok).
 vip_add(IPVSMgr, Namespace, {{Protocol, IP, Port}, BEs}) ->
     dcos_l4lb_ipvs_mgr:add_service(IPVSMgr, IP, Port, Protocol, Namespace),
-    lists:foreach(fun ({BEIP, BEPort, BEWeight}) ->
+    lists:foreach(fun ({{BEIP, BEPort}, BEWeight}) ->
         dcos_l4lb_ipvs_mgr:add_dest(
             IPVSMgr, IP, Port,
             BEIP, BEPort,
             Protocol, Namespace, BEWeight)
     end, BEs).
 
--spec(vip_del(pid(), namespace(), {key(), [ipport()]}) -> ok).
+-spec(vip_del(pid(), namespace(), {key(), [ipportweight()]}) -> ok).
 vip_del(IPVSMgr, Namespace, {{Protocol, IP, Port}, _BEs}) ->
     dcos_l4lb_ipvs_mgr:remove_service(IPVSMgr, IP, Port, Protocol, Namespace).
 
--spec(vip_mod(pid(), namespace(), {key(), [ipport()], [ipport()]}) -> ok).
+-spec(vip_mod(pid(), namespace(), {key(), [ipportweight()], [ipportweight()]}) -> ok).
 vip_mod(IPVSMgr, Namespace, {{Protocol, IP, Port}, ToAdd, ToDel}) ->
-    lists:foreach(fun ({BEIP, BEPort, BEWeight}) ->
+    {ToMod, ToAdd0, ToDel0} = vip_extract_mod(ToAdd, ToDel),
+    lists:foreach(fun ({{BEIP, BEPort}, BEWeight}) ->
+        dcos_l4lb_ipvs_mgr:mod_dest(
+            IPVSMgr, IP, Port,
+            BEIP, BEPort,
+            Protocol, Namespace, BEWeight)
+    end, ToMod),
+    lists:foreach(fun ({{BEIP, BEPort}, BEWeight}) ->
         dcos_l4lb_ipvs_mgr:add_dest(
             IPVSMgr, IP, Port,
             BEIP, BEPort,
             Protocol, Namespace, BEWeight)
-    end, ToAdd),
-    lists:foreach(fun ({BEIP, BEPort, _BEWeight}) ->
+    end, ToAdd0),
+    lists:foreach(fun ({{BEIP, BEPort}, _BEWeight}) ->
         dcos_l4lb_ipvs_mgr:remove_dest(
             IPVSMgr, IP, Port,
             BEIP, BEPort,
             Protocol, Namespace)
-    end, ToDel).
+    end, ToDel0).
+
+-spec(vip_extract_mod([ipportweight()], [ipportweight()]) -> {[ipportweight()],
+                                                              [ipportweight()],
+                                                              [ipportweight()]}).
+vip_extract_mod(ToAdd, ToDel) ->
+    ToMod = [ {K, V} || {K, V} <- ToAdd, lists:keymember(K, 1, ToDel) ],
+    {ToMod,
+     [ {K, V} || {K, V} <- ToAdd, not(lists:keymember(K, 1, ToMod)) ],
+     [ {K, V} || {K, V} <- ToDel, not(lists:keymember(K, 1, ToMod)) ]}.
 
 -spec(vip_diff_size(diff_vips()) -> non_neg_integer()).
 vip_diff_size({ToAdd, ToDel, ToMod}) ->
