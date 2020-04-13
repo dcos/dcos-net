@@ -642,6 +642,23 @@ vips_port_mappings(VIPs) ->
         {{Protocol, VIP, VIPPort}, BEs0}
     end, VIPs).
 
+be_port_mapping(PMs, Protocol, AgentIP, BEAgentIP, BE) ->
+    case BE of
+        {BEIP, BEPort, Weight} ->
+            Weight = Weight;
+        {BEIP, BEPort} ->
+            Weight = 1
+    end,
+    case BEIP of
+        AgentIP ->
+            case maps:find({Protocol, BEPort}, PMs) of
+                {ok, {IP, Port}} -> {BEAgentIP, {IP, Port, Weight}};
+                error -> {BEAgentIP, {BEIP, BEPort, Weight}}
+            end;
+        _ ->
+            {BEAgentIP, {BEIP, BEPort, Weight}}
+    end.
+
 -spec(bes_port_mappings(PMs, tcp | udp, AgentIP, [backend()]) -> [backend()]
     when PMs :: #{Host => Container},
          AgentIP :: inet:ip4_address(),
@@ -649,13 +666,8 @@ vips_port_mappings(VIPs) ->
          Container :: {inet:ip_address(), inet:port_number()}).
 bes_port_mappings(PMs, Protocol, AgentIP, BEs) ->
     lists:map(
-        fun ({BEAgentIP, {BEIP, BEPort, Weight}}) when BEIP =:= AgentIP ->
-                case maps:find({Protocol, BEPort}, PMs) of
-                    {ok, {IP, Port}} -> {BEAgentIP, {IP, Port, Weight}};
-                    error -> {BEAgentIP, {BEIP, BEPort, Weight}}
-                end;
-            ({BEAgentIP, {BEIP, BEPort, Weight}}) ->
-                {BEAgentIP, {BEIP, BEPort, Weight}}
+        fun ({BEAgentIP, BE}) ->
+            be_port_mapping(PMs, Protocol, AgentIP, BEAgentIP, BE)
         end, BEs).
 
 %%%===================================================================
