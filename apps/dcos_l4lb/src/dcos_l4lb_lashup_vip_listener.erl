@@ -1,6 +1,10 @@
 -module(dcos_l4lb_lashup_vip_listener).
 -behaviour(gen_server).
 
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
+
 -export([
     start_link/0,
     ip2name/1,
@@ -126,6 +130,23 @@ categorize_backends(BEs) ->
         Family = dcos_l4lb_app:family(IP),
         orddict:append(Family, BE0, Acc)
     end, orddict:new(), BEs).
+
+-ifdef(TEST).
+
+-define(BE4, {{2, 3, 4, 5}, {{1, 2, 3, 4}, 80, 1}}).
+-define(BE4OLD, {{3, 4, 5, 6}, {{1, 2, 3, 5}, 80}}).
+-define(BE6, {{2, 3, 4, 5}, {{1, 0, 0, 0, 0, 0, 0, 1}, 80, 1}}).
+-define(BE6OLD, {{3, 4, 5, 6}, {{1, 0, 0, 0, 0, 0, 0, 2}, 80}}).
+
+categorize_backends_test() ->
+    ?assertEqual(
+       [{inet, [{{2, 3, 4, 5}, {{1, 2, 3, 4}, 80, 1}},
+                {{3, 4, 5, 6}, {{1, 2, 3, 5}, 80, 1}}]},
+        {inet6, [{{2, 3, 4, 5}, {{1, 0, 0, 0, 0, 0, 0, 1}, 80, 1}},
+                 {{3, 4, 5, 6}, {{1, 0, 0, 0, 0, 0, 0, 2}, 80, 1}}]}],
+       categorize_backends([?BE4, ?BE4OLD, ?BE6, ?BE6OLD])).
+
+-endif.
 
 %%%===================================================================
 %%% Mapping functions
