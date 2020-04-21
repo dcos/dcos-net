@@ -676,6 +676,20 @@ local_port_mappings() ->
 
 -ifdef(TEST).
 
+-define(BE4, {{1, 2, 3, 4}, 80, 1}).
+-define(BE4OLD, {{1, 2, 3, 5}, 80}).
+
+be_port_mapping_test() ->
+    PMs = #{{tcp, 8080} => {{1, 2, 3, 5}, 80},
+            {udp, 8181} => {{1, 0, 0, 0, 0, 0, 0, 2}, 80}},
+    AgentIP = {2, 3, 4, 5},
+    ?assertEqual(
+       {{2, 3, 4, 5}, {{1, 2, 3, 4}, 80, 1}},
+       be_port_mapping(PMs, tcp, AgentIP, AgentIP, ?BE4)),
+    ?assertEqual(
+       {{2, 3, 4, 5}, {{1, 2, 3, 5}, 80, 1}},
+       be_port_mapping(PMs, tcp, AgentIP, AgentIP, ?BE4OLD)).
+
 diff_simple_test() ->
     ?assertEqual(
         {[], [], []},
