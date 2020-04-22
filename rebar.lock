@@ -17,7 +17,7 @@
  {<<"folsom">>,{pkg,<<"folsom">>,<<"0.8.8">>},0},
  {<<"gen_netlink">>,
   {git,"https://github.com/mesosphere/gen_netlink.git",
-       {ref,"3d8d268a54af13a91246d5b3438b1facf29f77a9"}},
+       {ref,"99948ccc687212687c3757f2852fd197923ba20d"}},
   0},
  {<<"inotify">>,
   {git,"https://github.com/dcos/inotify.git",

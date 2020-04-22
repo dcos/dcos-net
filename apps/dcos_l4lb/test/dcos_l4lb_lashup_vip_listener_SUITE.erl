@@ -48,11 +48,13 @@ end_per_testcase(_, _Config) ->
 -define(LKEY(K), {{tcp, K, 80}, riak_dt_orswot}).
 -define(LKEY(L, F), ?LKEY({name, {L, F}})).
 -define(BE4, {{1, 2, 3, 4}, {{1, 2, 3, 4}, 80, 1}}).
+-define(BE4OLD, {{1, 2, 3, 5}, {{1, 2, 3, 5}, 80}}).
 -define(BE6, {{1, 2, 3, 4}, {{1, 0, 0, 0, 0, 0, 0, 1}, 80, 1}}).
 
 lookup_vips(_Config) ->
     lashup_kv:request_op(?VIPS_KEY2, {update, [
         {update, ?LKEY({1, 2, 3, 4}), {add, ?BE4}},
+        {update, ?LKEY({1, 2, 3, 5}), {add, ?BE4OLD}},
         {update, ?LKEY(<<"/foo">>, <<"bar">>), {add, ?BE4}},
         {update, ?LKEY(<<"/baz">>, <<"qux">>), {add, ?BE4}},
         {update, ?LKEY(<<"/qux">>, <<"ipv6">>), {add, ?BE6}}
@@ -73,6 +75,7 @@ lookup_vips(_Config) ->
 
     lashup_kv:request_op(?VIPS_KEY2, {update, [
         {update, ?LKEY({1, 2, 3, 4}), {remove, ?BE4}},
+        {update, ?LKEY({1, 2, 3, 5}), {remove, ?BE4OLD}},
         {update, ?LKEY(<<"/baz">>, <<"qux">>), {remove, ?BE4}},
         {update, ?LKEY(<<"/qux">>, <<"ipv6">>), {remove, ?BE6}}
     ]}),
