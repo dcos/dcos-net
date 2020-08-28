@@ -197,6 +197,12 @@ logs() {
     fi
   fi
 
+  echo "Capturing dcos-gen-resolvconf logs..."
+  journalctl -u dcos-gen-resolvconf.service > "$DATA_DIR/dcos-gen-resolvconf-logs.txt"
+
+  echo "Capturing kernel logs..."
+  journalctl -k > "$DATA_DIR/kernel-logs.txt"
+
   echo "Captured logs using journald."
   echo
 }
@@ -289,7 +295,7 @@ l4lb-data() {
   fi
 
   echo "Capturing kernel state..."
-  (sysctl net.ipv4.vs; sysctl net.ipv4.ip_local_port_range) > "$DATA_DIR/sysctl.txt"
+  sysctl -a > "$DATA_DIR/sysctl.txt"
 
   echo "Capturing iptables configuration..."
   iptables-save > "$DATA_DIR/iptables-save.txt"
@@ -320,6 +326,8 @@ overlay-data() {
   ip link > "$DATA_DIR/ip-link.txt"
   ip addr > "$DATA_DIR/ip-addr.txt"
   ip route > "$DATA_DIR/ip-route.txt"
+  ip neigh > "$DATA_DIR/ip-neigh.txt"
+  ip ntable > "$DATA_DIR/ip-ntable.txt"
 
   echo "Capturing lashup overlay state..."
   wrap-net-eval \
