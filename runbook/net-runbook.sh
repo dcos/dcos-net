@@ -322,17 +322,23 @@ overlay-data() {
   echo "Capturing overlay data..."
 
   echo "Capturing network configuration..."
+  bridge fdb > "$DATA_DIR/bridge-fdb.txt"
   ifconfig -a > "$DATA_DIR/ifconfig.txt"
-  ip link > "$DATA_DIR/ip-link.txt"
   ip addr > "$DATA_DIR/ip-addr.txt"
-  ip route > "$DATA_DIR/ip-route.txt"
+  ip link > "$DATA_DIR/ip-link.txt"
   ip neigh > "$DATA_DIR/ip-neigh.txt"
   ip ntable > "$DATA_DIR/ip-ntable.txt"
+  ip route > "$DATA_DIR/ip-route.txt"
+  ip route show table 42 > "$DATA_DIR/ip-route-42.txt"
+  ip rule > "$DATA_DIR/ip-rule.txt"
 
   echo "Capturing lashup overlay state..."
   wrap-net-eval \
     '[{Key, lashup_kv:value(Key)} || Key = [navstar, overlay, _Subnet] <- mnesia:dirty_all_keys(kv2)].' \
     > "$DATA_DIR/lashup-overlays.txt"
+  wrap-net-eval \
+      'mnesia:dirty_select(nclock, ets:fun2ms(fun(A) -> A end)).' \
+      > "$DATA_DIR/lashup-nclock.txt"
 
   echo "Capturing Mesos overlay information..."
   if [ "$RUNNING_ON_MASTER" == "yes" ];then
