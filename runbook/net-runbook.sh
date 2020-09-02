@@ -329,7 +329,7 @@ overlay-data() {
   ip neigh > "$DATA_DIR/ip-neigh.txt"
   ip ntable > "$DATA_DIR/ip-ntable.txt"
   ip route > "$DATA_DIR/ip-route.txt"
-  ip route show table 42 > "$DATA_DIR/ip-route-42.txt"
+  ip route show table 42 > "$DATA_DIR/ip-route-42.txt" 2>&1
   ip rule > "$DATA_DIR/ip-rule.txt"
 
   echo "Capturing lashup overlay state..."
