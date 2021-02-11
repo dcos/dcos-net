@@ -7,13 +7,13 @@
         kernel,
         stdlib,
         lashup,
-        lager,
         ranch,
         inets,
         ssl,
         erldns,
         telemetry,
-        prometheus
+        prometheus,
+        backoff
     ]},
     {env,[]},
     {modules, []},

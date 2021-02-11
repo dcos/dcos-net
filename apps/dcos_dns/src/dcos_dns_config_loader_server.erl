@@ -22,6 +22,7 @@
 %% API
 -export([start_link/0, start_link/1]).
 
+-include_lib("kernel/include/logger.hrl").
 -include("dcos_dns.hrl").
 
 -define(REFRESH_INTERVAL_NORMAL, 120000).
@@ -55,11 +56,11 @@ init([]) ->
     {ok, #state{}}.
 
 handle_call(Msg, _From, State) ->
-    lager:warning("Unhandled messages: ~p", [Msg]),
+    ?LOG_WARNING("Unhandled messages: ~p", [Msg]),
     {reply, ok, State}.
 
 handle_cast(Msg, State) ->
-    lager:warning("Unhandled messages: ~p", [Msg]),
+    ?LOG_WARNING("Unhandled messages: ~p", [Msg]),
     {noreply, State}.
 
 handle_info(?REFRESH_MESSAGE, State) ->
@@ -73,7 +74,7 @@ handle_info(?REFRESH_MESSAGE, State) ->
     end,
     {noreply, State, hibernate};
 handle_info(Msg, State) ->
-    lager:warning("Unhandled messages: ~p", [Msg]),
+    ?LOG_WARNING("Unhandled messages: ~p", [Msg]),
     {noreply, State}.
 
 terminate(_Reason, _State) ->
@@ -105,7 +106,7 @@ get_masters() ->
         "master_list" ->
             get_masters_file();
         Source ->
-            lager:warning("Unable to load masters (dcos_dns) from source: ~p", [Source]),
+            ?LOG_WARNING("Unable to load masters (dcos_dns) from source: ~p", [Source]),
             {error, bad_source}
     end.
 
@@ -138,7 +139,6 @@ get_masters_exhibitor(URI) ->
             IPAddresses = lists:map(fun dcos_dns_app:parse_ipv4_address/1, ExhibitorHostnames),
             {ok, [{IPAddress, ?MESOS_DNS_PORT} || IPAddress <- IPAddresses]};
         Error ->
-            lager:warning("Failed to retrieve information from exhibitor to configure dcos_dns: ~p", [Error]),
+            ?LOG_WARNING("Failed to retrieve information from exhibitor to configure dcos_dns: ~p", [Error]),
             {error, unavailable}
     end.
-

@@ -1,5 +1,6 @@
 -module(dcos_l4lb_ipset_mgr).
 
+-include_lib("kernel/include/logger.hrl").
 -include_lib("gen_netlink/include/netlink.hrl").
 
 -behaviour(gen_server).
@@ -114,12 +115,12 @@ handle_cast(_Request, State) ->
     {ok, non_neg_integer()} | {error, atom() | non_neg_integer()}).
 get_protocol_version(Pid) ->
     case request(Pid, protocol, [request], [{protocol, ?IPSET_PROTOCOL}]) of
-        {ok, Response} ->
+        {ok, [{ipset, protocol, _Flags, _Seq, _Pid, {inet, 0, 0, Response}}]} ->
             case get_protocol_versions(Response) of
                 {ok, ?IPSET_PROTOCOL} ->
                     {ok, ?IPSET_PROTOCOL};
                 {ok, Ver} ->
-                    lager:alert(
+                    ?LOG_ALERT(
                         "ipset protocol (ver. ~p) is not supported: ~p",
                         [?IPSET_PROTOCOL, Ver]),
                     {error, Ver};
@@ -128,12 +129,12 @@ get_protocol_version(Pid) ->
                          VerMin =< ?IPSET_PROTOCOL ->
                     {ok, ?IPSET_PROTOCOL};
                 {ok, Ver, VerMin} ->
-                    lager:alert(
+                    ?LOG_ALERT(
                         "ipset protocol (ver. ~p) is not supported: ~p, ~p",
                         [?IPSET_PROTOCOL, Ver, VerMin]),
                     {error, Ver};
                 error ->
-                    lager:alert("Failed to initialize ipset"),
+                    ?LOG_ALERT("Failed to initialize ipset"),
                     {error, no_version}
             end;
         {error, Error, _Response} ->
@@ -160,7 +161,7 @@ get_protocol_versions(Response) ->
 get_supported_revision(Pid, Type, Family) ->
     Msg = [{protocol, ?IPSET_PROTOCOL}, {typename, Type}, {family, Family}],
     case request(Pid, type, [request], Msg) of
-        {ok, Response} ->
+        {ok, [{ipset, type, _Flags, _Seq, _Pid, {inet, 0, 0, Response}}]} ->
             case lists:keyfind(revision, 1, Response) of
                 {revision, Revision} -> {ok, Revision};
                 false -> {error, not_found}
@@ -291,18 +292,25 @@ get_entries(Pid, Name) ->
     Msg = [{protocol, ?IPSET_PROTOCOL}, {setname, Name}],
     case request(Pid, list, [match, root, ack, request], Msg) of
         {ok, Response} ->
-            {adt, ADT} = lists:keyfind(adt, 1, Response),
-            {ok, lists:map(fun ({data, Data}) ->
-                {ip, [{_Family, IP}]} = lists:keyfind(ip, 1, Data),
-                {port, Port} = lists:keyfind(port, 1, Data),
-                {proto, Protocol} = lists:keyfind(proto, 1, Data),
-                {Protocol, IP, Port}
-            end, ADT)};
+            {ok, parse_entries(Response)};
         {error, enoent, _Response} ->
             {ok, []};
         {error, Error, _Response} ->
             {error, Error}
     end.
+
+-spec(parse_entries(Response :: term()) -> [entry()]).
+parse_entries(Response) ->
+    lists:flatmap(
+        fun ({ipset, list, _Flags, _Seq, _Pid, {inet, 0, 0, Info}}) ->
+            {adt, ADT} = lists:keyfind(adt, 1, Info),
+            lists:map(fun ({data, Data}) ->
+                {ip, [{_Family, IP}]} = lists:keyfind(ip, 1, Data),
+                {port, Port} = lists:keyfind(port, 1, Data),
+                {proto, Protocol} = lists:keyfind(proto, 1, Data),
+                {Protocol, IP, Port}
+            end, ADT)
+        end, Response).
 
 %%%===================================================================
 %%% Internal functions
@@ -313,8 +321,6 @@ get_entries(Pid, Name) ->
 request(Pid, Command, Flags, Msg) ->
     Args = [Pid, ?NETLINK_NETFILTER, ipset, Command, Flags, {inet, 0, 0, Msg}],
     case apply(gen_netlink_client, request, Args) of
-        {ok, [{ipset, Command, _Flags, _Seq, _Pid, {inet, 0, 0, Response}}]} ->
-            {ok, Response};
         {ok, Response} ->
             {ok, Response};
         {error, eexist, _Response} ->

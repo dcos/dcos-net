@@ -7,6 +7,8 @@
 
 -behaviour(application).
 
+-include_lib("kernel/include/logger.hrl").
+
 -define(MASTERS_KEY, {masters, riak_dt_orswot}).
 
 %% Application callbacks
@@ -47,9 +49,9 @@ load_config_files(App) ->
     ConfigDir = config_dir(),
     case file:list_dir(ConfigDir) of
       {ok, []} ->
-        lager:info("Found an empty config directory: ~p", [ConfigDir]);
+        ?LOG_INFO("Found an empty config directory: ~p", [ConfigDir]);
       {error, enoent} ->
-        lager:info("Couldn't find config directory: ~p", [ConfigDir]);
+        ?LOG_INFO("Couldn't find config directory: ~p", [ConfigDir]);
       {ok, Filenames} ->
         lists:foreach(fun (Filename) ->
             AbsFilename = filename:absname(Filename, ConfigDir),
@@ -60,12 +62,12 @@ load_config_files(App) ->
 load_config_file(App, Filename) ->
     case file:consult(Filename) of
         {ok, []} ->
-            lager:info("Found an empty config file: ~p~n", [Filename]);
+            ?LOG_INFO("Found an empty config file: ~p~n", [Filename]);
         {error, eacces} ->
-            lager:info("Couldn't load config: ~p", [Filename]);
+            ?LOG_INFO("Couldn't load config: ~p", [Filename]);
         {ok, Result} ->
             load_config(App, Result),
-            lager:info("Loaded config: ~p", [Filename])
+            ?LOG_INFO("Loaded config: ~p", [Filename])
     end.
 
 load_config(App, [Result]) ->
@@ -236,11 +238,11 @@ load_plugin({App, AppPath}) ->
             load_modules(App, AppPath),
             case application:ensure_all_started(App, permanent) of
                 {error, Error} ->
-                    lager:error("Plugin ~p: ~p", [App, Error]);
+                    ?LOG_ERROR("Plugin ~p: ~p", [App, Error]);
                 {ok, _Apps} -> ok
             end;
         {error, bad_directory} ->
-            lager:error("Plugin ~p: bad_directory", [App])
+            ?LOG_ERROR("Plugin ~p: bad_directory", [App])
     end.
 
 load_modules(App, AppPath) ->

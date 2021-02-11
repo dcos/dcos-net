@@ -1,6 +1,7 @@
 -module(dcos_l4lb_mgr).
 -behaviour(gen_server).
 
+-include_lib("kernel/include/logger.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 -include("dcos_l4lb_lashup.hrl").
 -include("dcos_l4lb.hrl").
@@ -38,13 +39,14 @@
     namespaces = [host] :: [namespace()],
     % vips
     vips = [] :: [{key(), [backend()]}],
-    prev_vips = [] :: [{key(), [ipport()]}]
+    prev_vips = [] :: [{key(), [backend()]}]
 }).
 -type state() :: #state{}.
 
 -type key() :: dcos_l4lb_mesos_poller:key().
 -type backend() :: dcos_l4lb_mesos_poller:backend().
--type ipport() :: {inet:ip_address(), inet:port_number()}.
+-type ipportweight() :: {{inet:ip_address(), inet:port_number()},
+                         dcos_l4lb_mesos_poller:backend_weight()}.
 -type namespace() :: term().
 
 -define(GM_EVENTS(R, T), {lashup_gm_route_events, #{ref := R, tree := T}}).
@@ -192,11 +194,10 @@ start_reconcile_timer() ->
 
 -spec(handle_reconcile([{key(), [backend()]}], state()) -> state()).
 handle_reconcile(VIPs, #state{tree=Tree, nodes=Nodes, namespaces=Namespaces,
-        route_mgr=RouteMgr, ipvs_mgr=IPVSMgr, ipset_mgr=IPSetMgr}=State) ->
+        route_mgr=RouteMgr, ipset_mgr=IPSetMgr, prev_vips=PrevVIPs}=State) ->
     % If everything is ok this function is silent and changes nothing.
     VIPs0 = vips_port_mappings(VIPs),
     VIPs1 = healthy_vips(VIPs0, Nodes, Tree),
-    VIPsP = prepare_vips(VIPs1),
     Routes = get_vip_routes(VIPs),
     Diffs =
         lists:map(fun (Namespace) ->
@@ -206,8 +207,7 @@ handle_reconcile(VIPs, #state{tree=Tree, nodes=Nodes, namespaces=Namespaces,
             PrevRoutes = get_routes(RouteMgr, Namespace),
             DiffRoutes = dcos_net_utils:complement(Routes, PrevRoutes),
 
-            PrevVIPsP = get_vips(IPVSMgr, Namespace),
-            DiffVIPs = diff(PrevVIPsP, VIPsP),
+            DiffVIPs = diff(prepare_vips(PrevVIPs), prepare_vips(VIPs1)),
 
             {Namespace, LogPrefix, DiffRoutes, DiffVIPs}
         end, Namespaces),
@@ -350,42 +350,22 @@ remove_ipset_entries(IPSetMgr, KeysToDel) ->
 %%% IPVS functions
 %%%===================================================================
 
--spec(prepare_vips([{key(), [backend()]}]) -> [{key(), [ipport()]}]).
+-spec(prepare_vips([{key(), [backend()]}]) -> [{key(), [ipportweight()]}]).
 prepare_vips(VIPs) ->
     lists:map(fun ({VIP, BEs}) ->
-        {VIP, [BE || {_AgentIP, BE} <- BEs]}
+        {VIP, [{{BackendIP, BackendPort},
+                BackendWeight} || {_AgentIP, {BackendIP,
+                                              BackendPort,
+                                              BackendWeight}} <- BEs]}
     end, VIPs).
-
--spec(get_vips(pid(), namespace()) -> [{key(), [ipport()]}]).
-get_vips(IPVSMgr, Namespace) ->
-    Services = get_vip_services(IPVSMgr, Namespace),
-    lists:map(fun (S) -> get_vip(IPVSMgr, Namespace, S) end, Services).
-
--spec(get_vip_services(pid(), namespace()) -> [Service]
-    when Service :: dcos_l4lb_ipvs_mgr:service()).
-get_vip_services(IPVSMgr, Namespace) ->
-    Services = dcos_l4lb_ipvs_mgr:get_services(IPVSMgr, Namespace),
-    FVIPs = lists:map(fun dcos_l4lb_ipvs_mgr:service_address/1, Services),
-    maps:values(maps:from_list(lists:zip(FVIPs, Services))).
-
--spec(get_vip(pid(), namespace(), Service) -> {key(), [ipport()]}
-    when Service :: dcos_l4lb_ipvs_mgr:service()).
-get_vip(IPVSMgr, Namespace, Service) ->
-    {Family, VIP} = dcos_l4lb_ipvs_mgr:service_address(Service),
-    Dests = dcos_l4lb_ipvs_mgr:get_dests(IPVSMgr, Service, Namespace),
-    Backends =
-        lists:map(fun (Dest) ->
-            dcos_l4lb_ipvs_mgr:destination_address(Family, Dest)
-        end, Dests),
-    {VIP, lists:usort(Backends)}.
 
 %%%===================================================================
 %%% IPVS Apply functions
 %%%===================================================================
 
--type diff_vips() :: {ToAdd :: [{key(), [ipport()]}],
-                      ToDel :: [{key(), [ipport()]}],
-                      ToMod :: [{key(), [ipport()], [ipport()]}]}.
+-type diff_vips() :: {ToAdd :: [{key(), [ipportweight()]}],
+                      ToDel :: [{key(), [ipportweight()]}],
+                      ToMod :: [{key(), [ipportweight()], [ipportweight()]}]}.
 
 -spec(apply_vips_diff(pid(), namespace(), diff_vips()) -> ok).
 apply_vips_diff(IPVSMgr, Namespace, {ToAdd, ToDel, ToMod}) ->
@@ -399,34 +379,50 @@ apply_vips_diff(IPVSMgr, Namespace, {ToAdd, ToDel, ToMod}) ->
         vip_mod(IPVSMgr, Namespace, VIP)
     end, ToMod).
 
--spec(vip_add(pid(), namespace(), {key(), [ipport()]}) -> ok).
+-spec(vip_add(pid(), namespace(), {key(), [ipportweight()]}) -> ok).
 vip_add(IPVSMgr, Namespace, {{Protocol, IP, Port}, BEs}) ->
     dcos_l4lb_ipvs_mgr:add_service(IPVSMgr, IP, Port, Protocol, Namespace),
-    lists:foreach(fun ({BEIP, BEPort}) ->
+    lists:foreach(fun ({{BEIP, BEPort}, BEWeight}) ->
         dcos_l4lb_ipvs_mgr:add_dest(
             IPVSMgr, IP, Port,
             BEIP, BEPort,
-            Protocol, Namespace)
+            Protocol, Namespace, BEWeight)
     end, BEs).
 
--spec(vip_del(pid(), namespace(), {key(), [ipport()]}) -> ok).
+-spec(vip_del(pid(), namespace(), {key(), [ipportweight()]}) -> ok).
 vip_del(IPVSMgr, Namespace, {{Protocol, IP, Port}, _BEs}) ->
     dcos_l4lb_ipvs_mgr:remove_service(IPVSMgr, IP, Port, Protocol, Namespace).
 
--spec(vip_mod(pid(), namespace(), {key(), [ipport()], [ipport()]}) -> ok).
+-spec(vip_mod(pid(), namespace(), {key(), [ipportweight()], [ipportweight()]}) -> ok).
 vip_mod(IPVSMgr, Namespace, {{Protocol, IP, Port}, ToAdd, ToDel}) ->
-    lists:foreach(fun ({BEIP, BEPort}) ->
+    {ToMod, ToAdd0, ToDel0} = vip_extract_mod(ToAdd, ToDel),
+    lists:foreach(fun ({{BEIP, BEPort}, BEWeight}) ->
+        dcos_l4lb_ipvs_mgr:mod_dest(
+            IPVSMgr, IP, Port,
+            BEIP, BEPort,
+            Protocol, Namespace, BEWeight)
+    end, ToMod),
+    lists:foreach(fun ({{BEIP, BEPort}, BEWeight}) ->
         dcos_l4lb_ipvs_mgr:add_dest(
             IPVSMgr, IP, Port,
             BEIP, BEPort,
-            Protocol, Namespace)
-    end, ToAdd),
-    lists:foreach(fun ({BEIP, BEPort}) ->
+            Protocol, Namespace, BEWeight)
+    end, ToAdd0),
+    lists:foreach(fun ({{BEIP, BEPort}, _BEWeight}) ->
         dcos_l4lb_ipvs_mgr:remove_dest(
             IPVSMgr, IP, Port,
             BEIP, BEPort,
             Protocol, Namespace)
-    end, ToDel).
+    end, ToDel0).
+
+-spec(vip_extract_mod([ipportweight()], [ipportweight()]) -> {[ipportweight()],
+                                                              [ipportweight()],
+                                                              [ipportweight()]}).
+vip_extract_mod(ToAdd, ToDel) ->
+    ToMod = [ {K, V} || {K, V} <- ToAdd, lists:keymember(K, 1, ToDel) ],
+    {ToMod,
+     [ {K, V} || {K, V} <- ToAdd, not(lists:keymember(K, 1, ToMod)) ],
+     [ {K, V} || {K, V} <- ToDel, not(lists:keymember(K, 1, ToMod)) ]}.
 
 -spec(vip_diff_size(diff_vips()) -> non_neg_integer()).
 vip_diff_size({ToAdd, ToDel, ToMod}) ->
@@ -506,7 +502,7 @@ agents(VIPs, Nodes, Tree) ->
     AgentIPs0 = lists:usort(AgentIPs),
     Result = [{IP, is_reachable(IP, Nodes, Tree)} || IP <- AgentIPs0],
     Unreachable = [IP || {IP, false} <- Result],
-    [ lager:warning(
+    [ ?LOG_WARNING(
         "L4LB unreachable agent nodes, size: ~p, ~p",
         [length(Unreachable), Unreachable])
     || Unreachable =/= [] ],
@@ -556,17 +552,17 @@ log_vips_diff(Diff) ->
 -spec(log_vips_diff(binary(), diff_vips()) -> ok).
 log_vips_diff(Prefix, {ToAdd, ToDel, ToMod}) ->
     lists:foreach(fun ({{Proto, VIP, Port}, Backends}) ->
-        lager:notice(
+        ?LOG_NOTICE(
             "~sVIP service was added: ~p://~s:~p, Backends: ~p",
             [Prefix, Proto, inet:ntoa(VIP), Port, Backends])
     end, ToAdd),
     lists:foreach(fun ({{Proto, VIP, Port}, _BEs}) ->
-        lager:notice(
+        ?LOG_NOTICE(
             "~sVIP service was deleted: ~p://~s:~p",
             [Prefix, Proto, inet:ntoa(VIP), Port])
     end, ToDel),
     lists:foreach(fun ({{Proto, VIP, Port}, Added, Removed}) ->
-        lager:notice(
+        ?LOG_NOTICE(
             "~sVIP service was modified: ~p://~s:~p, Backends: +~p -~p",
             [Prefix, Proto, inet:ntoa(VIP), Port, Added, Removed])
     end, ToMod).
@@ -577,10 +573,10 @@ log_routes_diff(Diff) ->
 
 -spec(log_routes_diff(binary(), diff_routes()) -> ok).
 log_routes_diff(Prefix, {ToAdd, ToDel}) ->
-    [ lager:notice(
+    [ ?LOG_NOTICE(
         "~sVIP routes were added, routes: ~p, IPs: ~p",
         [Prefix, length(ToAdd), ToAdd]) || ToAdd =/= [] ],
-    [ lager:notice(
+    [ ?LOG_NOTICE(
         "~sVIP routes were removed, routes: ~p, IPs: ~p",
         [Prefix, length(ToDel), ToDel]) || ToDel =/= [] ],
     ok.
@@ -588,10 +584,10 @@ log_routes_diff(Prefix, {ToAdd, ToDel}) ->
 -spec(log_ipset_diff(diff_keys()) -> ok).
 log_ipset_diff({ToAdd, ToDel}) ->
     IPSetEnabled = dcos_l4lb_config:ipset_enabled(),
-    [ lager:notice(
+    [ ?LOG_NOTICE(
         "VIPs were added to ipset: ~p",
         [ToAdd]) || ToAdd =/= [], IPSetEnabled ],
-    [ lager:notice(
+    [ ?LOG_NOTICE(
         "VIPs were removed from ipset: ~p",
         [ToDel]) || ToDel =/= [], IPSetEnabled ],
     ok.
@@ -604,7 +600,7 @@ log_netns_diff(Namespaces, _PrevNamespaces) ->
     <<", ", Str/binary>> =
         << <<", ", (namespace2bin(Namespace))/binary>>
         || Namespace <- Namespaces>>,
-    lager:notice("L4LB network namespaces: ~s", [Str]).
+    ?LOG_NOTICE("L4LB network namespaces: ~s", [Str]).
 
 %%%===================================================================
 %%% Network Namespace functions
@@ -646,6 +642,23 @@ vips_port_mappings(VIPs) ->
         {{Protocol, VIP, VIPPort}, BEs0}
     end, VIPs).
 
+be_port_mapping(PMs, Protocol, AgentIP, BEAgentIP, BE) ->
+    case BE of
+        {BEIP, BEPort, Weight} ->
+            Weight = Weight;
+        {BEIP, BEPort} ->
+            Weight = 1
+    end,
+    case BEIP of
+        AgentIP ->
+            case maps:find({Protocol, BEPort}, PMs) of
+                {ok, {IP, Port}} -> {BEAgentIP, {IP, Port, Weight}};
+                error -> {BEAgentIP, {BEIP, BEPort, Weight}}
+            end;
+        _ ->
+            {BEAgentIP, {BEIP, BEPort, Weight}}
+    end.
+
 -spec(bes_port_mappings(PMs, tcp | udp, AgentIP, [backend()]) -> [backend()]
     when PMs :: #{Host => Container},
          AgentIP :: inet:ip4_address(),
@@ -653,13 +666,8 @@ vips_port_mappings(VIPs) ->
          Container :: {inet:ip_address(), inet:port_number()}).
 bes_port_mappings(PMs, Protocol, AgentIP, BEs) ->
     lists:map(
-        fun ({BEAgentIP, {BEIP, BEPort}}) when BEIP =:= AgentIP ->
-                case maps:find({Protocol, BEPort}, PMs) of
-                    {ok, {IP, Port}} -> {BEAgentIP, {IP, Port}};
-                    error -> {BEAgentIP, {BEIP, BEPort}}
-                end;
-            ({BEAgentIP, {BEIP, BEPort}}) ->
-                {BEAgentIP, {BEIP, BEPort}}
+        fun ({BEAgentIP, BE}) ->
+            be_port_mapping(PMs, Protocol, AgentIP, BEAgentIP, BE)
         end, BEs).
 
 %%%===================================================================
@@ -792,6 +800,20 @@ init_unreachable_metrics() ->
 %%%===================================================================
 
 -ifdef(TEST).
+
+-define(BE4, {{1, 2, 3, 4}, 80, 1}).
+-define(BE4OLD, {{1, 2, 3, 5}, 80}).
+
+be_port_mapping_test() ->
+    PMs = #{{tcp, 8080} => {{1, 2, 3, 5}, 80},
+            {udp, 8181} => {{1, 0, 0, 0, 0, 0, 0, 2}, 80}},
+    AgentIP = {2, 3, 4, 5},
+    ?assertEqual(
+       {{2, 3, 4, 5}, {{1, 2, 3, 4}, 80, 1}},
+       be_port_mapping(PMs, tcp, AgentIP, AgentIP, ?BE4)),
+    ?assertEqual(
+       {{2, 3, 4, 5}, {{1, 2, 3, 5}, 80, 1}},
+       be_port_mapping(PMs, tcp, AgentIP, AgentIP, ?BE4OLD)).
 
 diff_simple_test() ->
     ?assertEqual(

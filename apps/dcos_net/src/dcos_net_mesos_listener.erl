@@ -13,9 +13,11 @@
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2,
-    handle_info/2, terminate/2, code_change/3]).
+    handle_info/2, handle_continue/2, terminate/2, code_change/3]).
 
 -export_type([task_id/0, task/0, task_state/0, task_port/0, runtime/0]).
+
+-include_lib("kernel/include/logger.hrl").
 
 -opaque task_id() :: {framework_id(), binary()}.
 -type framework_id() :: binary().
@@ -30,7 +32,7 @@
     ports => [task_port()]
 }.
 -type runtime() :: docker | mesos | unknown.
--type task_state() :: preparing | running | terminal.
+-type task_state() :: preparing | running | killing | terminal.
 -type task_port() :: #{
     name => binary(),
     host_port => inet:port_number(),
@@ -40,17 +42,23 @@
 }.
 
 -record(state, {
-    pid :: pid(),
-    ref :: reference(),
-    size = undefined :: pos_integer() | undefined,
-    buf = <<>> :: binary(),
-    timeout = 15000 :: timeout(),
-    timeout_ref = make_ref() :: reference(),
+    http_pid = undefined :: pid() | undefined,
+    http_ref = undefined :: reference() | undefined,
+    http_size = undefined :: pos_integer() | undefined,
+    http_buf = <<>> :: binary(),
+    http_timeout = 15000 :: timeout(),
+    http_timer_ref = make_ref() :: reference(),
     agents = #{} :: #{binary() => inet:ip4_address()},
+    recovered_agents = #{} :: #{binary() => true},
     frameworks = #{} :: #{framework_id() => binary()},
     tasks = #{} :: #{task_id() => task()},
     waiting_tasks = #{} :: #{task_id() => true},
-    subs = undefined :: #{pid() => reference()} | undefined
+    subs = #{} :: #{pid() => reference()},
+    backoff :: backoff:backoff(),
+    backoff_timer_ref = make_ref() :: reference(),
+    phase = init :: init | await_agents | await_tasks | serve,
+    await_agents_timer_ref = make_ref() :: reference(),
+    await_tasks_timer_ref = make_ref() :: reference()
 }).
 
 -type state() :: #state{}.
@@ -59,8 +67,7 @@
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
--spec(subscribe() -> {ok, MonRef, Tasks} | {error, atom()}
-    when MonRef :: reference(), Tasks :: #{task_id() => task()}).
+-spec(subscribe() -> {ok, MonRef} | {error, atom()} when MonRef :: reference()).
 subscribe() ->
     case whereis(?MODULE) of
         undefined ->
@@ -100,39 +107,47 @@ from_state(Data) ->
 %%%===================================================================
 
 init([]) ->
-    self() ! init,
-    {ok, []}.
+    Interval = application:get_env(dcos_net, mesos_reconnect_timeout, 2000),
+    MaxInterval = application:get_env(
+        dcos_net, mesos_reconnect_max_timeout, 30000),
+    Backoff0 = backoff:init(Interval, MaxInterval, self(), init),
+    Backoff = backoff:type(Backoff0, jitter),
+    {ok, #state{backoff = Backoff}, {continue, init}}.
 
-handle_call(is_leader, _From, State) ->
-    % There is no state if it's not connected
-    IsLeader = is_record(State, state),
+handle_call(is_leader, _From, #state{http_ref = Ref} = State) ->
+    %% if there is no HTTP connection reference, it means this
+    %% listener is surely not a leader
+    IsLeader = Ref =/= undefined,
     {reply, IsLeader, State};
-handle_call(_Request, _From, State) ->
+handle_call(Request, _From, State) ->
+    ?LOG_WARNING("Unexpected request: ~p", [Request]),
     {noreply, State}.
 
-handle_cast(_Request, State) ->
+handle_cast(Request, State) ->
+    ?LOG_WARNING("Unexpected request: ~p", [Request]),
     {noreply, State}.
 
-handle_info(init, []) ->
-    {noreply, handle_init([])};
 handle_info({subscribe, Pid, Ref}, State) ->
     {noreply, handle_subscribe(Pid, Ref, State)};
-handle_info({http, {Ref, stream, Data}}, #state{ref=Ref}=State) ->
+handle_info({http, {Ref, stream, Data}}, #state{http_ref = Ref} = State) ->
     handle_stream(Data, State);
-handle_info({timeout, TRef, httpc}, #state{ref=Ref, timeout_ref=TRef}=State) ->
-    ok = httpc:cancel_request(Ref),
-    lager:error("Mesos timeout"),
-    {stop, {httpc, timeout}, State};
-handle_info({http, {Ref, {error, Error}}}, #state{ref=Ref}=State) ->
-    lager:error("Mesos connection terminated: ~p", [Error]),
-    {stop, Error, State};
-handle_info({'DOWN', _MonRef, process, Pid, Info}, #state{pid=Pid}=State) ->
-    lager:error("Mesos http client: ~p", [Info]),
-    {stop, Info, State};
+handle_info({timeout, _TRef, _Reason} = Timeout, State) ->
+    handle_timeout(Timeout, State);
+handle_info({http, {Ref, {error, Error}}}, #state{http_ref = Ref} = State) ->
+    ?LOG_ERROR("Mesos connection terminated: ~p", [Error]),
+    {noreply, handle_failure(State), {continue, init}};
+handle_info({'DOWN', _MonRef, process, Pid, Info},
+        #state{http_pid = Pid} = State) ->
+    ?LOG_ERROR("Mesos http client is down: ~p", [Info]),
+    {noreply, handle_failure(State), {continue, init}};
 handle_info({'DOWN', _MonRef, process, Pid, _Info}, State) ->
     {noreply, handle_unsubscribe(Pid, State)};
-handle_info(_Info, State) ->
+handle_info(Info, State) ->
+    ?LOG_WARNING("Unexpected info: ~p", [Info]),
     {noreply, State}.
+
+handle_continue(init, State) ->
+    {noreply, handle_init(State)}.
 
 terminate(normal, _State) ->
     ok;
@@ -141,6 +156,76 @@ terminate(_Reason, _State) ->
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+-spec(reset_state(state()) -> state()).
+reset_state(#state{http_ref = Ref, http_timer_ref = TRef, subs = Subscribers,
+        backoff = Backoff, backoff_timer_ref = BackoffTRef,
+        await_agents_timer_ref = AwaitAgentsTRef,
+        await_tasks_timer_ref = AwaitTasksTRef}) ->
+    case Ref of
+        undefined -> ok;
+        _ -> ok = httpc:cancel_request(Ref)
+    end,
+    _ = erlang:cancel_timer(TRef),
+    _ = erlang:cancel_timer(BackoffTRef),
+    _ = erlang:cancel_timer(AwaitAgentsTRef),
+    _ = erlang:cancel_timer(AwaitTasksTRef),
+    #state{subs = Subscribers, backoff = Backoff}.
+
+-spec(handle_init(state()) -> state()).
+handle_init(#state{backoff = Backoff0} = State) ->
+    case start_stream(State) of
+        {ok, State0} ->
+            {_, Backoff} = backoff:succeed(Backoff0),
+            State0#state{backoff = Backoff};
+        {error, redirect} ->
+            % It's not a leader, don't log anything
+            {_, Backoff} = backoff:succeed(Backoff0),
+            BackoffTimerRef = backoff:fire(Backoff),
+            State#state{backoff = Backoff,
+                 backoff_timer_ref = BackoffTimerRef};
+        {error, Error} ->
+            ?LOG_ERROR("Couldn't connect to mesos: ~p", [Error]),
+            prometheus_counter:inc(mesos_listener, failures_total, [], 1),
+            BackoffTimerRef = backoff:fire(Backoff0),
+            {_, Backoff} = backoff:fail(Backoff0),
+            State#state{backoff = Backoff, backoff_timer_ref = BackoffTimerRef}
+    end.
+
+-spec(handle_failure(state()) -> state()).
+handle_failure(#state{backoff = Backoff0} = State) ->
+    %% eos stands for End Of Stream
+    State0 = publish(eos, State),
+    BackoffTimerRef = backoff:fire(Backoff0),
+    {_, Backoff} = backoff:fail(Backoff0),
+    reset_state(State0#state{backoff = Backoff,
+        backoff_timer_ref = BackoffTimerRef}).
+
+-spec(handle_timeout({timeout, reference(), atom()}, state()) ->
+    {noreply, state()} | {noreply, state(), {continue, init}}).
+handle_timeout({timeout, TRef, init}, #state{
+        backoff_timer_ref = TRef} = State) ->
+    {noreply, State, {continue, init}};
+handle_timeout({timeout, TRef, await_agents}, #state{phase = await_agents,
+        recovered_agents = RA, await_agents_timer_ref = TRef} = State) ->
+    ?LOG_NOTICE(
+        "Agents readiness timeout expired while having ~p inactive agents",
+        [map_size(RA)]),
+    {noreply, maybe_next_phase(State, timeout)};
+handle_timeout({timeout, TRef, await_tasks}, #state{phase = await_tasks,
+        await_tasks_timer_ref = TRef} = State) ->
+    ?LOG_NOTICE("Now publishing events to subscribers"),
+    {noreply, maybe_next_phase(State, timeout)};
+handle_timeout({timeout, TRef, httpc}, #state{http_timer_ref = TRef} = State) ->
+    ?LOG_ERROR("Mesos timeout"),
+    {noreply, handle_failure(State), {continue, init}};
+handle_timeout({timeout, _TRef, Timeout}, #state{phase = Phase} = State) ->
+    ?LOG_WARNING("Unhandled timeout ~p in phase ~p", [Timeout, Phase]),
+    {noreply, State}.
 
 %%%===================================================================
 %%% Handle functions
@@ -174,45 +259,47 @@ handle(#{<<"type">> := <<"AGENT_REMOVED">>} = Obj, State) ->
     Obj0 = mget(<<"agent_removed">>, Obj),
     handle_agent_removed(Obj0, State);
 handle(Obj, State) ->
-    lager:error("Unexpected mesos message type: ~p", [Obj]),
+    ?LOG_ERROR("Unexpected mesos message type: ~p", [Obj]),
     State.
 
 -spec(handle_subscribed(jiffy:object(), state()) -> state()).
 handle_subscribed(Obj, State) ->
     Timeout = mget(<<"heartbeat_interval_seconds">>, Obj),
     Timeout0 = erlang:trunc(Timeout * 1000),
-    State0 = State#state{timeout = Timeout0},
+    State0 = State#state{http_timeout = Timeout0},
 
     MState = mget(<<"get_state">>, Obj, #{}),
+    GetAgents = mget(<<"get_agents">>, MState, #{}),
 
-    Agents = mget([<<"get_agents">>, <<"agents">>], MState, []),
-    State1 =
+    RecoveredAgents = mget(<<"recovered_agents">>, GetAgents, []),
+    State1 = handle_recovered_agents(RecoveredAgents, State0),
+
+    Agents = mget(<<"agents">>, GetAgents, []),
+    State2 =
         lists:foldl(fun (Agent, St) ->
             handle_agent_added(#{<<"agent">> => Agent}, St)
-        end, State0, Agents),
+        end, State1, Agents),
 
     Frameworks = mget([<<"get_frameworks">>, <<"frameworks">>], MState, []),
-    State2 =
+    State3 =
         lists:foldl(fun (Framework, St) ->
             handle_framework_updated(#{<<"framework">> => Framework}, St)
-        end, State1, Frameworks),
+        end, State2, Frameworks),
 
-    Tasks = mget([<<"get_tasks">>, <<"tasks">>], MState, []),
-    State3 =
+    MTasks = mget([<<"get_tasks">>, <<"tasks">>], MState, []),
+    State4 =
         lists:foldl(fun (Task, St) ->
             handle_task(Task, St)
-        end, State2, Tasks),
-
-    State4 = State3#state{subs=#{}},
+        end, State3, MTasks),
 
     erlang:garbage_collect(),
     handle_heartbeat(State4).
 
 -spec(handle_heartbeat(state()) -> state()).
-handle_heartbeat(#state{timeout = T, timeout_ref = TRef}=State) ->
+handle_heartbeat(#state{http_timeout = T, http_timer_ref = TRef} = State) ->
     TRef0 = erlang:start_timer(3 * T, self(), httpc),
     _ = erlang:cancel_timer(TRef),
-    State#state{timeout_ref=TRef0}.
+    State#state{http_timer_ref = TRef0}.
 
 -spec(handle_task_added(jiffy:object(), state()) -> state()).
 handle_task_added(Obj, State) ->
@@ -237,19 +324,18 @@ handle_framework_added(Obj, State) ->
     handle_framework_updated(Obj, State).
 
 -spec(handle_framework_updated(jiffy:object(), state()) -> state()).
-handle_framework_updated(Obj, #state{frameworks=F}=State) ->
+handle_framework_updated(Obj, #state{frameworks = F} = State) ->
     FObj = mget(<<"framework">>, Obj),
     #{id := Id, name := Name} = handle_framework(FObj),
-
-    lager:notice("Framework ~s added, ~s", [Id, Name]),
-    State0 = State#state{frameworks=mput(Id, Name, F)},
+    ?LOG_NOTICE("Framework ~s added, ~s", [Id, Name]),
+    State0 = State#state{frameworks = mput(Id, Name, F)},
     handle_waiting_tasks(framework, Id, Name, State0).
 
 -spec(handle_framework_removed(jiffy:object(), state()) -> state()).
-handle_framework_removed(Obj, #state{frameworks=F}=State) ->
+handle_framework_removed(Obj, #state{frameworks = F} = State) ->
     #{id := Id} = handle_framework(Obj),
-    lager:notice("Framework ~s removed", [Id]),
-    State#state{frameworks=mremove(Id, F)}.
+    ?LOG_NOTICE("Framework ~s removed", [Id]),
+    State#state{frameworks = mremove(Id, F)}.
 
 -spec(handle_framework(jiffy:object()) ->
     #{id => binary(), name => binary() | undefined}).
@@ -259,33 +345,42 @@ handle_framework(Obj) ->
     Name = mget(<<"name">>, Info, undefined),
     #{id => Id, name => Name}.
 
+-spec(handle_recovered_agents(jiffy:object(), state()) -> state()).
+handle_recovered_agents(AObj, State) ->
+    RecoveredAgents = [{handle_agent_info_id(Info), true} || Info <- AObj],
+    State#state{recovered_agents = maps:from_list(RecoveredAgents)}.
+
 -spec(handle_agent_added(jiffy:object(), state()) -> state()).
-handle_agent_added(Obj, #state{agents=A}=State) ->
+handle_agent_added(Obj, #state{agents = A, recovered_agents = RA} = State) ->
     AObj = mget(<<"agent">>, Obj),
     #{id := Id, ip := IP} = handle_agent(AObj),
-    lager:notice("Agent ~s added, ~p", [Id, IP]),
-    State0 = State#state{agents=mput(Id, IP, A)},
+    ?LOG_NOTICE("Agent ~s added, ~p", [Id, IP]),
+    State0 = State#state{
+        agents = mput(Id, IP, A),
+        recovered_agents = mremove(Id, RA)},
     handle_waiting_tasks(agent_ip, Id, IP, State0).
 
 -spec(handle_agent_removed(jiffy:object(), state()) -> state()).
-handle_agent_removed(Obj, #state{agents=A}=State) ->
+handle_agent_removed(Obj, #state{agents = A, recovered_agents = RA} = State) ->
     Id = mget([<<"agent_id">>, <<"value">>], Obj),
-    lager:notice("Agent ~s removed", [Id]),
-    State#state{agents=mremove(Id, A)}.
+    ?LOG_NOTICE("Agent ~s removed", [Id]),
+    State#state{agents = mremove(Id, A), recovered_agents = mremove(Id, RA)}.
 
 -spec(handle_agent(jiffy:object()) ->
     #{id => binary(), ip => inet:ip4_address() | undefined}).
 handle_agent(Obj) ->
     Info = mget(<<"agent_info">>, Obj),
-    Id =
-        try
-            mget([<<"id">>, <<"value">>], Info)
-        catch error:{badkey, <<"id">>} ->
-            error(bad_agent_id)
-        end,
+    Id = handle_agent_info_id(Info),
     Hostname = mget(<<"hostname">>, Info, undefined),
     AgentIP = handle_agent_hostname(Hostname),
     #{id => Id, ip => AgentIP}.
+
+handle_agent_info_id(Info) ->
+    try
+        mget([<<"id">>, <<"value">>], Info)
+    catch error:{badkey, <<"id">>} ->
+        error(bad_agent_id)
+    end.
 
 -spec(handle_agent_hostname(binary() | undefined) ->
     inet:ip4_address() | undefined).
@@ -295,12 +390,12 @@ handle_agent_hostname(Hostname) ->
         {ok, [IP]} ->
             IP;
         {ok, [IP|IPs]} ->
-            lager:warning(
+            ?LOG_WARNING(
                 "Unexpected agent ips were ignored, ~s -> ~p: ~p",
                 [Hostname, IP, IPs]),
             IP;
         {error, Error} ->
-            lager:error(
+            ?LOG_ERROR(
                 "Couldn't resolve agent hostname, ~s: ~p",
                 [Hostname, Error]),
             undefined
@@ -311,7 +406,7 @@ handle_agent_hostname(Hostname) ->
 %%%===================================================================
 
 -spec(handle_task(jiffy:object(), state()) -> state()).
-handle_task(TaskObj, #state{tasks=T}=State) ->
+handle_task(TaskObj, #state{tasks = T} = State) ->
     FrameworkId = mget([<<"framework_id">>, <<"value">>], TaskObj),
     TaskId = {FrameworkId, mget([<<"task_id">>, <<"value">>], TaskObj)},
     Task = maps:get(TaskId, T, #{}),
@@ -321,12 +416,12 @@ handle_task(TaskObj, #state{tasks=T}=State) ->
     task_id(), jiffy:object(),
     task(), state()) -> state()).
 handle_task(TaskId, TaskObj, Task,
-            State=#state{agents=A, frameworks=F}) ->
+            State = #state{agents = A, frameworks = F}) ->
     try
         Task0 = task(TaskObj, Task, A, F),
         add_task(TaskId, Task, Task0, State)
     catch Class:Error ->
-        lager:error(
+        ?LOG_ERROR(
             "Unexpected error with ~s [~p]: ~p",
             [id2bin(TaskId), Class, Error]),
         State
@@ -357,7 +452,7 @@ task(TaskObj, Task, Agents, Frameworks) ->
         try Fun(TaskObj, Acc) of Value ->
             mput(Key, Value, Acc)
         catch Class:Error ->
-            lager:error(
+            ?LOG_ERROR(
                 "Unexpected error with ~p [~p]: ~p",
                 [Key, Class, Error]),
             Acc
@@ -370,18 +465,18 @@ add_task(TaskId, TaskPrev, TaskNew, State) ->
         MDiff when map_size(MDiff) =:= 0 ->
             State;
         MDiff ->
-            lager:notice("Task ~s updated with ~p", [id2bin(TaskId), MDiff]),
+            ?LOG_NOTICE("Task ~s updated with ~p", [id2bin(TaskId), MDiff]),
             add_task(TaskId, TaskNew, State)
     end.
 
 -spec(add_task(task_id(), task(), state()) -> state()).
 add_task(TaskId, #{state := terminal} = Task, #state{
-        tasks=T, waiting_tasks=TW}=State) ->
-    State0 = notify(TaskId, Task, State),
+        tasks = T, waiting_tasks = TW} = State) ->
+    State0 = publish_task_update(TaskId, Task, State),
     State0#state{
-        tasks=mremove(TaskId, T),
-        waiting_tasks=mremove(TaskId, TW)};
-add_task(TaskId, Task, #state{tasks=T, waiting_tasks=TW}=State) ->
+        tasks = mremove(TaskId, T),
+        waiting_tasks = mremove(TaskId, TW)};
+add_task(TaskId, Task, #state{tasks = T, waiting_tasks = TW} = State) ->
     % NOTE: you can get task info before you get agent or framework
     {TW0, State0} =
         case Task of
@@ -390,22 +485,22 @@ add_task(TaskId, Task, #state{tasks=T, waiting_tasks=TW}=State) ->
             #{framework := {id, _Id}} ->
                 {mput(TaskId, true, TW), State};
             _Task ->
-                St = notify(TaskId, Task, State),
+                St = publish_task_update(TaskId, Task, State),
                 {mremove(TaskId, TW), St}
         end,
     State0#state{
-        tasks=mput(TaskId, Task, T),
-        waiting_tasks=TW0}.
+        tasks = mput(TaskId, Task, T),
+        waiting_tasks = TW0}.
 
 -spec(handle_waiting_tasks(
     agent_ip | framework, binary(),
     term(), state()) -> state()).
-handle_waiting_tasks(Key, Id, Value, #state{waiting_tasks=TW}=State) ->
-    maps:fold(fun(TaskId, true, #state{tasks=T}=Acc) ->
+handle_waiting_tasks(Key, Id, Value, #state{waiting_tasks = TW} = State) ->
+    maps:fold(fun(TaskId, true, #state{tasks = T} = Acc) ->
         Task = maps:get(TaskId, T),
         case maps:get(Key, Task) of
             {id, Id} ->
-                lager:notice(
+                ?LOG_NOTICE(
                     "Task ~s updated with ~p",
                     [id2bin(TaskId), #{Key => Value}]),
                 add_task(TaskId, mput(Key, Value, Task), Acc);
@@ -441,6 +536,8 @@ handle_task_state(TaskObj, _Task) ->
             terminal;
         <<"TASK_RUNNING">> ->
             running;
+        <<"TASK_KILLING">> ->
+            killing;
         _TaskState ->
             preparing
     end.
@@ -469,7 +566,7 @@ handle_task_runtime(TaskObj, Task) ->
         <<"DOCKER">> ->
             docker;
         Type ->
-            lager:warning("Received an unknown container runtime
+            ?LOG_WARNING("Received an unknown container runtime
                 ~p for task ~p", [Type, Task]),
             unknown
     catch error:{badkey, _} ->
@@ -536,7 +633,7 @@ handle_protocol(Obj) ->
         <<"tcp">> -> tcp;
         <<"udp">> -> udp;
         _Protocol ->
-            lager:warning("Unexpected protocol type: ~p", [Obj]),
+            ?LOG_WARNING("Unexpected protocol type: ~p", [Obj]),
             throw(unexpected_protocol)
     end.
 
@@ -799,7 +896,7 @@ from_state_imp(TaskObjs, Agents, Frameworks) ->
             Task ->
                 mput(TaskId, Task, Acc)
         catch Class:Error ->
-            lager:error(
+            ?LOG_ERROR(
                 "Unexpected error with ~s [~p]: ~p",
                 [id2bin(TaskId), Class, Error]),
             Acc
@@ -810,8 +907,8 @@ from_state_imp(TaskObjs, Agents, Frameworks) ->
 %%% Subscribe Functions
 %%%===================================================================
 
--spec(subscribe(pid()) -> {ok, MonRef, Tasks} | {error, atom()}
-    when MonRef :: reference(), Tasks :: #{task_id() => task()}).
+-spec(subscribe(pid()) -> {ok, MonRef} | {error, atom()}
+    when MonRef :: reference()).
 subscribe(Pid) ->
     MonRef = erlang:monitor(process, Pid),
     Pid ! {subscribe, self(), MonRef},
@@ -821,8 +918,8 @@ subscribe(Pid) ->
         {error, MonRef, Reason} ->
             erlang:demonitor(MonRef, [flush]),
             {error, Reason};
-        {ok, MonRef, Tasks} ->
-            {ok, MonRef, Tasks}
+        {ok, MonRef} ->
+            {ok, MonRef}
     after 5000 ->
         erlang:demonitor(MonRef, [flush]),
         {error, timeout}
@@ -831,37 +928,31 @@ subscribe(Pid) ->
 -spec(handle_subscribe(pid(), reference(), state()) -> state()).
 handle_subscribe(Pid, Ref, State) ->
     case State of
-        [] ->
-            Pid ! {error, Ref, init},
-            State;
-        #state{subs=undefined} ->
-            Pid ! {error, Ref, wait},
-            State;
-        #state{subs=#{Pid := _}} ->
+        #state{subs = #{Pid := _}} ->
             Pid ! {error, Ref, subscribed},
             State;
-        #state{subs=Subs, tasks=T, waiting_tasks=TW} ->
-            T0 = maps:without(maps:keys(TW), T),
-            Pid ! {ok, Ref, T0},
+        #state{subs = Subs} ->
+            Pid ! {ok, Ref},
             _MonRef = erlang:monitor(process, Pid),
-            State#state{subs=maps:put(Pid, Ref, Subs)}
+            State0 = State#state{subs = maps:put(Pid, Ref, Subs)},
+            publish_tasks(#{Pid => Ref}, State0)
     end.
 
 -spec(handle_unsubscribe(pid(), state()) -> state()).
-handle_unsubscribe(Pid, #state{subs=Subs}=State) ->
-    State#state{subs=maps:remove(Pid, Subs)}.
+handle_unsubscribe(Pid, #state{subs = Subs} = State) ->
+    State#state{subs = maps:remove(Pid, Subs)}.
 
--spec(notify(task_id(), task(), state()) -> state()).
-notify(_TaskId, _Task, #state{subs=undefined}=State) ->
-    State;
-notify(TaskId, Task, #state{subs=Subs, timeout=Timeout}=State) ->
+-spec(publish(term(), state()) -> state()).
+publish(Message, #state{subs = Subscribers} = State) ->
+    publish(Message, Subscribers, State).
+
+-spec(publish(term(), #{pid() => reference()}, state()) -> state()).
+publish(Message, Subscribers, #state{phase = serve,
+        http_timeout = Timeout} = State) ->
     Begin = erlang:monotonic_time(),
     try
-        maps:fold(fun (Pid, Ref, ok) ->
-            Pid ! {task_updated, Ref, TaskId, Task},
-            ok
-        end, ok, Subs),
-
+        Send = fun({Pid, MonRef}) -> Pid ! {Message, MonRef} end,
+        ok = lists:foreach(Send, maps:to_list(Subscribers)),
         maps:fold(fun (Pid, Ref, St) ->
             receive
                 {next, Ref} ->
@@ -872,12 +963,85 @@ notify(TaskId, Task, #state{subs=Subs, timeout=Timeout}=State) ->
                 exit(Pid, {?MODULE, timeout}),
                 St
             end
-        end, State, Subs)
+        end, State, Subscribers)
     after
         prometheus_summary:observe(
             mesos_listener, pubsub_duration_seconds,
             [], erlang:monotonic_time() - Begin)
-    end.
+    end;
+publish(_Message, _Subscribers, State) ->
+    State.
+
+-spec(publish_tasks(state()) -> state()).
+publish_tasks(#state{subs = Subscribers} = State) ->
+    publish_tasks(Subscribers, State).
+
+-spec(publish_tasks(#{pid() => reference()}, state()) -> state()).
+publish_tasks(Subscribers, #state{tasks = T, waiting_tasks = TW} = State) ->
+    Tasks = maps:without(maps:keys(TW), T),
+    publish({tasks, Tasks}, Subscribers, State).
+
+-spec(publish_task_update(task_id(), task(), state()) -> state()).
+publish_task_update(TaskId, Task, State) ->
+    publish({task_updated, TaskId, Task}, State).
+
+-spec(start_agents_readiness_timer() -> reference()).
+start_agents_readiness_timer() ->
+    Timeout = application:get_env(dcos_net,
+        mesos_agents_readiness_timeout, timer:minutes(10)),
+    erlang:start_timer(Timeout, self(), await_agents).
+
+-spec(start_tasks_readiness_timer() -> reference()).
+start_tasks_readiness_timer() ->
+    Timeout = application:get_env(dcos_net,
+        mesos_tasks_readiness_timeout, timer:seconds(10)),
+    erlang:start_timer(Timeout, self(), await_tasks).
+
+%%%===================================================================
+%%% Phase functions
+%%%===================================================================
+
+-spec(maybe_next_phase(state(), timeout | update) -> state()).
+maybe_next_phase(#state{phase = serve} = State, update) ->
+    State;
+maybe_next_phase(#state{phase = init} = State, update) ->
+    maybe_next_phase_init(State, update);
+maybe_next_phase(#state{phase = await_agents} = State, Reason) ->
+    maybe_next_phase_await_agents(State, Reason);
+maybe_next_phase(#state{phase = await_tasks} = State, Reason) ->
+    maybe_next_phase_await_tasks(State, Reason).
+
+-spec(maybe_next_phase_init(state(), update) -> state()).
+maybe_next_phase_init(#state{recovered_agents = RA} = State, update)
+        when map_size(RA) > 0 ->
+    TRef = start_agents_readiness_timer(),
+    State#state{phase = await_agents, await_agents_timer_ref = TRef};
+maybe_next_phase_init(State, update) ->
+    maybe_next_phase(State#state{phase = await_agents}, update).
+
+-spec(maybe_next_phase_await_agents(state(), timeout | update) -> state()).
+maybe_next_phase_await_agents(State, timeout) ->
+    TRef = start_tasks_readiness_timer(),
+    State#state{phase = await_tasks, recovered_agents = #{},
+        await_agents_timer_ref = make_ref(),
+        await_tasks_timer_ref = TRef};
+maybe_next_phase_await_agents(#state{recovered_agents = RA,
+        await_agents_timer_ref = AwaitAgentsTRef} = State, update)
+        when map_size(RA) =:= 0 ->
+    _ = erlang:cancel_timer(AwaitAgentsTRef),
+    AwaitTasksTRef = start_tasks_readiness_timer(),
+    State#state{phase = await_tasks, recovered_agents = #{},
+        await_agents_timer_ref = make_ref(),
+        await_tasks_timer_ref = AwaitTasksTRef};
+maybe_next_phase_await_agents(State, update) ->
+    State.
+
+-spec(maybe_next_phase_await_tasks(state(), timeout | update) -> state()).
+maybe_next_phase_await_tasks(State, update) ->
+    State;
+maybe_next_phase_await_tasks(State, timeout) ->
+    publish_tasks(State#state{phase = serve,
+        await_tasks_timer_ref = make_ref()}).
 
 %%%===================================================================
 %%% Maps Functions
@@ -930,25 +1094,8 @@ mdiff(A, B) ->
 %%% Mesos Operator API Client
 %%%===================================================================
 
--spec(handle_init([]) -> state() | []).
-handle_init(State0) ->
-    Timeout = application:get_env(dcos_net, mesos_reconnect_timeout, 2000),
-    case start_stream() of
-        {ok, State} ->
-            State;
-        {error, redirect} ->
-            % It's not a leader, don't log anything
-            erlang:send_after(Timeout, self(), init),
-            State0;
-        {error, Error} ->
-            lager:error("Couldn't connect to mesos: ~p", [Error]),
-            prometheus_counter:inc(mesos_listener, failures_total, [], 1),
-            erlang:send_after(Timeout, self(), init),
-            State0
-    end.
-
--spec(start_stream() -> {ok, state()} | {error, term()}).
-start_stream() ->
+-spec(start_stream(state()) -> {ok, state()} | {error, term()}).
+start_stream(State) ->
     prometheus_boolean:set(mesos_listener, is_leader, [], false),
     Opts = [{stream, {self, once}}],
     Request = #{type => <<"SUBSCRIBE">>},
@@ -957,16 +1104,15 @@ start_stream() ->
             prometheus_boolean:set(mesos_listener, is_leader, [], true),
             httpc:stream_next(Pid),
             erlang:monitor(process, Pid),
-            State = #state{pid=Pid, ref=Ref},
-            {ok, handle_heartbeat(State)};
+            State0 = State#state{http_pid = Pid, http_ref = Ref},
+            {ok, handle_heartbeat(State0)};
         {error, {http_status, {_HTTPVersion, 307, _StatusStr}, _Data}} ->
             {error, redirect};
         {error, Error} ->
             {error, Error}
     end.
 
--spec(handle_stream(binary(), state()) ->
-    {noreply, state()} | {stop, term(), state()}).
+-spec(handle_stream(binary(), state()) -> {noreply, state()}).
 handle_stream(Data, State) ->
     Size = byte_size(Data),
     prometheus_counter:inc(mesos_listener, bytes_total, [], Size),
@@ -975,37 +1121,40 @@ handle_stream(Data, State) ->
             {noreply, State0};
         {next, Obj, State0} ->
             State1 = handle(Obj, State0),
-            handle_metrics(State1),
-            handle_stream(<<>>, State1);
+            State2 = maybe_next_phase(State1, update),
+            handle_metrics(State2),
+            handle_stream(<<>>, State2);
         {error, Error} ->
-            lager:error("Mesos protocol error: ~p", [Error]),
-            {stop, Error, State}
+            ?LOG_ERROR("Mesos protocol error: ~p", [Error]),
+            {noreply, handle_failure(State)}
     end.
 
 -spec(stream(binary(), State) -> {error, term()} |
     {next, State} | {next, jiffy:object(), State}
         when State :: state()).
-stream(Data, #state{pid=Pid, size=undefined, buf=Buf}=State) ->
+stream(Data, #state{http_pid = Pid, http_size = undefined,
+        http_buf = Buf} = State) ->
     Buf0 = <<Buf/binary, Data/binary>>,
     case binary:split(Buf0, <<"\n">>) of
         [SizeBin, Tail] ->
             Size = binary_to_integer(SizeBin),
-            State0 = State#state{size=Size, buf= <<>>},
+            State0 = State#state{http_size = Size, http_buf = <<>>},
             stream(Tail, State0);
         [Buf0] when byte_size(Buf0) > 12 ->
             {error, {bad_format, Buf0}};
         [Buf0] ->
             httpc:stream_next(Pid),
-            {next, State#state{buf=Buf0}}
+            {next, State#state{http_buf = Buf0}}
     end;
-stream(Data, #state{pid=Pid, size=Size, buf=Buf}=State) ->
+stream(Data, #state{http_pid = Pid, http_size = Size,
+        http_buf = Buf} = State) ->
     Buf0 = <<Buf/binary, Data/binary>>,
     case byte_size(Buf0) of
         BufSize when BufSize >= Size ->
             stream_decode(Buf0, Size, State);
         _BufSize ->
             httpc:stream_next(Pid),
-            {next, State#state{buf=Buf0}}
+            {next, State#state{http_buf = Buf0}}
     end.
 
 -spec(stream_decode(binary(), integer(), State) -> {error, term()} |
@@ -1013,7 +1162,7 @@ stream(Data, #state{pid=Pid, size=Size, buf=Buf}=State) ->
          when State :: state()).
 stream_decode(Buf, Size, State) ->
     <<Head:Size/binary, Tail/binary>> = Buf,
-    State0 = State#state{size=undefined, buf=Tail},
+    State0 = State#state{http_size = undefined, http_buf = Tail},
     prometheus_counter:inc(mesos_listener, messages_total, [], 1),
     try jiffy:decode(Head, [return_maps]) of Obj ->
         {next, Obj, State0}
@@ -1074,8 +1223,8 @@ init_metrics_mesos_state() ->
         {help, "Total number of tasks with no agent/framework information."}]).
 
 -spec(handle_metrics(state()) -> state()).
-handle_metrics(#state{agents=A, frameworks=F,
-        tasks=T, waiting_tasks=WT}=State) ->
+handle_metrics(#state{agents = A, frameworks = F,
+        tasks = T, waiting_tasks = WT} = State) ->
     prometheus_gauge:set(
         mesos_listener, tasks_total, [],
         maps:size(T)),

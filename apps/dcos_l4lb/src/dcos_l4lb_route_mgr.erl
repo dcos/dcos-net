@@ -25,6 +25,7 @@
     handle_cast/2, handle_info/2]).
 
 
+-include_lib("kernel/include/logger.hrl").
 -include_lib("gen_netlink/include/netlink.hrl").
 -include("dcos_l4lb.hrl").
 
@@ -89,11 +90,11 @@ handle_call({get_routes, Namespace}, _From, State) ->
     Routes = handle_get_routes(Namespace, State),
     {reply, Routes, State};
 handle_call({add_routes, Routes, Namespace}, _From, State) ->
-    lager:info("Namespace: ~p, Adding Routes: ~p", [Namespace, Routes]),
+    ?LOG_INFO("Namespace: ~p, Adding Routes: ~p", [Namespace, Routes]),
     update_routes(Routes, newroute, Namespace, State),
     {reply, ok, State};
 handle_call({remove_routes, Routes, Namespace}, _From, State) ->
-    lager:info("Namespace: ~p, Removing Routes: ~p", [Namespace, Routes]),
+    ?LOG_INFO("Namespace: ~p, Removing Routes: ~p", [Namespace, Routes]),
     update_routes(Routes, delroute, Namespace, State),
     {reply, ok, State};
 handle_call({add_netns, UpdateValue}, _From, State0) ->
@@ -130,7 +131,7 @@ handle_get_route2(Family, Table, #params{pid = Pid, iface = Iface}) ->
                                     dcos_l4lb_app:prefix_len(Family) == element(2, Msg),
                                     Iface == route_msg_oif(Msg),
                                     Table == route_msg_table(Msg)],
-    lager:info("Get routes ~p ~p", [Iface, Routes]),
+    ?LOG_INFO("Get routes ~p ~p", [Iface, Routes]),
     ordsets:from_list(Routes).
 
 %% see netlink.hrl for the element position
@@ -139,7 +140,7 @@ route_msg_dst(Msg) -> proplists:get_value(dst, element(10, Msg)).
 route_msg_table(Msg) -> proplists:get_value(table, element(10, Msg)).
 
 update_routes(Routes, Action, Namespace, #state{netns = NetnsMap}) ->
-    lager:info("~p ~p ~p", [Action, Namespace, Routes]),
+    ?LOG_INFO("~p ~p ~p", [Action, Namespace, Routes]),
     Params = maps:get(Namespace, NetnsMap),
     lists:foreach(fun(Route) ->
                     perform_action(Route, Action, Namespace, Params)
@@ -158,7 +159,7 @@ perform_action2(Pid, Action, Flags, Route) ->
       {_, {ok, _}} -> ok;
       {delroute, {_, 16#FD, []}} -> ok; %% route doesn't exists
       {_, {_, Error, []}} ->
-         lager:error("Encountered error while ~p ~p ~p", [Action, Route, Error])
+         ?LOG_ERROR("Encountered error while ~p ~p ~p", [Action, Route, Error])
     end.
 
 make_routes(Dst, Namespace, #params{iface = Iface, lo_iface = LoIface}) ->
@@ -209,7 +210,7 @@ maybe_add_netns(false, #netns{id = Id, ns = Namespace}, NetnsMap) ->
             Params = #params{pid = Pid, iface = Iface},
             maps:put(Id, Params, NetnsMap);
         {error, Reason} ->
-            lager:error("Couldn't create route netlink client for ~p due to ~p", [Id, Reason]),
+            ?LOG_ERROR("Couldn't create route netlink client for ~p due to ~p", [Id, Reason]),
             NetnsMap
     end.
 

@@ -363,6 +363,11 @@ setup(SetupFun) ->
     meck:expect(lashup_kv, value, fun value/1),
     meck:expect(lashup_kv, request_op, fun request_op/2),
 
+    DefaultHandlerMounted = lists:member(default, logger:get_handler_ids()),
+    case DefaultHandlerMounted of
+        true -> ok = logger:remove_handler(default);
+        _ -> ok
+    end,
     {ok, Apps} = ensure_all_started(erldns),
     Tasks = dcos_net_mesos_listener_tests:SetupFun(),
     {ok, Pid} = dcos_dns_mesos:start_link(),
@@ -385,7 +390,6 @@ cleanup({Tasks, Pid, Apps}) ->
     dcos_net_mesos_listener_tests:cleanup(Tasks).
 
 ensure_all_started(erldns) ->
-    ok = application:load(lager),
     ok = application:load(erldns),
 
     {ok, Cwd} = file:get_cwd(),
@@ -410,31 +414,10 @@ value(?LASHUP_LWW_KEY(ZoneName)) ->
             [{?RECORDS_LWW_FIELD, Records}];
         {error, zone_not_found} ->
             [{?RECORDS_LWW_FIELD, []}]
-    end;
-value(?LASHUP_SET_KEY(ZoneName)) ->
-    case erldns_zone_cache:get_zone_with_records(ZoneName) of
-        {ok, #zone{records_by_name = RecordsByName}} ->
-            Records = lists:append(maps:values(RecordsByName)),
-            [{?RECORDS_SET_FIELD, Records}];
-        {error, zone_not_found} ->
-            [{?RECORDS_SET_FIELD, []}]
     end.
 
 request_op(LKey = ?LASHUP_LWW_KEY(ZoneName), {update, Updates}) ->
     [{update, ?RECORDS_LWW_FIELD, Op}] = Updates,
     {assign, Records, _Timestamp} = Op,
     _Result = dcos_dns:push_prepared_zone(ZoneName, Records),
-    {ok, value(LKey)};
-request_op(LKey = ?LASHUP_SET_KEY(ZoneName), {update, Updates}) ->
-    [{?RECORDS_SET_FIELD, Records}] = lashup_kv:value(LKey),
-    Records0 = apply_op(Records, Updates),
-    _Result = dcos_dns:push_prepared_zone(ZoneName, Records0),
     {ok, value(LKey)}.
-
-apply_op(List, Updates) ->
-    lists:foldl(
-        fun ({update, ?RECORDS_SET_FIELD, {remove_all, RList}}, Acc) ->
-                Acc -- RList;
-            ({update, ?RECORDS_SET_FIELD, {add_all, AList}}, Acc) ->
-                Acc ++ AList
-        end, List, Updates).

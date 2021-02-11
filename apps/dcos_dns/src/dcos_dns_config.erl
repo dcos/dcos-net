@@ -9,6 +9,7 @@
 -module(dcos_dns_config).
 -author("Sargun Dhillon <sargun@mesosphere.com>").
 
+-include_lib("kernel/include/logger.hrl").
 -include("dcos_dns.hrl").
 
 %% API
@@ -20,8 +21,7 @@
     forward_zones/0,
     handler_limit/0,
     mesos_resolvers/0, mesos_resolvers/1,
-    loadbalance/0,
-    store_modes/0
+    loadbalance/0
 ]).
 
 exhibitor_timeout() ->
@@ -59,12 +59,12 @@ bind_ips() ->
         V ->
             V
     end,
-    lager:debug("found ips: ~p", [IPs0]),
+    ?LOG_DEBUG("found ips: ~p", [IPs0]),
     BlacklistedIPs = application:get_env(?APP, bind_ip_blacklist, []),
-    lager:debug("blacklist ips: ~p", [BlacklistedIPs]),
+    ?LOG_DEBUG("blacklist ips: ~p", [BlacklistedIPs]),
     IPs1 = [ IP || IP <- IPs0, not lists:member(IP, BlacklistedIPs) ],
     IPs2 = lists:usort(IPs1),
-    lager:debug("final ips: ~p", [IPs2]),
+    ?LOG_DEBUG("final ips: ~p", [IPs2]),
     IPs2.
 
 -spec(get_ips() -> [inet:ip_address()]).
@@ -106,7 +106,3 @@ mesos_resolvers(Upstreams) ->
 -spec(loadbalance() -> atom()).
 loadbalance() ->
     application:get_env(?APP, loadbalance, round_robin).
-
--spec(store_modes() -> [lww | set]).
-store_modes() ->
-    application:get_env(?APP, store_modes, [lww, set]).

@@ -7,8 +7,9 @@
     {applications, [
         kernel,
         stdlib,
+        syntax_tools,
+        compiler,
         erldns,
-        lager,
         inets,
         jsx,
         dns,

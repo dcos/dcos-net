@@ -6,6 +6,7 @@
     basic_setup/0,
     hello_overlay_setup/0,
     pod_tasks_setup/0,
+    recovered_agents_setup/0,
     cleanup/1
 ]).
 
@@ -47,6 +48,11 @@ hello_overlay_test_() ->
 pod_tasks_test_() ->
     {setup, fun pod_tasks_setup/0, fun cleanup/1, {with, [
         fun pod_tasks/1
+    ]}}.
+
+recovered_agents_test_() ->
+    {setup, fun recovered_agents_setup/0, fun cleanup/1, {with, [
+        fun recovered_agents/1
     ]}}.
 
 vip_labels_test() ->
@@ -145,7 +151,7 @@ unhealthy_test() ->
 %%% Basic Tests
 %%%===================================================================
 
-is_leader(_Tasts) ->
+is_leader(_Tasks) ->
     IsLeader = dcos_net_mesos_listener:is_leader(),
     ?assertEqual(true, IsLeader).
 
@@ -427,6 +433,32 @@ pod_tasks(Tasks) ->
     }, Tasks).
 
 %%%===================================================================
+%%% Recovered Agents Tests
+%%%===================================================================
+
+recovered_agents(Tasks) ->
+    TaskId = <<"web.instance-8b38cc52-c951-11e9-8d5b-70b3d5800001._app.2">>,
+    Framework = <<"65fccc5d-35a8-4cae-9eb2-05922043018e-0001">>,
+    Task = #{
+        agent_ip => {172, 17, 0, 4},
+        framework => <<"marathon">>,
+        name => <<"web">>,
+        ports => [#{
+            host_port => 16424,
+            name => <<"default">>,
+            port => 10080,
+            protocol => tcp,
+            vip => [<<"/web:10080">>]
+        }],
+        runtime => mesos,
+        state => running,
+        task_ip => [{172, 31, 254, 10}]
+    },
+    ?assertEqual(#{
+        {Framework, TaskId} => Task
+    }, Tasks).
+
+%%%===================================================================
 %%% From State Tests
 %%%===================================================================
 
@@ -533,11 +565,21 @@ hello_overlay_setup() ->
 pod_tasks_setup() ->
     setup("pod-tasks.json").
 
+recovered_agents_setup() ->
+    setup("recovered-agents.json").
+
+setenv() ->
+    application:set_env(dcos_net, is_master, true),
+    application:set_env(dcos_net, mesos_agents_readiness_timeout,
+        timer:seconds(1)),
+    application:set_env(dcos_net, mesos_tasks_readiness_timeout,
+        timer:seconds(1)).
+
 setup(FileName) ->
     Lines = read_lines(FileName),
 
     application:load(dcos_net),
-    application:set_env(dcos_net, is_master, true),
+    setenv(),
 
     meck:new(httpc),
     meck:expect(httpc, request,
@@ -553,6 +595,11 @@ setup(FileName) ->
             Pid ! stream_next
         end),
 
+    DefaultHandlerMounted = lists:member(default, logger:get_handler_ids()),
+    case DefaultHandlerMounted of
+        true -> ok = logger:remove_handler(default);
+        _ -> ok
+    end,
     ok = application:start(prometheus),
     dcos_net_mesos:init_metrics(),
     dcos_net_mesos_listener:init_metrics(),
@@ -560,8 +607,8 @@ setup(FileName) ->
     {ok, _Pid} = dcos_net_mesos_listener:start_link(),
     stream_wait(),
 
-    {ok, _MonRef, Tasks} = dcos_net_mesos_listener:subscribe(),
-    Tasks.
+    {ok, MonRef} = dcos_net_mesos_listener:subscribe(),
+    wait_for_tasks(MonRef).
 
 cleanup(_Tasks) ->
     Pid = whereis(dcos_net_mesos_listener),
@@ -588,6 +635,15 @@ stream_wait() ->
             false
         end
     end, lists:seq(1, 20)).
+
+wait_for_tasks(Ref) ->
+    receive
+        {{tasks, Tasks}, Ref} ->
+            ok = dcos_net_mesos_listener:next(Ref),
+            Tasks
+    after 5000 ->
+        error(timeout)
+    end.
 
 %%%===================================================================
 %%% Mesos Operator API Server

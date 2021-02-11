@@ -2,7 +2,9 @@
 
 -module(dcos_l4lb_mesos_poller).
 -behaviour(gen_server).
+
 -include("dcos_l4lb.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -16,13 +18,14 @@
 
 %% gen_server callbacks
 -export([init/1, handle_call/3,
-    handle_cast/2, handle_info/2]).
+    handle_cast/2, handle_info/2, handle_continue/2]).
 
 -export_type([named_vip/0, vip/0, protocol/0,
-    key/0, lkey/0, backend/0]).
+    key/0, lkey/0, backend/0, backend_weight/0]).
 
 -record(state, {
-    timer_ref :: reference()
+    backoff :: backoff:backoff(),
+    timer_ref = make_ref() :: reference()
 }).
 
 -type task() :: dcos_net_mesos_listener:task().
@@ -36,8 +39,11 @@
 -type lkey() :: {key(), riak_dt_orswot}.
 -type backend() :: {
     AgentIP :: inet:ip4_address(),
-    {BackendIP :: inet:ip_address(), BackendPort :: inet:port_number() }
+    {BackendIP :: inet:ip_address(),
+     BackendPort :: inet:port_number(),
+     BackendWeight :: backend_weight() }
 }.
+-type backend_weight() :: 0..65535.
 
 -spec(start_link() ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
@@ -49,75 +55,95 @@ start_link() ->
 %%%===================================================================
 
 init([]) ->
-    TRef = start_poll_timer(),
-    {ok, #state{timer_ref=TRef}}.
+    PollInterval = dcos_l4lb_config:agent_poll_interval(),
+    PollMaxInterval = dcos_l4lb_config:agent_poll_max_interval(),
+    Backoff0 = backoff:init(PollInterval, PollMaxInterval, self(), poll),
+    Backoff = backoff:type(Backoff0, jitter),
+    {ok, #state{backoff = Backoff}, {continue, poll}}.
 
-handle_call(_Request, _From, State) ->
+handle_call(Request, _From, State) ->
+    ?LOG_WARNING("Unexpected request: ~p", [Request]),
     {reply, ok, State}.
 
-handle_cast(_Request, State) ->
+handle_cast(Request, State) ->
+    ?LOG_WARNING("Unexpected request: ~p", [Request]),
     {noreply, State}.
 
-handle_info({timeout, TRef, poll}, #state{timer_ref=TRef}=State) ->
-    TRef0 = start_poll_timer(),
-    ok = handle_poll(),
-    {noreply, State#state{timer_ref=TRef0}, hibernate};
-handle_info(_Info, State) ->
+handle_info({timeout, TRef, poll}, #state{timer_ref = TRef} = State) ->
+    {noreply, State, {continue, poll}};
+handle_info(Info, State) ->
+    ?LOG_WARNING("Unexpected info: ~p", [Info]),
+    {noreply, State}.
+
+handle_continue(poll, #state{backoff = Backoff0} = State) ->
+    {Backoff, TimerRef} = handle_poll(Backoff0),
+    {noreply, State#state{backoff = Backoff, timer_ref = TimerRef}, hibernate};
+handle_continue(Request, State) ->
+    ?LOG_WARNING("Unexpected request: ~p", [Request]),
     {noreply, State}.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
--spec(start_poll_timer() -> reference()).
-start_poll_timer() ->
-    Timeout = dcos_l4lb_config:agent_poll_interval(),
-    erlang:start_timer(Timeout, self(), poll).
-
--spec(handle_poll() -> ok).
-handle_poll() ->
+-spec(handle_poll(backoff:backoff()) -> {backoff:backoff(), reference()}).
+handle_poll(Backoff) ->
     IsEnabled = dcos_l4lb_config:agent_polling_enabled(),
-    handle_poll(IsEnabled).
+    handle_poll(IsEnabled, Backoff).
 
--spec(handle_poll(boolean()) -> ok).
-handle_poll(false) ->
-    ok;
-handle_poll(true) ->
+-spec(handle_poll(boolean(), backoff:backoff()) ->
+    {backoff:backoff(), reference()}).
+handle_poll(false, Backoff0) ->
+    TimerRef = backoff:fire(Backoff0),
+    {_, Backoff} = backoff:succeed(Backoff0),
+    {Backoff, TimerRef};
+handle_poll(true, Backoff0) ->
     try dcos_net_mesos_listener:poll() of
         {error, Error} ->
-            lager:warning("Unable to poll mesos agent: ~p", [Error]);
+            TimerRef = backoff:fire(Backoff0),
+            {_, Backoff} = backoff:fail(Backoff0),
+            ?LOG_WARNING("Unable to poll mesos agent: ~p", [Error]),
+            {Backoff, TimerRef};
         {ok, Tasks} ->
-            handle_poll_state(Tasks)
+            handle_poll_state(Tasks),
+            TimerRef = backoff:fire(Backoff0),
+            {_, Backoff} = backoff:succeed(Backoff0),
+            {Backoff, TimerRef}
     catch error:bad_agent_id ->
-        lager:warning("Mesos agent is not ready")
+        ?LOG_WARNING("Mesos agent is not ready"),
+        TimerRef = backoff:fire(Backoff0),
+        {_, Backoff} = backoff:succeed(Backoff0),
+        {Backoff, TimerRef}
     end.
 
 -spec(handle_poll_state(#{task_id() => task()}) -> ok).
 handle_poll_state(Tasks) ->
-    HealthyTasks = maps:filter(fun is_healthy/2, Tasks),
+    RunningTasks = maps:filter(fun is_running/2, Tasks),
 
-    PortMappings = collect_port_mappings(HealthyTasks),
+    PortMappings = collect_port_mappings(RunningTasks),
     dcos_l4lb_mgr:local_port_mappings(PortMappings),
 
-    VIPs = collect_vips(HealthyTasks),
+    VIPs = collect_vips(RunningTasks),
     ok = push_vips(VIPs),
 
     LocalBackends = lists:sum([length(BEs) || BEs <- maps:values(VIPs)]),
     prometheus_gauge:set(l4lb, local_tasks, [], maps:size(Tasks)),
-    prometheus_gauge:set(l4lb, local_healthy_tasks, [], maps:size(HealthyTasks)),
+    prometheus_gauge:set(l4lb, local_running_tasks, [], maps:size(RunningTasks)),
     prometheus_gauge:set(l4lb, local_vips, [], maps:size(VIPs)),
     prometheus_gauge:set(l4lb, local_backends, [], LocalBackends).
 
--spec(is_healthy(task_id(), task()) -> boolean()).
-is_healthy(_TaskId, Task) ->
-    is_healthy(Task).
+-spec(is_running(task_id(), task()) -> boolean()).
+is_running(_TaskId, Task) ->
+    is_running(Task).
 
--spec(is_healthy(task()) -> boolean()).
-is_healthy(#{healthy := IsHealthy, state := running}) ->
-    IsHealthy;
-is_healthy(#{state := running}) ->
+-spec(is_running(task()) -> boolean()).
+% NOTE(jkoelker): when the state is `killing` we consider it running so the
+%                 weight of the backend will goto 0.
+is_running(#{state := killing}) ->
     true;
-is_healthy(_Task) ->
+is_running(#{state := running}) ->
+    true;
+is_running(_Task) ->
     false.
 
 %%%===================================================================
@@ -159,8 +185,8 @@ collect_vips(TaskId, Task, Port, VIPLabel, VIPs) ->
         Value = backends(Key, Task, Port),
         mappend(Key, Value, VIPs)
     catch Class:Error ->
-        lager:error("Unexpected error with ~s [~p]: ~p",
-                    [TaskId, Class, Error]),
+        ?LOG_ERROR("Unexpected error with ~s [~p]: ~p",
+                   [TaskId, Class, Error]),
         VIPs
     end.
 
@@ -184,15 +210,26 @@ key(Task, PortObj, VIPLabel) ->
 backends(Key, Task, PortObj) ->
     IsIPv6Enabled = dcos_l4lb_config:ipv6_enabled(),
     AgentIP = maps:get(agent_ip, Task),
+    Weight = get_weight(Task),
     case maps:find(host_port, PortObj) of
         error ->
             Port = maps:get(port, PortObj),
-            [ {AgentIP, {TaskIP, Port}}
+            [ {AgentIP, {TaskIP, Port, Weight}}
             || TaskIP <- maps:get(task_ip, Task),
                validate_backend_ip(IsIPv6Enabled, Key, TaskIP) ];
         {ok, HostPort} ->
-            [{AgentIP, {AgentIP, HostPort}}]
+            [{AgentIP, {AgentIP, HostPort, Weight}}]
     end.
+
+-spec(get_weight(task()) -> backend_weight()).
+% NOTE(jkoelker) an unhealthy task should not get new connecitons, but should
+%                still be available for existing connecitons.
+get_weight(#{healthy := false, state := running}) ->
+    0;
+get_weight(#{state := running}) ->
+    1;
+get_weight(_Task) ->
+    0.
 
 -spec(validate_backend_ip(boolean(), key(), inet:ip_address()) -> boolean()).
 validate_backend_ip(true, {_Protocol, {name, _Name}, _VIPPort}, _TaskIP) ->
@@ -293,16 +330,16 @@ log_update_ops(Key, {update, Ops}) ->
     end, Ops);
 log_update_ops(Key, {add_all, Backends}) ->
     lists:foreach(fun ({_AgentIP, Backend}) ->
-        lager:notice("VIP updated: ~p, added: ~p", [Key, Backend])
+        ?LOG_NOTICE("VIP updated: ~p, added: ~p", [Key, Backend])
     end, Backends);
 log_update_ops(Key, {remove_all, Backends}) ->
     lists:foreach(fun ({_AgentIP, Backend}) ->
-        lager:notice("VIP updated: ~p, removed: ~p", [Key, Backend])
+        ?LOG_NOTICE("VIP updated: ~p, removed: ~p", [Key, Backend])
     end, Backends).
 
 -spec(log_remove_op(key()) -> ok).
 log_remove_op(Key) ->
-    lager:notice("VIP removed: ~p", [Key]).
+    ?LOG_NOTICE("VIP removed: ~p", [Key]).
 
 
 %%%===================================================================
@@ -321,8 +358,8 @@ init_metrics() ->
         {help, "The number of local tasks."}]),
     prometheus_gauge:new([
         {registry, l4lb},
-        {name, local_healthy_tasks},
-        {help, "The number of local healthy tasks."}]),
+        {name, local_running_tasks},
+        {help, "The number of local running tasks."}]),
     prometheus_gauge:new([
         {registry, l4lb},
         {name, local_backends},

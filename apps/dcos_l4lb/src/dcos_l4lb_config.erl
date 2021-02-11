@@ -13,6 +13,7 @@
 %% API
 -export([
   agent_poll_interval/0,
+  agent_poll_max_interval/0,
   networking/0,
   agent_polling_enabled/0,
   min_named_ip/0,
@@ -38,6 +39,9 @@ dcos_l4lb_iface() ->
 
 agent_poll_interval() ->
   application:get_env(dcos_l4lb, agent_poll_interval, 2000).
+
+agent_poll_max_interval() ->
+  application:get_env(dcos_l4lb, agent_poll_max_interval, 60000).
 
 networking() ->
   application:get_env(dcos_l4lb, enable_networking, true).

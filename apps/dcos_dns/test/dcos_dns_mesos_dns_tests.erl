@@ -205,7 +205,6 @@ cleanup({Pid, Apps}) ->
     ]).
 
 ensure_all_started(erldns) ->
-    ok = application:load(lager),
     ok = application:load(erldns),
 
     {ok, Cwd} = file:get_cwd(),

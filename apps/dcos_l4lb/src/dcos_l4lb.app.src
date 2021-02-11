@@ -8,7 +8,6 @@
   {applications, [
                   kernel,
                   stdlib,
-                  lager,
                   inets,
                   jsx,
                   lashup,
@@ -18,6 +17,7 @@
                   tcp_metrics,
                   gen_netlink,
                   inotify,
+                  backoff,
                   dcos_dns,
                   dcos_net
                  ]},

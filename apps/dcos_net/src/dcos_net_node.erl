@@ -27,7 +27,9 @@
 }).
 -type state() :: #state{}.
 
+-include_lib("kernel/include/logger.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
+
 -define(LASHUP_KEY, [dcos_net, nodes]).
 
 -spec(start_link() ->
@@ -138,10 +140,10 @@ update_node_info(Key, Value) ->
                 OldValue0 ->
                     ok;
                 _Value0 ->
-                    ok = lager:notice("Node metadata was updated: ~p", [Value])
+                    ok = ?LOG_NOTICE("Node metadata was updated: ~p", [Value])
             end;
         false ->
-            ok = lager:notice("Node metadata was added: ~p", [Value])
+            ok = ?LOG_NOTICE("Node metadata was added: ~p", [Value])
     end.
 
 -spec(get_public_ips() -> [inet:ip_address()]).
@@ -155,7 +157,7 @@ get_public_ips() ->
         {error, enoent} ->
             [];
         {error, Error} ->
-            lager:error(
+            ?LOG_ERROR(
                 "~s failed to detect public ip addresses, ~p",
                 [Script, Error]),
             []

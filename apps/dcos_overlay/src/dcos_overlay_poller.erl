@@ -18,6 +18,7 @@
     handle_call/3,
     handle_cast/2,
     handle_info/2,
+    handle_continue/2,
     terminate/2,
     code_change/3]).
 
@@ -26,10 +27,13 @@
 -endif.
 
 -define(SERVER, ?MODULE).
--define(MIN_POLL_PERIOD, 30000). %% 30 secs
+
+-define(MIN_POLL_PERIOD, 30000).  %% 30  secs
 -define(MAX_POLL_PERIOD, 120000). %% 120 secs
+
 -define(VXLAN_UDP_PORT, 64000).
 
+-include_lib("kernel/include/logger.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 -include_lib("gen_netlink/include/netlink.hrl").
 
@@ -38,7 +42,8 @@
 -record(state, {
     known_overlays = ordsets:new(),
     ip = undefined :: undefined | inet:ip4_address(),
-    poll_period = ?MIN_POLL_PERIOD :: integer(),
+    backoff :: non_neg_integer(),
+    timer_ref = make_ref() :: reference(),
     netlink :: undefined | pid()
 }).
 
@@ -63,49 +68,32 @@ start_link() ->
 %%%===================================================================
 
 init([]) ->
-    self() ! init,
-    {ok, []}.
+    {ok, [], {continue, init}}.
 
 handle_call(ip, _From, State = #state{ip = IP}) ->
     {reply, IP, State};
 handle_call(overlays, _From, State = #state{known_overlays = KnownOverlays}) ->
     {reply, KnownOverlays, State};
 handle_call(Request, _From, State) ->
-    lager:warning("Unexpected request: ~p", [Request]),
+    ?LOG_WARNING("Unexpected request: ~p", [Request]),
     {reply, ok, State}.
 
-handle_cast(_Request, State) ->
+handle_cast(Request, State) ->
+    ?LOG_WARNING("Unexpected request: ~p", [Request]),
     {noreply, State}.
 
-handle_info(init, []) ->
-    {ok, Pid} = gen_netlink_client:start_link(?NETLINK_ROUTE),
-    timer:send_after(0, poll),
-    {noreply, #state{netlink = Pid}};
-handle_info(poll, #state{netlink = Pid, poll_period = PollPeriod,
-                         known_overlays = Overlays} = State0) ->
-    State =
-        case poll() of
-            {error, _Error} ->
-                State0#state{poll_period = ?MIN_POLL_PERIOD};
-            {ok, AgentInfo} ->
-                NewPollPeriod = update_poll_period(PollPeriod),
-                case parse_response(Pid, Overlays, AgentInfo) of
-                    {ok, NewOverlays, AgentIP} ->
-                        State0#state{
-                            ip = AgentIP,
-                            poll_period = NewPollPeriod,
-                            known_overlays = NewOverlays};
-                    {error, Error} ->
-                        lager:error(
-                            "Failed to parse overlay response due to ~p",
-                            [Error]),
-                        exit(Error)
-                end
-        end,
-    timer:send_after(State#state.poll_period, poll),
-    {noreply, State, hibernate};
-handle_info(_Info, State) ->
+handle_info({timeout, TimerRef, poll}, #state{timer_ref = TimerRef} = State) ->
+    {noreply, State, {continue, poll}};
+handle_info(Info, State) ->
+    ?LOG_WARNING("Unexpected info: ~p", [Info]),
     {noreply, State}.
+
+handle_continue(init, []) ->
+    State = handle_init(),
+    {noreply, State, {continue, poll}};
+handle_continue(poll, State0) ->
+    State = handle_poll(State0),
+    {noreply, State, hibernate}.
 
 terminate(_Reason, _State) ->
     ok.
@@ -117,17 +105,46 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-update_poll_period(OldPollPeriod) when OldPollPeriod*2 =< ?MAX_POLL_PERIOD ->
-    OldPollPeriod * 2;
-update_poll_period(_) ->
-    ?MAX_POLL_PERIOD.
+handle_init() ->
+    {ok, Pid} = gen_netlink_client:start_link(?NETLINK_ROUTE),
+    #state{backoff = ?MIN_POLL_PERIOD, netlink = Pid}.
+
+handle_poll(#state{netlink = Pid, known_overlays = Overlays,
+        backoff = Backoff0} = State) ->
+    case poll() of
+        {error, _Error} ->
+            TimerRef = backoff_fire(Backoff0),
+            Backoff = backoff_reset(),
+            State#state{backoff = Backoff, timer_ref = TimerRef};
+        {ok, AgentInfo} ->
+            case parse_response(Pid, Overlays, AgentInfo) of
+                {ok, NewOverlays, AgentIP} ->
+                    TimerRef = backoff_fire(Backoff0),
+                    Backoff = backoff_bump(Backoff0),
+                    State#state{ip = AgentIP, backoff = Backoff,
+                        known_overlays = NewOverlays, timer_ref = TimerRef};
+                {error, Error} ->
+                    ?LOG_ERROR(
+                      "Failed to parse overlay response due to ~p", [Error]),
+                    exit(Error)
+            end
+    end.
+
+backoff_reset() ->
+    ?MIN_POLL_PERIOD.
+
+backoff_bump(Backoff) ->
+    min(?MAX_POLL_PERIOD, 2 * Backoff).
+
+backoff_fire(Backoff) ->
+    erlang:start_timer(Backoff, self(), poll).
 
 poll() ->
     Begin = erlang:monotonic_time(),
     try dcos_net_mesos:poll("/overlay-agent/overlay") of
         {error, Error} ->
             prometheus_counter:inc(overlay, poll_errors_total, [], 1),
-            lager:warning("Overlay Poller could not poll: ~p", [Error]),
+            ?LOG_WARNING("Overlay Poller could not poll: ~p", [Error]),
             {error, Error};
         {ok, Data} ->
             {ok, Data}
@@ -166,26 +183,26 @@ add_overlay(Pid,
     Overlay = #{<<"backend">> := #{<<"vxlan">> := VxLan},
                 <<"state">> := #{<<"status">> := <<"STATUS_OK">>}},
     AgentIP) ->
-    lager:notice("Configuring new overlay network, ~p", [VxLan]),
+    ?LOG_NOTICE("Configuring new overlay network, ~p", [VxLan]),
     case config_overlay(Pid, Overlay) of
         ok ->
             case maybe_add_overlay_to_lashup(Overlay, AgentIP) of
                 ok ->
                     ok;
                 {error, Error} ->
-                    lager:error(
+                    ?LOG_ERROR(
                         "Failed to add overlay ~p to Lashup due to ~p",
                         [Overlay, Error]),
                     {error, Error}
             end;
         {error, Error} ->
-            lager:error(
+            ?LOG_ERROR(
                 "Failed to configure overlay ~p due to ~p",
                 [Overlay, Error]),
             {error, Error}
     end;
 add_overlay(_Pid, Overlay, _AgentIP) ->
-    lager:warning("Bad overlay network was skipped, ~p", [Overlay]),
+    ?LOG_WARNING("Bad overlay network was skipped, ~p", [Overlay]),
     ok.
 
 config_overlay(Pid, Overlay) ->
@@ -194,13 +211,13 @@ config_overlay(Pid, Overlay) ->
             case maybe_add_ip_rule(Pid, Overlay) of
                 ok -> ok;
                 {error, Error} ->
-                    lager:error(
+                    ?LOG_ERROR(
                         "Failed to add IP rule for overlay ~p due to ~p",
                         [Overlay, Error]),
                     {error, Error}
             end;
         {error, Error} ->
-            lager:error(
+            ?LOG_ERROR(
                 "Failed to create VTEP link for overlay ~p due to ~p",
                 [Overlay, Error]),
             {error, Error}
@@ -216,13 +233,13 @@ maybe_create_vtep(Pid, #{<<"backend">> := Backend}) ->
             case create_vtep_addr(Pid, VXLan) of
                 ok -> ok;
                 {error, Error} ->
-                    lager:error(
+                    ?LOG_ERROR(
                         "Failed to create VTEP address for ~p due to ~p",
                         [VXLan, Error]),
                     {error, Error}
             end;
         {error, Error} ->
-            lager:error(
+            ?LOG_ERROR(
                 "Failed to create VTEP link for ~p due to ~p",
                 [VXLan, Error]),
             {error, Error}
@@ -233,22 +250,22 @@ maybe_create_vtep_link(Pid, VXLan) ->
     VTEPNameStr = binary_to_list(VTEPName),
     case check_vtep_link(Pid, VXLan) of
         {ok, false} ->
-            lager:info(
+            ?LOG_INFO(
                 "Overlay VTEP link will be created, ~s",
                 [VTEPNameStr]),
             create_vtep_link(Pid, VXLan);
         {ok, {true, true}} ->
-            lager:info(
+            ?LOG_INFO(
                 "Overlay VTEP link is up-to-date, ~s",
                 [VTEPNameStr]),
             ok;
         {ok, {true, false}} ->
-            lager:info(
+            ?LOG_INFO(
                 "Overlay VTEP link is not up-to-date, and will be "
                 "recreated, ~s", [VTEPNameStr]),
             recreate_vtep_link(Pid, VXLan, VTEPNameStr);
         {error, Error} ->
-            lager:error(
+            ?LOG_ERROR(
                 "Failed to check VTEP link ~s due to ~p",
                 [VTEPNameStr, Error]),
             {error, Error}
@@ -263,7 +280,7 @@ check_vtep_link(Pid, VXLan) ->
             Match = match_vtep_link(VXLan, LinkInfo),
             {ok, {true, Match}};
         {error, {enodev, _ErrorMsg}} ->
-            lager:info("Overlay VTEP link does not exist, ~s", [VTEPName]),
+            ?LOG_INFO("Overlay VTEP link does not exist, ~s", [VTEPName]),
             {ok, false};
         {error, Error} ->
             {error, Error}
@@ -306,18 +323,18 @@ create_vtep_link(Pid, VXLan) ->
                      Pid, ParsedVTEPMAC, VTEPNameStr) of
                 {ok, _} ->
                     Info = #{vni => VNI, mac => VTEPMAC, attr => VTEPAttr},
-                    lager:notice(
+                    ?LOG_NOTICE(
                         "Overlay VTEP link was configured, ~s => ~p",
                         [VTEPName, Info]),
                     ok;
                 {error, Error} ->
-                    lager:error(
+                    ?LOG_ERROR(
                         "Failed to set VTEP link for MAC: ~p; VTEP: ~s "
                         "due to ~p", [ParsedVTEPMAC, VTEPNameStr, Error]),
                     {error, Error}
             end;
         {error, Error} ->
-            lager:error(
+            ?LOG_ERROR(
                 "Failed to add VTEP link for VTEP: ~s; VNI: ~p due to ~p",
                 [VTEPNameStr, VNI, Error]),
             {error, Error}
@@ -326,13 +343,13 @@ create_vtep_link(Pid, VXLan) ->
 recreate_vtep_link(Pid, VXLan, VTEPNameStr) ->
     case dcos_overlay_netlink:iplink_delete(Pid, VTEPNameStr) of
         {ok, _} ->
-            lager:notice("Overlay VTEP link was removed, ~s", [VTEPNameStr]),
+            ?LOG_NOTICE("Overlay VTEP link was removed, ~s", [VTEPNameStr]),
             create_vtep_link(Pid, VXLan);
         {error, {enodev, _ErrorMsg}} ->
-            lager:notice("Overlay VTEP link did not exist, ~s", [VTEPNameStr]),
+            ?LOG_NOTICE("Overlay VTEP link did not exist, ~s", [VTEPNameStr]),
             create_vtep_link(Pid, VXLan);
         {error, Error}  ->
-            lager:error(
+            ?LOG_ERROR(
                 "Failed to detete VTEP link ~s due to ~p",
                 [VTEPNameStr, Error]),
             {error, Error}
@@ -347,11 +364,11 @@ create_vtep_addr(Pid, VXLan) ->
     case dcos_overlay_netlink:ipaddr_replace(
              Pid, inet, ParsedVTEPIP, PrefixLen, VTEPNameStr) of
         {ok, _} ->
-            lager:notice("Overlay VTEP address was configured, ~s => ~p",
+            ?LOG_NOTICE("Overlay VTEP address was configured, ~s => ~p",
                 [VTEPName, VTEPIP]),
             maybe_create_vtep_addr6(Pid, VTEPName, VTEPNameStr, VTEPIP6);
         {error, Error}  ->
-            lager:error(
+            ?LOG_ERROR(
                 "Failed to replace address ~p for VTEP ~s due to ~p",
                 [VTEPIP, VTEPNameStr, Error]),
             {error, Error}
@@ -362,7 +379,7 @@ maybe_create_vtep_addr6(Pid, VTEPName, VTEPNameStr, VTEPIP6) ->
         {_, undefined} ->
             ok;
         {false, _} ->
-            lager:notice("Overlay network is disabled [ipv6], ~s => ~p",
+            ?LOG_NOTICE("Overlay network is disabled [ipv6], ~s => ~p",
                 [VTEPName, VTEPIP6]),
             ok;
         _ ->
@@ -376,12 +393,12 @@ ensure_vtep_addr6_created(Pid, VTEPName, VTEPNameStr, VTEPIP6) ->
             case dcos_overlay_netlink:ipaddr_replace(
                    Pid, inet6, ParsedVTEPIP6, PrefixLen6, VTEPNameStr) of
                 {ok, _} ->
-                    lager:notice(
+                    ?LOG_NOTICE(
                         "Overlay VTEP address was configured [ipv6], ~s => ~p",
                         [VTEPNameStr, VTEPIP6]),
                     ok;
                 {error, Error}  ->
-                    lager:error(
+                    ?LOG_ERROR(
                         "Failed to replace address ~p for VTEP ~s due to ~p",
                         [VTEPIP6, VTEPNameStr, Error]),
                     {error, Error}
@@ -396,7 +413,7 @@ try_enable_ipv6(IfName) ->
         {ok, _} ->
             ok;
         {error, Error} ->
-            lager:error(
+            ?LOG_ERROR(
                 "Couldn't enable IPv6 on ~s interface due to ~p",
                 [IfName, Error]),
             {error, Error}
@@ -409,7 +426,7 @@ maybe_add_ip_rule(
         {ok, Rules} ->
             ensure_ip_rule_exists(Pid, Rules, Subnet, VTEPName);
         {error, Error} ->
-            lager:error("Failed to get IP rules due to ~p", [Error]),
+            ?LOG_ERROR("Failed to get IP rules due to ~p", [Error]),
             {error, Error}
     end;
 maybe_add_ip_rule(_Pid, _Overlay) ->
@@ -424,12 +441,12 @@ ensure_ip_rule_exists(Pid, Rules, Subnet, VTEPName) ->
             case dcos_overlay_netlink:iprule_add(
                      Pid, inet, ParsedSubnetIP, PrefixLen, ?TABLE) of
                 {ok, _} ->
-                    lager:notice(
+                    ?LOG_NOTICE(
                         "Overlay routing policy was added, ~s => ~p",
                         [VTEPName, #{overlaySubnet => Subnet}]),
                     ok;
                 {error, Error} ->
-                    lager:error(
+                    ?LOG_ERROR(
                         "Failed to add IP rule for subnet ~p and VTEP ~p "
                         "due to ~p",
                         [Subnet, VTEPName, Error]),
@@ -456,13 +473,13 @@ maybe_add_overlay_to_lashup(Overlay, AgentIP) ->
                      AgentSubnet6, OverlaySubnet6, AgentIP) of
                 ok -> ok;
                 {error, Error} ->
-                    lager:error(
+                    ?LOG_ERROR(
                         "Failed to add IPv6 overlay ~p to Lashup due to ~p",
                         [Overlay, Error]),
                     {error, Error}
             end;
         {error, Error} ->
-            lager:error(
+            ?LOG_ERROR(
                 "Failed to add IP overlay ~p to Lashup due to ~p",
                 [Overlay, Error]),
             {error, Error}
@@ -488,11 +505,11 @@ maybe_add_overlay_to_lashup(
                              mac => VTEPMac,
                              agentSubnet => AgentSubnet,
                              overlaySubnet => OverlaySubnet},
-                    lager:notice("Overlay network was added, ~s => ~p",
+                    ?LOG_NOTICE("Overlay network was added, ~s => ~p",
                         [VTEPName, Info]),
                     ok;
                 {error, Error} ->
-                    lager:error(
+                    ?LOG_ERROR(
                         "Failed to update data in Lashup for ~s due to ~p",
                         [VTEPName, Error]),
                     {error, Error}
@@ -510,25 +527,18 @@ parse_subnet(Subnet) ->
     {IP, PrefixLen}.
 
 check_subnet(VTEPIPStr, VTEPMac, AgentSubnet, AgentIP, LashupValue) ->
-
     ParsedSubnet = parse_subnet(AgentSubnet),
     ParsedVTEPMac = parse_vtep_mac(VTEPMac),
-
     ParsedVTEPIP = parse_subnet(VTEPIPStr),
-    case lists:keyfind({ParsedVTEPIP, riak_dt_map}, 1, LashupValue) of
-        {{ParsedVTEPIP, riak_dt_map}, _Value} ->
-            ok;
+
+    Changed = overlay_changed(
+        ParsedVTEPIP, ParsedVTEPMac, AgentIP, ParsedSubnet, LashupValue),
+    case Changed of
+        true ->
+            update_overlay_op(
+                ParsedVTEPIP, ParsedVTEPMac, AgentIP, ParsedSubnet);
         false ->
-            Now = erlang:system_time(nano_seconds),
-            {update,
-                {ParsedVTEPIP, riak_dt_map},
-                {update, [
-                    {update, {mac, riak_dt_lwwreg},
-                        {assign, ParsedVTEPMac, Now}},
-                    {update, {agent_ip, riak_dt_lwwreg},
-                        {assign, AgentIP, Now}},
-                    {update, {subnet, riak_dt_lwwreg},
-                        {assign, ParsedSubnet, Now}}]}}
+            ok
     end.
 
 parse_vtep_mac(MAC) ->
@@ -538,6 +548,33 @@ parse_vtep_mac(MAC) ->
                 binary_to_integer(Component, 16)
         end,
         MACComponents).
+
+overlay_changed(VTEPIP, VTEPMac, AgentIP, Subnet, LashupValue) ->
+    case lists:keyfind({VTEPIP, riak_dt_map}, 1, LashupValue) of
+        {{VTEPIP, riak_dt_map}, Value} ->
+            ExpectedValue = [
+                {{agent_ip, riak_dt_lwwreg}, AgentIP},
+                {{mac, riak_dt_lwwreg}, VTEPMac},
+                {{subnet, riak_dt_lwwreg}, Subnet}
+            ],
+            case lists:sort(Value) of
+                ExpectedValue -> false;
+                _ -> true
+            end;
+        false -> true
+    end.
+
+update_overlay_op(VTEPIP, VTEPMac, AgentIP, Subnet) ->
+    Now = erlang:system_time(nano_seconds),
+    {update,
+        {VTEPIP, riak_dt_map},
+        {update, [
+            {update, {mac, riak_dt_lwwreg}, {assign, VTEPMac, Now}},
+            {update, {agent_ip, riak_dt_lwwreg}, {assign, AgentIP, Now}},
+            {update, {subnet, riak_dt_lwwreg}, {assign, Subnet, Now}}
+            ]
+        }
+    }.
 
 %%%===================================================================
 %%% Metrics functions
@@ -586,5 +623,48 @@ match_vtep_link_test() ->
 
     VXLan2 = VXLan#{<<"vtep_mac">> := VTEPMAC2},
     ?assertEqual(false, match_vtep_link(VXLan2, LinkInfo)).
+
+overlay_changed_test() ->
+    VTEPIP = {{44, 128, 0, 1}, 20},
+    VTEPMac = [112, 179, 213, 128, 0, 1],
+    AgentIP = {172, 17, 0, 2},
+    Subnet = {{9, 0, 0, 0}, 24},
+    LashupValue = [],
+    ?assert(overlay_changed(VTEPIP, VTEPMac, AgentIP, Subnet, LashupValue)),
+    LashupValue2 = [
+         {{{{44, 128, 0, 1}, 20}, riak_dt_map},
+             [{{subnet, riak_dt_lwwreg}, {{9, 0, 0, 0}, 24}},
+              {{mac, riak_dt_lwwreg}, [112, 179, 213, 128, 0, 1]},
+              {{agent_ip, riak_dt_lwwreg}, {172, 17, 0, 2}}]}
+    ],
+    ?assertNot(overlay_changed(VTEPIP, VTEPMac, AgentIP, Subnet, LashupValue2)),
+    LashupValue3 = [
+         {{{{44, 128, 0, 1}, 20}, riak_dt_map},
+             [{{subnet, riak_dt_lwwreg}, {{9, 0, 1, 0}, 24}},
+              {{mac, riak_dt_lwwreg}, [112, 179, 213, 128, 0, 1]},
+              {{agent_ip, riak_dt_lwwreg}, {172, 17, 0, 2}}]}
+    ],
+    ?assert(overlay_changed(VTEPIP, VTEPMac, AgentIP, Subnet, LashupValue3)),
+    LashupValue4 = [
+         {{{{44, 128, 0, 1}, 20}, riak_dt_map},
+             [{{subnet, riak_dt_lwwreg}, {{9, 0, 0, 0}, 24}},
+              {{mac, riak_dt_lwwreg}, [112, 179, 213, 128, 0, 2]},
+              {{agent_ip, riak_dt_lwwreg}, {172, 17, 0, 2}}]}
+    ],
+    ?assert(overlay_changed(VTEPIP, VTEPMac, AgentIP, Subnet, LashupValue4)),
+    LashupValue5 = [
+         {{{{44, 128, 0, 1}, 20}, riak_dt_map},
+             [{{subnet, riak_dt_lwwreg}, {{9, 0, 0, 0}, 24}},
+              {{mac, riak_dt_lwwreg}, [112, 179, 213, 128, 0, 1]},
+              {{agent_ip, riak_dt_lwwreg}, {172, 17, 0, 3}}]}
+    ],
+    ?assert(overlay_changed(VTEPIP, VTEPMac, AgentIP, Subnet, LashupValue5)),
+    LashupValue6 = [
+         {{{{44, 128, 0, 2}, 20}, riak_dt_map},
+             [{{subnet, riak_dt_lwwreg}, {{9, 0, 0, 0}, 24}},
+              {{mac, riak_dt_lwwreg}, [112, 179, 213, 128, 0, 1]},
+              {{agent_ip, riak_dt_lwwreg}, {172, 17, 0, 2}}]}
+    ],
+    ?assert(overlay_changed(VTEPIP, VTEPMac, AgentIP, Subnet, LashupValue6)).
 
 -endif.
