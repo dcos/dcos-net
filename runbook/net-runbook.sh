@@ -146,6 +146,10 @@ os-data() {
 
   echo "Captured OS release and version."
   echo
+
+  echo "Capturing system state..."
+  systemctl -a > "$DATA_DIR/systemctl.txt"
+
 }
 
 docker-version() {
@@ -202,6 +206,7 @@ logs() {
 
   echo "Capturing kernel logs..."
   journalctl -k > "$DATA_DIR/kernel-logs.txt"
+  dmesg -T > "$DATA_DIR/kernel-dmesg.txt"
 
   echo "Captured logs using journald."
   echo
