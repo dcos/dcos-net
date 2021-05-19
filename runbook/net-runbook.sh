@@ -146,6 +146,10 @@ os-data() {
 
   echo "Captured OS release and version."
   echo
+
+  echo "Capturing system state..."
+  systemctl -a > "$DATA_DIR/systemctl.txt"
+
 }
 
 docker-version() {
@@ -202,6 +206,7 @@ logs() {
 
   echo "Capturing kernel logs..."
   journalctl -k > "$DATA_DIR/kernel-logs.txt"
+  dmesg -T > "$DATA_DIR/kernel-dmesg.txt"
 
   echo "Captured logs using journald."
   echo
@@ -260,6 +265,8 @@ sockets() {
   echo "======================================================================"
   echo "Capturing listening and non-listening sockets..."
 
+  # Check the ports that dcos-net (and others) are listening on, make sure that
+  # dcos-net is listening on 53 for spartan
   netstat -nap > "$DATA_DIR/netstat.txt"
 
   echo "Captured listening and non-listening sockets."
@@ -271,10 +278,13 @@ l4lb-data() {
   echo "Capturing L4LB data..."
 
   echo "Capturing VIPs..."
+  # The list of VIPs that dcos-net knows about and should be configured
   wrap-curl 'http://localhost:62080/v1/vips' \
     | maybe-pprint-json > "$DATA_DIR/l4lb-vips.json"
 
   echo "Capturing IPVS state..."
+  # The actual configuration that ipvs has, this will show the backends and
+  # their weight
   wrap-ipvsadm -L -n > "$DATA_DIR/ipvsadm.txt"
   cp /proc/net/ip_vs "$DATA_DIR/ip-vs.txt"
   if hash perl 2>/dev/null; then
@@ -284,9 +294,12 @@ l4lb-data() {
   fi
 
   echo "Capturing IPVS timeouts..."
+  # The TCP timeouts for TCP sessions
   wrap-ipvsadm -L --timeout > "$DATA_DIR/ipvsadm-timeout.txt"
 
   echo "Capturing IPVS connection state..."
+  # The state of each connection / finding out how VIP traffic is getting forwarded
+  # Protocol / Src IP / Src Port/ Target IP (VIP) / Target Port / Dst IP, Dst Port
   cp /proc/net/ip_vs_conn "$DATA_DIR/ip-vs-conn.txt"
   if hash perl 2>/dev/null; then
     perl -lpe \
@@ -295,22 +308,31 @@ l4lb-data() {
   fi
 
   echo "Capturing kernel state..."
+  # Things to check:
+  # ip forwarding is on globally and for each interface
   sysctl -a > "$DATA_DIR/sysctl.txt"
 
   echo "Capturing iptables configuration..."
+  # Mkae sure that the PREROUTING and OUTPUT chains have the match for L4LB traffic
   iptables-save > "$DATA_DIR/iptables-save.txt"
   ip6tables-save > "$DATA_DIR/ip6tables-save.txt"
 
   echo "Capturing ipset configuration..."
+  # Make sure that the dcos-l4lb set has the vips in it that are expected
   ipset list > "$DATA_DIR/ipset.txt"
 
   echo "Capturing netfilter conntrack table..."
+  # Contrack should have an entry for each connection
   cp /proc/net/nf_conntrack "$DATA_DIR/nf-conntrack.txt"
 
   echo "Capturing minuteman routing table..."
+  # Every vip should have a local entry
   ip route show table local dev minuteman scope host > "$DATA_DIR/minuteman-routes.txt"
 
   echo "Capturing lashup membership..."
+  # The lashup view from this node, every node should have a similar view.
+  # the active_view is the list of nodes that the node is peer'd with
+  # each node will only peer with a few other nodes, but a complete mesh is formed
   wrap-net-eval 'lashup_gm:gm().' > "$DATA_DIR/lashup-membership.txt"
 
   echo "Captured L4LB data"
@@ -322,25 +344,45 @@ overlay-data() {
   echo "Capturing overlay data..."
 
   echo "Capturing network configuration..."
+
+  # Every container will have a forwarding entry forcing the mac over the vtep
   bridge fdb > "$DATA_DIR/bridge-fdb.txt"
   ifconfig -a > "$DATA_DIR/ifconfig.txt"
   ip addr > "$DATA_DIR/ip-addr.txt"
   ip link > "$DATA_DIR/ip-link.txt"
   ip neigh > "$DATA_DIR/ip-neigh.txt"
   ip ntable > "$DATA_DIR/ip-ntable.txt"
+  # Every overlay /24 will have a route to its host on the vtep
   ip route > "$DATA_DIR/ip-route.txt"
+  # Every container participating in the overlay will have a route entry
   ip route show table 42 > "$DATA_DIR/ip-route-42.txt" 2>&1
+  # If overlay is enabled, there should be a rule from 9.0.0.0/8 lookup 42
   ip rule > "$DATA_DIR/ip-rule.txt"
 
   echo "Capturing lashup overlay state..."
+  # shows the subnet, mac address, overlay address, and host address of every agent
   wrap-net-eval \
     '[{Key, lashup_kv:value(Key)} || Key = [navstar, overlay, _Subnet] <- mnesia:dirty_all_keys(kv2)].' \
     > "$DATA_DIR/lashup-overlays.txt"
+  # Nclock values are carried along with updates. If a node has replicated
+  # data to another node and suddenly the nclock value "jumps", the node
+  # is shunned and no updates are commited.
+  # This shows the value of the latest value from each peer and itself, the
+  # value for itself *should* be similar the the value reported on other nodes
+  # for it.
+  # That is if this host is 10.1.1.1 and has the value 2000, then other hosts
+  # should also have a similar (although not exact) value for 10.1.1.1.
+  # Commonly a node will get out of sync during an upgrade and will fail to join
+  # back up to the other nodes. Wiping the nclock values cluster wide will reset
+  # them:
+  # /opt/mesosphere/bin/dcos-net-env eval 'lists:foreach(fun (K) -> mnesia:dirty_delete(nclock, K) end, mnesia:dirty_all_keys(nclock)).'
   wrap-net-eval \
       'mnesia:dirty_select(nclock, ets:fun2ms(fun(A) -> A end)).' \
       > "$DATA_DIR/lashup-nclock.txt"
 
   echo "Capturing Mesos overlay information..."
+  # Shows the configuration of the overlay for this node, and if it was
+  # successfully setup
   if [ "$RUNNING_ON_MASTER" == "yes" ];then
     wrap-curl \
       "https://$IP:5050/overlay-master/state" > "$DATA_DIR/overlay-master-state.json" \
@@ -374,8 +416,17 @@ dns-data() {
   echo "Capturing DNS data..."
 
   echo "Copying resolv.conf ..."
+  # The resolv.conf should have three entries for spartan in it:
+  # nameserver 198.51.100.1
+  # nameserver 198.51.100.2
+  # nameserver 198.51.100.3
+  # Common issues are when another process such as puppet replaces
+  # /etc/resolv.conf with other values causes sporadic resolution failures
+  # inside containers.
   cat /etc/resolv.conf > "$DATA_DIR/resolv.conf"
 
+  # This just verifies that spartain is resolving, errors here usually mean
+  # dcos-net can't reach the leader or mesos stream
   echo "Resovling ready.spartan ..."
   wrap-dig ready.spartan > "$DATA_DIR/dig-ready.spartan.txt"
   echo "Resovling ready.spartan through 198.51.100.1 ..."
@@ -385,6 +436,8 @@ dns-data() {
   echo "Resovling dcos.io through 198.51.100.1 ..."
   wrap-dig dcos.io @198.51.100.1 > "$DATA_DIR/dig-dcos.io-at-198.51.100.1.txt"
 
+  # checking the latenency directly to the upstream servers, resolution
+  # time should be the same as the above, if it varies, then spartan is lagging
   echo "Resolving dcos.io through upstream servers..."
   (
     # shellcheck disable=SC1091
